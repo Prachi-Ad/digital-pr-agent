@@ -2,6 +2,6 @@
   "version": 2,
   "framework": "nextjs",
   "functions": {
-    "api/index.py": { "maxDuration": 300 }
+    "api/analyze.py": { "maxDuration": 300 }
   }
 }
