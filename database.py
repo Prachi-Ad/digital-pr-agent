@@ -15,8 +15,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+import os
+from pathlib import Path
 ROOT = Path(__file__).resolve().parent
-DATA_DIR = ROOT / "data"
+DATA_DIR = Path(os.environ.get("VISTA_DATA_DIR", ROOT / "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Migrate legacy DB filename (if present) to the generic name once.
@@ -32,6 +34,12 @@ if _LEGACY_DB.exists() and not DB_PATH.exists():
                 legacy_sidecar.rename(new_sidecar)
     except OSError:
         DB_PATH = _LEGACY_DB
+
+def _backup_dir() -> Path:
+    env = os.environ.get("VISTA_BACKUP_DIR")
+    if env:
+        return Path(env)
+    return ROOT / "backups"
 
 
 def _now() -> str:
@@ -554,7 +562,7 @@ def journalist_csv_bytes() -> bytes:
 def create_database_backup() -> str:
     """Create a consistent, verified, dated SQLite backup under backups."""
     init_db()
-    backup_dir = ROOT / "backups"
+    backup_dir = _backup_dir()
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup_path = backup_dir / f"pr_agent_database_{stamp}.sqlite3"

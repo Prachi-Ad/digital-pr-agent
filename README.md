@@ -105,7 +105,23 @@ setx SEARCH_CONTEXT_SIZE "medium"          # low | medium | high (default: high)
 
 The active model is shown in the app sidebar.
 
-## Privacy and safety notes
+## Deploy to Render (recommended for full app)
+
+The repo includes a `render.yaml` blueprint for one-click deploy on Render with a
+persistent disk (so your research database and backups survive restarts).
+
+1. Push this repo to GitHub (already done).
+2. Go to https://render.com → "New" → "Blueprint" → connect your repo.
+3. Render reads `render.yaml` and creates the web service + disk.
+4. In the service's "Environment" tab, set `OPENAI_API_KEY` (and optionally
+   `BRAND_NAME`, `PRODUCT_DESCRIPTION`).
+5. Deploy. Your app will be live at `https://<name>.onrender.com`.
+
+The disk is mounted at the project's `data/` folder, so the SQLite database and
+backups persist across deploys and restarts.
+
+For Railway instead, use the included `Procfile` and add a persistent volume
+mounted at the project root.
 
 - `.gitignore` excludes `.venv/`, `data/`, `backups/`, logs, and local code
   snapshots. Research data never leaves this machine through git.

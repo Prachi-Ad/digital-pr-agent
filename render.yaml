@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: digital-pr-agent
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+    envVars:
+      - key: VISTA_DATA_DIR
+        value: /opt/render/project/src/data
+      - key: VISTA_BACKUP_DIR
+        value: /opt/render/project/src/data/backups
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: BRAND_NAME
+        value: Your Brand
+      - key: PRODUCT_DESCRIPTION
+        value: a software product

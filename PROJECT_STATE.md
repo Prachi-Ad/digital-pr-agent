@@ -40,8 +40,10 @@ automatically. The target brand is configurable via `BRAND_NAME` /
 - Launchers renamed to `launch_pr_agent_hidden.vbs`, `run_pr_agent.bat`,
   `stop_pr_agent.bat`.
 
-### GitHub
-- Private repo `Prachi-Ad/digital-pr-agent` (renamed from vista-pr-agent).
+### Hosting
+- Prepared for Render (render.yaml blueprint) and Railway (Procfile) with persistent disk.
+- Database/backup paths are env-overridable (`VISTA_DATA_DIR`, `VISTA_BACKUP_DIR`).
+- All 43 storage checks pass.
 - Contains code/docs only; no DB, backups, venv, or secrets.
 
 ## Remaining work
