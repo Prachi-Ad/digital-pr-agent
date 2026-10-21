@@ -1,5 +1,24 @@
 import hashlib
+import os
+
 import streamlit as st
+
+# Hosting platforms (e.g. Streamlit Community Cloud) inject configuration via
+# secrets rather than environment variables. Mirror them into os.environ before
+# importing agent.py, which reads them at import time.
+try:
+    for _key in (
+        "OPENAI_API_KEY",
+        "BRAND_NAME",
+        "PRODUCT_DESCRIPTION",
+        "BRAND_DOMAIN",
+        "OPENAI_MODEL",
+        "SEARCH_CONTEXT_SIZE",
+    ):
+        if _key not in os.environ and _key in st.secrets:
+            os.environ[_key] = str(st.secrets[_key])
+except Exception:
+    pass
 
 from agent import (
     BRAND_NAME,

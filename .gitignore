@@ -16,6 +16,7 @@ backups/
 .env.*
 !.env.example
 *.log
+.streamlit/secrets.toml
 
 # Older local code snapshots
 *_backup_before_*.py
