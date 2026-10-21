@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -93,4 +94,14 @@ def health():
 @app.post("/analyze")
 @app.post("/api/analyze")
 def handle(req: AnalyzeRequest):
-    return _dispatch(req)
+    last = None
+    for attempt in range(2):
+        try:
+            return _dispatch(req)
+        except HTTPException:
+            raise
+        except Exception as e:
+            last = e
+            if attempt == 0:
+                time.sleep(2)
+    raise HTTPException(status_code=500, detail=str(last))
