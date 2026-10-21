@@ -2,11 +2,6 @@
   "version": 2,
   "framework": "nextjs",
   "functions": {
-    "api/analyze.py": { "maxDuration": 300 },
-    "api/opportunities.py": { "maxDuration": 300 },
-    "api/journalists.py": { "maxDuration": 300 },
-    "api/listicles.py": { "maxDuration": 300 },
-    "api/listicle_contact.py": { "maxDuration": 300 },
-    "api/publisher_policy.py": { "maxDuration": 300 }
+    "api/index.py": { "maxDuration": 300 }
   }
 }
