@@ -19,9 +19,9 @@ from pydantic import BaseModel, Field
 DEFAULT_MODEL = "gpt-5.4-nano"
 MODEL = (os.environ.get("OPENAI_MODEL") or os.environ.get("VISTA_OPENAI_MODEL") or DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
-SEARCH_CONTEXT_SIZE = (os.environ.get("SEARCH_CONTEXT_SIZE") or os.environ.get("VISTA_SEARCH_CONTEXT") or "medium").strip().lower()
+SEARCH_CONTEXT_SIZE = (os.environ.get("SEARCH_CONTEXT_SIZE") or os.environ.get("VISTA_SEARCH_CONTEXT") or "low").strip().lower()
 if SEARCH_CONTEXT_SIZE not in {"low", "medium", "high"}:
-    SEARCH_CONTEXT_SIZE = "medium"
+    SEARCH_CONTEXT_SIZE = "low"
 
 
 # Keep responses fast and cheap.
@@ -29,6 +29,8 @@ MODEL_SETTINGS = ModelSettings(
     reasoning={"effort": "low"} if MODEL.startswith("gpt-5") else None,
     verbosity="low",
 )
+
+MAX_TURNS = int(os.environ.get("MAX_TURNS", "4"))
 
 # Fail fast (120s) on stalled OpenAI calls instead of hanging until Vercel kills
 # the function; retry connection errors at the SDK level.
@@ -609,7 +611,7 @@ def _run_agent_in_worker(agent_to_run, prompt: str):
     """Run an async agent in a separate worker thread to avoid event-loop conflicts."""
 
     def execute_with_own_loop():
-        return asyncio.run(Runner.run(agent_to_run, prompt))
+        return asyncio.run(Runner.run(agent_to_run, prompt, max_turns=MAX_TURNS))
 
     with ThreadPoolExecutor(max_workers=1) as executor:
         result = executor.submit(execute_with_own_loop).result()
@@ -750,7 +752,7 @@ Return up to {max_results} distinct candidate pages.
 {BRAND_NAME} is {PRODUCT_DESCRIPTION}. Only claim a feature is a fit if it is
 relevant to the listicle topic. Do not invent capabilities.
 
-Search broadly across the supplied related queries and useful variants. Look for existing
+Search using 2-3 query variations. Look for existing
 best-of articles, product roundups, alternatives pages, comparisons, and directories. Focus
 on actual pages a person could review and potentially pursue for inclusion.
 
