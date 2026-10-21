@@ -23,8 +23,11 @@ backups/
 vista_pr_agent_agent*.py
 vista_pr_agent_app*.py
 
-# Editor and OS files
-.vscode/
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
 .idea/
 .DS_Store
 Thumbs.db
