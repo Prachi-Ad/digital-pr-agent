@@ -1,4 +1,4 @@
-"""One-click storage health check for the Vista Social PR Agent.
+"""One-click storage health check for the Digital PR Agent.
 
 Runs the real Streamlit app against a temporary database, exercises every
 save path, restarts the session, and verifies exports and backups.
@@ -49,7 +49,7 @@ def check(label: str, condition: bool, detail: object = "") -> None:
 
 
 def main() -> int:
-    emit("Vista Social PR Agent - storage health check")
+    emit("Digital PR Agent - storage health check")
     emit(f"Run at: {datetime.now().isoformat(timespec='seconds')}")
     emit(f"Project: {PROJECT}")
     emit()
@@ -58,15 +58,15 @@ def main() -> int:
         emit("FAIL  The project's .venv Python environment was not found.")
         return 1
 
-    tmp = Path(tempfile.mkdtemp(prefix="vista_storage_check_"))
-    emit(f"Temporary test database: {tmp / 'vista_pr_agent.sqlite3'}")
+    tmp = Path(tempfile.mkdtemp(prefix="pr_storage_check_"))
+    emit(f"Temporary test database: {tmp / 'pr_agent.sqlite3'}")
     emit()
 
     import database
 
     database.ROOT = tmp
     database.DATA_DIR = tmp
-    database.DB_PATH = tmp / "vista_pr_agent.sqlite3"
+    database.DB_PATH = tmp / "pr_agent.sqlite3"
 
     from agent import (
         AssetAnalysis,
@@ -110,8 +110,8 @@ def main() -> int:
         listicle_category="social media management",
         target_audience="agencies",
         competitors_listed=["Hootsuite", "Buffer"],
-        vista_social_currently_listed="No",
-        vista_social_fit="Vista Social matches the category.",
+        brand_currently_listed="No",
+        brand_fit="the brand matches the category.",
         inclusion_gap="Unknown",
         placement_type="Editorial",
         contact_route="Official editorial form",
@@ -164,7 +164,7 @@ def main() -> int:
         recommended_tactic="Expert commentary",
         story_hypothesis="Marketers distrust social measurement.",
         why_useful="Timely topic.",
-        vista_contribution="Aggregate platform data.",
+        brand_contribution="Aggregate platform data.",
         target_publication_types=["Marketing trade press"],
         target_journalist_beats=["analytics"],
         relevant_asset="Probe asset",
@@ -190,7 +190,7 @@ def main() -> int:
         topic="Measurement",
         opportunity_type="Expert commentary",
         why_relevant="Matches the angle.",
-        vista_social_contribution="Data and commentary.",
+        brand_contribution="Data and commentary.",
         competitor_mention="None identified",
         topical_relevance="High",
         editorial_fit="High",
@@ -212,7 +212,7 @@ def main() -> int:
         article_date="2026-02-01",
         topic_covered="Measurement",
         why_relevant="Covers the exact topic.",
-        suggested_pitch_angle="Offer the Vista Social data.",
+        suggested_pitch_angle="Offer the the brand data.",
         author_profile_or_contact_page="https://example.com/author/jordan",
         evidence="Byline verified.",
         confidence="High",
@@ -399,7 +399,7 @@ def main() -> int:
     backup_button = [button for button in app3.button if button.label == "Create database backup"][0]
     backup_button.click()
     app3.run()
-    backups = sorted((tmp / "backups").glob("vista_pr_agent_database_*.sqlite3"))
+    backups = sorted((tmp / "backups").glob("pr_agent_database_*.sqlite3"))
     check("database backup is created", len(backups) == 1, backups)
     if backups:
         with sqlite3.connect(backups[0]) as connection:
@@ -427,8 +427,8 @@ def main() -> int:
         listicle_category="emoji ✦ test",
         target_audience="agencies",
         competitors_listed=[],
-        vista_social_currently_listed="Unclear",
-        vista_social_fit="Line one\nLine two",
+        brand_currently_listed="Unclear",
+        brand_fit="Line one\nLine two",
         inclusion_gap="Unknown",
         placement_type="Unclear",
         contact_route="Unknown",

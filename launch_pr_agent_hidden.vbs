@@ -12,12 +12,12 @@ appPath = projectDir & "\app.py"
 url = "http://localhost:8501"
 
 If Not fso.FileExists(pythonExe) Then
-    MsgBox "Could not find the project's Python environment:" & vbCrLf & pythonExe, vbExclamation, "Vista Social PR Agent"
+    MsgBox "Could not find the project's Python environment:" & vbCrLf & pythonExe, vbExclamation, "Digital PR Agent"
     WScript.Quit 1
 End If
 
 If Not fso.FileExists(appPath) Then
-    MsgBox "Could not find app.py in:" & vbCrLf & projectDir, vbExclamation, "Vista Social PR Agent"
+    MsgBox "Could not find app.py in:" & vbCrLf & projectDir, vbExclamation, "Digital PR Agent"
     WScript.Quit 1
 End If
 
@@ -50,7 +50,7 @@ If ready Then
 Else
     MsgBox "The PR Agent did not start within 45 seconds." & vbCrLf & _
            "Check that app.py works and OPENAI_API_KEY is set in Windows.", _
-           vbExclamation, "Vista Social PR Agent"
+           vbExclamation, "Digital PR Agent"
 End If
 
 Function IsServerReady()

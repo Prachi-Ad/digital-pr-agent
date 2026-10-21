@@ -14,11 +14,15 @@ from pydantic import BaseModel, Field
 #   VISTA_OPENAI_MODEL=gpt-4.1-nano
 #   VISTA_SEARCH_CONTEXT=medium|low     (fewer search content tokens)
 DEFAULT_MODEL = "gpt-5.4-nano"
-MODEL = os.environ.get("VISTA_OPENAI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+MODEL = (os.environ.get("OPENAI_MODEL") or os.environ.get("VISTA_OPENAI_MODEL") or DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
-SEARCH_CONTEXT_SIZE = os.environ.get("VISTA_SEARCH_CONTEXT", "high").strip().lower()
+SEARCH_CONTEXT_SIZE = (os.environ.get("SEARCH_CONTEXT_SIZE") or os.environ.get("VISTA_SEARCH_CONTEXT") or "high").strip().lower()
 if SEARCH_CONTEXT_SIZE not in {"low", "medium", "high"}:
     SEARCH_CONTEXT_SIZE = "high"
+
+# Brand configuration (override to reuse this tool for any product/company)
+BRAND_NAME = (os.environ.get("BRAND_NAME") or os.environ.get("VISTA_BRAND_NAME") or "Your Brand").strip() or "Your Brand"
+PRODUCT_DESCRIPTION = (os.environ.get("PRODUCT_DESCRIPTION") or os.environ.get("VISTA_PRODUCT_DESCRIPTION") or "a software product").strip() or "a software product"
 
 
 # =========================================================
@@ -30,7 +34,7 @@ class Statistic(BaseModel):
     source: str = Field(description="The source of the statistic, if identified.")
     data_provenance: str = Field(
         description=(
-            "Classify as Vista Social original data, external primary source, "
+            "Classify as {BRAND_NAME} original data, external primary source, "
             "external survey, company-reported, secondary source, or unknown."
         )
     )
@@ -43,10 +47,10 @@ class PRAngle(BaseModel):
     recommended_tactic: str = Field(description="The recommended PR tactic.")
     story_hypothesis: str = Field(description="The story a publication could potentially cover.")
     why_useful: str = Field(description="Why this could provide editorial value.")
-    vista_contribution: str = Field(description="What Vista Social can credibly contribute.")
+    brand_contribution: str = Field(description="What the brand can credibly contribute.")
     target_publication_types: list[str] = Field(description="Types of publications that may fit the story.")
     target_journalist_beats: list[str] = Field(description="Relevant journalist topics to research later.")
-    relevant_asset: str = Field(description="The existing Vista Social asset supporting the angle.")
+    relevant_asset: str = Field(description="The existing the brand asset supporting the angle.")
     evidence: str = Field(description="Evidence supporting the angle.")
     next_action: str = Field(description="The single most useful next action.")
     confidence: str = Field(description="Confidence level: High, Medium, or Low.")
@@ -75,7 +79,7 @@ class PROpportunity(BaseModel):
     topic: str = Field(description="The article's main topic.")
     opportunity_type: str = Field(description="The type of PR opportunity.")
     why_relevant: str = Field(description="Why this specific article matches the PR angle.")
-    vista_social_contribution: str = Field(description="What Vista Social could credibly contribute.")
+    brand_contribution: str = Field(description="What the brand could credibly contribute.")
     competitor_mention: str = Field(description="A verified competitor mention, or None identified.")
     topical_relevance: str = Field(description="High, Medium, or Low, with reasoning.")
     editorial_fit: str = Field(description="High, Medium, or Low, with reasoning.")
@@ -121,7 +125,7 @@ class JournalistProfile(BaseModel):
         description="Why this person's work makes them a relevant target for this exact opportunity."
     )
     suggested_pitch_angle: str = Field(
-        description="A specific pitch approach linked to the verified article and Vista Social's contribution."
+        description="A specific pitch approach linked to the verified article and the brand's contribution."
     )
     author_profile_or_contact_page: str = Field(
         description="Verified author biography or official publication contact page URL, if available; otherwise Unknown."
@@ -176,14 +180,14 @@ class ListicleOpportunity(BaseModel):
     competitors_listed: list[str] = Field(
         description="Competitors explicitly visible in the article. Do not infer missing names."
     )
-    vista_social_currently_listed: str = Field(
-        description="Use Yes, No, or Unclear, based on whether the article was actually checked for Vista Social."
+    brand_currently_listed: str = Field(
+        description="Use Yes, No, or Unclear, based on whether the article was actually checked for the brand."
     )
-    vista_social_fit: str = Field(
-        description="Explain how Vista Social's known product category and capabilities match this listicle's inclusion criteria."
+    brand_fit: str = Field(
+        description="Explain how the brand's known product category and capabilities match this listicle's inclusion criteria."
     )
     inclusion_gap: str = Field(
-        description="A verified reason to request consideration, or Unknown if the reason Vista Social is absent cannot be established. Do not guess why it was omitted."
+        description="A verified reason to request consideration, or Unknown if the reason the brand is absent cannot be established. Do not guess why it was omitted."
     )
     placement_type: str = Field(
         description="Classify as Editorial, Affiliate, Sponsored/Paid, Directory, User-generated, or Unclear. Use evidence and acknowledge uncertainty."
@@ -285,7 +289,7 @@ class PublisherPolicyAssessment(BaseModel):
         description="Use one of: Pursue, Paid option to review, Needs verification, Do not pursue, Use directory submission, or Already listed."
     )
     disposition_reason: str = Field(
-        description="Explain the recommendation based on the verified policy and current Vista Social inclusion status."
+        description="Explain the recommendation based on the verified policy and current the brand inclusion status."
     )
     recommended_route: str = Field(
         description="The best next route: editorial consideration, official directory/vendor submission, affiliate/partner route, sponsored-content team, research further, or no outreach."
@@ -308,22 +312,22 @@ web_search = WebSearchTool(
 # =========================================================
 
 asset_agent = Agent(
-    name="Vista Social PR Asset Analyst",
-    instructions="""
-You are a Digital PR asset analyst and PR strategist for Vista Social.
+    name="PR Asset Analyst",
+    instructions=f"""
+You are a Digital PR asset analyst and PR strategist for {BRAND_NAME}.
 
-Analyze the Vista Social article supplied by the user. Identify useful
+Analyze the {BRAND_NAME} article supplied by the user. Identify useful
 content, claims, statistics, sources, data provenance, and credible PR angles.
 
 Rules:
 - Do not invent facts, statistics, sources, or claims.
 - Use web search to access or verify the article.
-- Distinguish Vista Social's own data from external research.
-- Never present external statistics as Vista Social's original data.
+- Distinguish {BRAND_NAME}'s own data from external research.
+- Never present external statistics as {BRAND_NAME}'s original data.
 - Do not turn every statistic into a PR angle.
 - A backlink alone is not a Digital PR opportunity.
 - Focus on editorial usefulness.
-- Explain what Vista Social can credibly contribute.
+- Explain what {BRAND_NAME} can credibly contribute.
 - Recommend a suitable tactic for every angle.
 - Identify target publication types and journalist beats.
 - Give exactly one useful next action for each angle.
@@ -343,19 +347,19 @@ Return the requested structured fields.
 # =========================================================
 
 opportunity_agent = Agent(
-    name="Vista Social PR Opportunity Researcher",
-    instructions="""
-You are a Digital PR opportunity researcher for Vista Social.
+    name="PR Opportunity Researcher",
+    instructions=f"""
+You are a Digital PR opportunity researcher for {BRAND_NAME}.
 
 Find real existing articles and editorial conversations that match the
 supplied PR angle.
 
 Research process:
-1. Understand the angle and Vista Social's contribution.
+1. Understand the angle and {BRAND_NAME}'s contribution.
 2. Search the web using several relevant topic variations.
 3. Find specific existing articles, not just website homepages.
 4. Evaluate topical and editorial relevance.
-5. Check whether Vista Social can make a credible contribution.
+5. Check whether {BRAND_NAME} can make a credible contribution.
 6. Check competitor mentions when the evidence is available.
 7. Exclude generic SEO opportunities that lack a real editorial reason.
 8. Return the strongest candidates, up to 10.
@@ -389,9 +393,9 @@ Return only the requested structured fields.
 # =========================================================
 
 journalist_agent = Agent(
-    name="Vista Social Journalist Researcher",
-    instructions="""
-You are a journalist researcher supporting a human-led Digital PR workflow for Vista Social.
+    name="Journalist Researcher",
+    instructions=f"""
+You are a journalist researcher supporting a human-led Digital PR workflow for {BRAND_NAME}.
 
 Your task is to identify real writers, reporters, or editors whose published work makes
 these people relevant to one specific, human-approved PR opportunity.
@@ -403,7 +407,7 @@ RESEARCH PROCESS:
    an official author page, or another reliable source.
 4. Prefer people who have covered the topic recently, ideally within the last 12 months.
    If few relevant people exist, older work can be included with the date clearly shown.
-5. Look for a direct connection between the person's beat and the contribution Vista Social can offer.
+5. Look for a direct connection between the person's beat and the contribution {BRAND_NAME} can offer.
 6. Return up to five strong contacts, and return fewer when the evidence is weak.
 
 STRICT RULES:
@@ -419,7 +423,7 @@ STRICT RULES:
 - Link to the actual relevant article and verified author profile/contact page where available.
 
 For every person, explain exactly why their published work makes them relevant to this opportunity
-and suggest an angle that is useful to the journalist, not just promotional for Vista Social.
+and suggest an angle that is useful to the journalist, not just promotional for {BRAND_NAME}.
 
 Return only the requested structured fields.
 """,
@@ -435,11 +439,11 @@ Return only the requested structured fields.
 # =========================================================
 
 listicle_agent = Agent(
-    name="Vista Social Listicle Opportunity Researcher",
-    instructions="""
-You are a listicle and software-roundup prospecting researcher for Vista Social.
+    name="Listicle Opportunity Researcher",
+    instructions=f"""
+You are a listicle and software-roundup prospecting researcher for {BRAND_NAME}.
 
-Your goal is to find a broad but relevant pool of existing pages where Vista Social
+Your goal is to find a broad but relevant pool of existing pages where {BRAND_NAME}
 could legitimately be considered for inclusion. This is a separate workflow from
 journalist-led Digital PR.
 
@@ -451,8 +455,8 @@ Research instructions:
 2. Include different search paths: category roundups, use-case roundups, audience-specific lists,
    competitor alternatives, comparison articles, and software directories when relevant.
 3. Return specific existing pages, never just publication homepages or search result pages.
-4. Prefer pages where Vista Social's actual product category and known capabilities fit the stated criteria.
-5. Check whether Vista Social is already included when the article can be inspected.
+4. Prefer pages where {BRAND_NAME}'s actual product category and known capabilities fit the stated criteria.
+5. Check whether {BRAND_NAME} is already included when the article can be inspected.
 6. Identify competitors only when they are explicitly present in the article.
 7. Capture publication or update dates only when verified. Otherwise use Unknown.
 8. Identify the likely placement model: editorial, affiliate, paid/sponsored, directory, user-generated, or unclear.
@@ -461,12 +465,12 @@ Research instructions:
 
 Important rules:
 - Do not invent article titles, URLs, dates, competitors, contacts, or contact details.
-- Do not guess why Vista Social is absent from a page. Use Unknown if the reason is not evidenced.
+- Do not guess why {BRAND_NAME} is absent from a page. Use Unknown if the reason is not evidenced.
 - Do not describe paid or affiliate placements as independent editorial endorsements.
 - Do not automatically dismiss affiliate pages, but label the model clearly so a human can decide.
 - Do not prioritize by Domain Rating alone.
 - Do not recommend irrelevant sites just to increase volume.
-- Do not assume a competitor's inclusion guarantees Vista Social qualifies.
+- Do not assume a competitor's inclusion guarantees {BRAND_NAME} qualifies.
 - Do not send emails or submit forms.
 - Do not invent email addresses.
 - Prefer a larger set of qualified candidates over a tiny set, while preserving relevance and deduplication.
@@ -475,8 +479,8 @@ Important rules:
 
 For each result, answer:
 - What is the exact page?
-- Does Vista Social fit the category?
-- Is Vista Social already listed?
+- Does {BRAND_NAME} fit the category?
+- Is {BRAND_NAME} already listed?
 - Which competitors are listed?
 - What inclusion gap or reasonable next step is evidenced?
 - How can the publisher be approached?
@@ -495,8 +499,8 @@ Return only the requested structured fields.
 # =========================================================
 
 listicle_contact_agent = Agent(
-    name="Vista Social Listicle Contact Researcher",
-    instructions="""
+    name="Listicle Contact Researcher",
+    instructions=f"""
 You find the most appropriate public professional contact route for a specific software listicle.
 
 Use live web search. Start with the exact listicle URL and publication name. Look for:
@@ -531,10 +535,10 @@ Return only the requested structured fields.
 # =========================================================
 
 publisher_policy_agent = Agent(
-    name="Vista Social Publisher Policy Researcher",
-    instructions="""
+    name="Publisher Policy Researcher",
+    instructions=f"""
 You assess whether it is appropriate to pursue a specific listicle, roundup,
-comparison article, or software directory page for Vista Social.
+comparison article, or software directory page for {BRAND_NAME}.
 
 Use live web search. Start with the exact target page, then inspect official
 publisher policies, submission instructions, contributor guidelines, affiliate
@@ -546,7 +550,7 @@ Check specifically for:
 - Paid or sponsored placement options, clearly labeled as such.
 - Affiliate or partnership requirements.
 - Official software directory/vendor submission procedures.
-- Whether Vista Social is already listed on the exact target page.
+- Whether {BRAND_NAME} is already listed on the exact target page.
 
 Rules:
 - Prefer the target page and official publisher sources over third-party summaries.
@@ -558,7 +562,7 @@ Rules:
 - If the policy is unclear, use Needs verification rather than guessing.
 - Include a source URL supporting the key policy finding; use Unknown if none is verifiable.
 - If the page is a directory, recommend its official vendor/listing route rather than an editorial pitch.
-- If Vista Social is already listed, recommend Already listed.
+- If {BRAND_NAME} is already listed, recommend Already listed.
 - Do not contact the publisher, submit forms, or send outreach.
 
 Disposition guidance:
@@ -567,7 +571,7 @@ Disposition guidance:
 - Needs verification: source evidence is incomplete or ambiguous.
 - Do not pursue: the publisher explicitly rejects this type of request or the opportunity is clearly unsuitable.
 - Use directory submission: official vendor/profile route is the correct process.
-- Already listed: Vista Social already appears on the exact target page.
+- Already listed: {BRAND_NAME} already appears on the exact target page.
 
 Return only the requested structured fields.
 """,
@@ -598,9 +602,9 @@ def _run_agent_in_worker(agent_to_run, prompt: str):
 # =========================================================
 
 def analyze_article(article_url: str) -> AssetAnalysis:
-    """Analyze a Vista Social article and return structured asset intelligence."""
+    """Analyze a the brand article and return structured asset intelligence."""
     prompt = f"""
-Analyze this exact Vista Social article:
+Analyze this exact {BRAND_NAME} article:
 
 {article_url}
 
@@ -613,7 +617,7 @@ provenance, useful assets, and actionable PR angles.
 def research_opportunities(angle: PRAngle) -> PRResearchResults:
     """Research editorial opportunities for a selected PR angle."""
     prompt = f"""
-Research this Vista Social PR angle.
+Research this {BRAND_NAME} PR angle.
 
 ANGLE:
 {angle.angle}
@@ -627,8 +631,8 @@ RECOMMENDED TACTIC:
 STORY HYPOTHESIS:
 {angle.story_hypothesis}
 
-VISTA SOCIAL CONTRIBUTION:
-{angle.vista_contribution}
+BRAND CONTRIBUTION:
+{angle.brand_contribution}
 
 TARGET PUBLICATION TYPES:
 {", ".join(angle.target_publication_types)}
@@ -636,7 +640,7 @@ TARGET PUBLICATION TYPES:
 TARGET JOURNALIST BEATS:
 {", ".join(angle.target_journalist_beats)}
 
-RELEVANT VISTA SOCIAL ASSET:
+RELEVANT BRAND ASSET:
 {angle.relevant_asset}
 
 SUPPORTING EVIDENCE:
@@ -656,7 +660,7 @@ def research_journalists(
     """Find evidence-supported journalists for an approved PR opportunity."""
 
     prompt = f"""
-Research relevant journalists or writers for this HUMAN-APPROVED Vista Social PR opportunity.
+Research relevant journalists or writers for this HUMAN-APPROVED {BRAND_NAME} PR opportunity.
 
 PR ANGLE:
 {angle.angle}
@@ -664,8 +668,8 @@ PR ANGLE:
 STORY HYPOTHESIS:
 {angle.story_hypothesis}
 
-VISTA SOCIAL CONTRIBUTION:
-{angle.vista_contribution}
+BRAND CONTRIBUTION:
+{angle.brand_contribution}
 
 APPROVED OPPORTUNITY:
 Publication: {opportunity.publication}
@@ -694,18 +698,16 @@ def research_listicles(
     competitors: list[str] | None = None,
     max_results: int = 15,
 ) -> ListicleResearchResults:
-    """Find and qualify existing listicles for potential Vista Social inclusion."""
+    """Find and qualify existing listicles for potential the brand inclusion."""
 
     if not search_theme or not search_theme.strip():
         raise ValueError("A listicle search theme is required.")
 
     max_results = max(5, min(int(max_results), 20))
-    competitors = competitors or [
-        "Hootsuite", "Sprout Social", "Buffer", "Later", "SocialBee"
-    ]
+    competitors = competitors or []
 
     prompt = f"""
-Research existing listicle opportunities for Vista Social.
+Research existing listicle opportunities for {BRAND_NAME}.
 
 PRIMARY SEARCH THEME:
 {search_theme.strip()}
@@ -720,12 +722,12 @@ TARGET MARKET:
 {target_market}
 
 COMPETITORS TO CHECK WHEN RELEVANT:
-{", ".join(competitors)}
+{", ".join(competitors) if competitors else "None supplied."}
 
 RESULT LIMIT:
 Return up to {max_results} distinct candidate pages.
 
-Vista Social is a social media management platform. Its potential inclusion fit may involve
+{BRAND_NAME} is {PRODUCT_DESCRIPTION}. Its potential inclusion fit may involve
 social media management, scheduling and publishing, engagement, analytics, social listening,
 team workflows, and tools for agencies or businesses. Do not claim a feature is a fit unless
 it is relevant to the listicle topic.
@@ -735,7 +737,7 @@ best-of articles, product roundups, alternatives pages, comparisons, and directo
 on actual pages a person could review and potentially pursue for inclusion.
 
 Distinguish editorial and affiliate roundups from paid/sponsored opportunities and directories.
-Do not assume a page is free to submit. Do not invent why Vista Social is missing, contact names,
+Do not assume a page is free to submit. Do not invent why {BRAND_NAME} is missing, contact names,
 email addresses, publication dates, competitor mentions, or URLs.
 
 Return a deduplicated shortlist, up to the stated limit. Include fewer results if there are not
@@ -781,14 +783,14 @@ def research_publisher_policy(
     """Check a listicle publisher's explicit policy before pursuing inclusion."""
 
     prompt = f"""
-Assess the publisher policy and best next route for this exact Vista Social listicle prospect.
+Assess the publisher policy and best next route for this exact {BRAND_NAME} listicle prospect.
 
 PUBLICATION: {item.publication}
 TARGET PAGE TITLE: {item.listicle_title}
 TARGET PAGE URL: {item.listicle_url}
 PUBLISHED / UPDATED: {item.published_or_updated}
 PLACEMENT TYPE FROM INITIAL RESEARCH: {item.placement_type}
-VISTA SOCIAL CURRENTLY LISTED: {item.vista_social_currently_listed}
+BRAND CURRENTLY LISTED: {item.brand_currently_listed}
 INCLUSION GAP: {item.inclusion_gap}
 CURRENT CONTACT ROUTE: {item.contact_route}
 INITIAL RECOMMENDATION: {item.recommended_action}
@@ -798,7 +800,7 @@ requests, link requests, editorial suggestions, paid/sponsored placements, affil
 and vendor/directory submissions. Distinguish explicit policies from policies you could not find.
 
 If the exact page is a directory rather than an editorial listicle, clearly state that and recommend
-the official vendor listing process if verified. If Vista Social is already listed, say so.
+the official vendor listing process if verified. If {BRAND_NAME} is already listed, say so.
 Return the specific policy source URL and factual evidence. Never contact the publisher or submit forms.
 """
 

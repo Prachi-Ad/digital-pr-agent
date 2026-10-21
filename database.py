@@ -1,4 +1,4 @@
-"""Local SQLite persistence for the Vista Social PR Agent.
+"""Local SQLite persistence for the Digital PR Agent.
 
 All data stays on this computer in the project's data directory.
 No network/database service is required.
@@ -17,7 +17,21 @@ from urllib.parse import urlsplit, urlunsplit
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
-DB_PATH = DATA_DIR / "vista_pr_agent.sqlite3"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Migrate legacy DB filename (if present) to the generic name once.
+_LEGACY_DB = DATA_DIR / "vista_pr_agent.sqlite3"
+DB_PATH = DATA_DIR / "pr_agent.sqlite3"
+if _LEGACY_DB.exists() and not DB_PATH.exists():
+    try:
+        _LEGACY_DB.rename(DB_PATH)
+        for suffix in ("-wal", "-shm"):
+            legacy_sidecar = _LEGACY_DB.with_name(_LEGACY_DB.name + suffix)
+            new_sidecar = DB_PATH.with_name(DB_PATH.name + suffix)
+            if legacy_sidecar.exists() and not new_sidecar.exists():
+                legacy_sidecar.rename(new_sidecar)
+    except OSError:
+        DB_PATH = _LEGACY_DB
 
 
 def _now() -> str:
@@ -543,7 +557,7 @@ def create_database_backup() -> str:
     backup_dir = ROOT / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup_path = backup_dir / f"vista_pr_agent_database_{stamp}.sqlite3"
+    backup_path = backup_dir / f"pr_agent_database_{stamp}.sqlite3"
     with sqlite3.connect(DB_PATH, timeout=15) as source:
         with sqlite3.connect(backup_path) as destination:
             source.backup(destination)

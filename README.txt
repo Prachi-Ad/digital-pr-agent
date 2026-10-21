@@ -1,16 +1,16 @@
-Vista Social PR Agent - Research Library and Storage Guide
+Digital PR Agent - Research Library and Storage Guide
 
 WHAT THE APP DOES
-- Turns published Vista Social articles into PR angles and editorial opportunities.
-- Finds listicle, roundup, alternatives, and directory pages where Vista Social may fit.
+- Turns published articles into PR angles and editorial opportunities.
+- Finds listicle, roundup, alternatives, and directory pages where a brand may fit.
 - Researches publisher contacts and publisher inclusion policies for a human to review.
 - Saves every listicle prospect, PR opportunity, journalist record, decision, contact finding, policy finding, and placement status in a local database.
 - Never emails publishers, submits forms, or sends outreach automatically.
 
 ONE-CLICK START
-1. Double-click launch_vista_pr_agent_hidden.vbs.
+1. Double-click launch_pr_agent_hidden.vbs.
 2. Your browser opens the app at http://localhost:8501.
-3. To stop the app, double-click stop_vista_pr_agent.bat.
+3. To stop the app, double-click stop_pr_agent.bat.
 
 CHECK THAT SAVING WORKS (ONE CLICK)
 1. Double-click run_storage_check.vbs.
@@ -22,8 +22,8 @@ The check never reads or changes your real research database. It is safe to run 
 It takes about 20-40 seconds and does not call the OpenAI API.
 
 WHERE DATA IS STORED
-- Main database: C:\Users\<your Windows user>\vista-pr-agent\data\vista_pr_agent.sqlite3
-- Code and database backups: C:\Users\<your Windows user>\vista-pr-agent\backups\
+- Main database: C:\Users\<your Windows user>\pr-agent\data\pr_agent.sqlite3 (or your project folder\data\pr_agent.sqlite3)
+- Code and database backups: <project folder>\backups\
 - Storage check logs: backups\latest_storage_check.txt and backups\storage_check_<date>.txt
 
 DATA BEHAVIOR
@@ -40,7 +40,7 @@ DATA BEHAVIOR
 
 BACKUP AND RESTORE
 - Research Library > Create database backup creates a dated, verified backup.
-- To restore, close the app and replace data\vista_pr_agent.sqlite3 with a backup file. Keep a copy of the current file first.
+- To restore, close the app and replace data\pr_agent.sqlite3 with a backup file. Keep a copy of the current file first.
 - Back up before installing updates or moving to another computer.
 
 INSTALLING UPDATES
@@ -53,3 +53,7 @@ SAFETY
 - Publisher research is informational and must be checked by a human.
 - Policy findings are recommendations, not permission or a placement guarantee.
 - The app does not contact publishers or send outreach. Human approval is required at every step.
+
+BRAND CONFIGURATION
+- Set BRAND_NAME and PRODUCT_DESCRIPTION in Windows environment variables to research a specific brand.
+- Legacy VISTA_* variable names are still accepted.

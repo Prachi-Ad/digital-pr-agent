@@ -9,14 +9,14 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 Set shell = CreateObject("WScript.Shell")
 
 sourceFolder = fso.GetParentFolderName(WScript.ScriptFullName)
-projectFolder = shell.ExpandEnvironmentStrings("%USERPROFILE%") & "\vista-pr-agent"
+projectFolder = fso.GetParentFolderName(WScript.ScriptFullName)
 agentPath = fso.BuildPath(projectFolder, "agent.py")
 appPath = fso.BuildPath(projectFolder, "app.py")
 databasePath = fso.BuildPath(projectFolder, "database.py")
-launcherPath = fso.BuildPath(projectFolder, "launch_vista_pr_agent_hidden.vbs")
-stopPath = fso.BuildPath(projectFolder, "stop_vista_pr_agent.bat")
+launcherPath = fso.BuildPath(projectFolder, "launch_pr_agent_hidden.vbs")
+stopPath = fso.BuildPath(projectFolder, "stop_pr_agent.bat")
 pythonExe = fso.BuildPath(projectFolder, ".venv\Scripts\python.exe")
-dbFile = fso.BuildPath(projectFolder, "data\vista_pr_agent.sqlite3")
+dbFile = fso.BuildPath(projectFolder, "data\pr_agent.sqlite3")
 
 sameFolder = (LCase(fso.GetAbsolutePathName(sourceFolder)) = _
               LCase(fso.GetAbsolutePathName(projectFolder)))
@@ -25,19 +25,19 @@ If Not fso.FileExists(fso.BuildPath(sourceFolder, "agent.py")) Or _
    Not fso.FileExists(fso.BuildPath(sourceFolder, "app.py")) Or _
    Not fso.FileExists(fso.BuildPath(sourceFolder, "database.py")) Then
     MsgBox "The update folder must contain agent.py, app.py, and database.py." & vbCrLf & _
-           "Extract the complete ZIP package first. Your project was not changed.", vbExclamation, "Vista Social PR Agent"
+           "Extract the complete ZIP package first. Your project was not changed.", vbExclamation, "Digital PR Agent"
     WScript.Quit 1
 End If
 
 If Not fso.FolderExists(projectFolder) Then
     MsgBox "I couldn't find the project folder:" & vbCrLf & projectFolder & vbCrLf & _
-           "Your files were not changed.", vbCritical, "Vista Social PR Agent"
+           "Your files were not changed.", vbCritical, "Digital PR Agent"
     WScript.Quit 1
 End If
 
 If Not fso.FileExists(pythonExe) Then
     MsgBox "I couldn't find the project's Python environment:" & vbCrLf & pythonExe & vbCrLf & vbCrLf & _
-           "Your files were not changed. Check that the .venv folder is present in the project folder.", vbCritical, "Vista Social PR Agent"
+           "Your files were not changed. Check that the .venv folder is present in the project folder.", vbCritical, "Digital PR Agent"
     WScript.Quit 1
 End If
 
@@ -65,9 +65,9 @@ If fso.FileExists(databasePath) Then fso.CopyFile databasePath, fso.BuildPath(ba
 If fso.FileExists(dbFile) Then
     backupDataFolder = fso.BuildPath(backupFolder, "data")
     If Not fso.FolderExists(backupDataFolder) Then fso.CreateFolder backupDataFolder
-    fso.CopyFile dbFile, fso.BuildPath(backupDataFolder, "vista_pr_agent.sqlite3"), True
-    If fso.FileExists(dbFile & "-wal") Then fso.CopyFile dbFile & "-wal", fso.BuildPath(backupDataFolder, "vista_pr_agent.sqlite3-wal"), True
-    If fso.FileExists(dbFile & "-shm") Then fso.CopyFile dbFile & "-shm", fso.BuildPath(backupDataFolder, "vista_pr_agent.sqlite3-shm"), True
+    fso.CopyFile dbFile, fso.BuildPath(backupDataFolder, "pr_agent.sqlite3"), True
+    If fso.FileExists(dbFile & "-wal") Then fso.CopyFile dbFile & "-wal", fso.BuildPath(backupDataFolder, "pr_agent.sqlite3-wal"), True
+    If fso.FileExists(dbFile & "-shm") Then fso.CopyFile dbFile & "-shm", fso.BuildPath(backupDataFolder, "pr_agent.sqlite3-shm"), True
 End If
 
 ' Install application code. When the installer already sits inside the project
@@ -80,7 +80,7 @@ If Not sameFolder Then
         Err.Clear
         RollBackFiles
         MsgBox "Couldn't install agent.py." & vbCrLf & "Previous code was restored where backups existed." & vbCrLf & _
-               "Backup folder: " & backupFolder & vbCrLf & "Error: " & errorMessage, vbCritical, "Vista Social PR Agent"
+               "Backup folder: " & backupFolder & vbCrLf & "Error: " & errorMessage, vbCritical, "Digital PR Agent"
         WScript.Quit 1
     End If
     Err.Clear
@@ -90,7 +90,7 @@ If Not sameFolder Then
         Err.Clear
         RollBackFiles
         MsgBox "Couldn't install app.py." & vbCrLf & "Previous code was restored where backups existed." & vbCrLf & _
-               "Backup folder: " & backupFolder & vbCrLf & "Error: " & errorMessage, vbCritical, "Vista Social PR Agent"
+               "Backup folder: " & backupFolder & vbCrLf & "Error: " & errorMessage, vbCritical, "Digital PR Agent"
         WScript.Quit 1
     End If
     Err.Clear
@@ -100,7 +100,7 @@ If Not sameFolder Then
         Err.Clear
         RollBackFiles
         MsgBox "Couldn't install database.py." & vbCrLf & "Previous code was restored where backups existed." & vbCrLf & _
-               "Backup folder: " & backupFolder & vbCrLf & "Error: " & errorMessage, vbCritical, "Vista Social PR Agent"
+               "Backup folder: " & backupFolder & vbCrLf & "Error: " & errorMessage, vbCritical, "Digital PR Agent"
         WScript.Quit 1
     End If
     Err.Clear
@@ -108,11 +108,11 @@ If Not sameFolder Then
 End If
 
 ' Only add launcher/stop files if absent; preserve the user's existing versions.
-If fso.FileExists(fso.BuildPath(sourceFolder, "launch_vista_pr_agent_hidden.vbs")) Then
-    If Not fso.FileExists(launcherPath) Then fso.CopyFile fso.BuildPath(sourceFolder, "launch_vista_pr_agent_hidden.vbs"), launcherPath, True
+If fso.FileExists(fso.BuildPath(sourceFolder, "launch_pr_agent_hidden.vbs")) Then
+    If Not fso.FileExists(launcherPath) Then fso.CopyFile fso.BuildPath(sourceFolder, "launch_pr_agent_hidden.vbs"), launcherPath, True
 End If
-If fso.FileExists(fso.BuildPath(sourceFolder, "stop_vista_pr_agent.bat")) Then
-    If Not fso.FileExists(stopPath) Then fso.CopyFile fso.BuildPath(sourceFolder, "stop_vista_pr_agent.bat"), stopPath, True
+If fso.FileExists(fso.BuildPath(sourceFolder, "stop_pr_agent.bat")) Then
+    If Not fso.FileExists(stopPath) Then fso.CopyFile fso.BuildPath(sourceFolder, "stop_pr_agent.bat"), stopPath, True
 End If
 
 ' Check all syntax with the project's own Python, hidden from the user.
@@ -150,7 +150,7 @@ If result <> 0 Then
     MsgBox "The update did not pass its automatic checks. Previous code was restored where backups existed." & vbCrLf & _
            "Your original database was not intentionally overwritten." & vbCrLf & _
            "Backup folder: " & backupFolder & vbCrLf & vbCrLf & _
-           "Please share this message if you need help.", vbCritical, "Vista Social PR Agent"
+           "Please share this message if you need help.", vbCritical, "Digital PR Agent"
     WScript.Quit 1
 End If
 
@@ -158,13 +158,13 @@ If sameFolder Then
     MsgBox "Checks passed. No files needed copying because this installer is already inside the project folder." & vbCrLf & vbCrLf & _
            "Checks passed: Python syntax, required AI functions, SQLite initialization, and database read check." & vbCrLf & vbCrLf & _
            "Backups saved to:" & vbCrLf & backupFolder & vbCrLf & vbCrLf & _
-           "Double-click launch_vista_pr_agent_hidden.vbs in your project folder to open the app.", vbInformation, "Vista Social PR Agent"
+           "Double-click launch_pr_agent_hidden.vbs in your project folder to open the app.", vbInformation, "Digital PR Agent"
 Else
     MsgBox "Persistent storage update installed successfully!" & vbCrLf & vbCrLf & _
            "Checks passed: Python syntax, required AI functions, SQLite initialization, and database read check." & vbCrLf & vbCrLf & _
            "Backups saved to:" & vbCrLf & backupFolder & vbCrLf & vbCrLf & _
-           "Research is stored locally at:" & vbCrLf & fso.BuildPath(fso.BuildPath(projectFolder, "data"), "vista_pr_agent.sqlite3") & vbCrLf & vbCrLf & _
-           "Double-click launch_vista_pr_agent_hidden.vbs in your project folder to reopen the app.", vbInformation, "Vista Social PR Agent"
+           "Research is stored locally at:" & vbCrLf & fso.BuildPath(fso.BuildPath(projectFolder, "data"), "pr_agent.sqlite3") & vbCrLf & vbCrLf & _
+           "Double-click launch_pr_agent_hidden.vbs in your project folder to reopen the app.", vbInformation, "Digital PR Agent"
 End If
 WScript.Quit 0
 

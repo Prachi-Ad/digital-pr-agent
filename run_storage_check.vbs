@@ -13,12 +13,12 @@ logPath = projectDir & "\backups\latest_storage_check.txt"
 
 If Not fso.FileExists(pythonExe) Then
     MsgBox "I couldn't find the project's Python environment:" & vbCrLf & pythonExe & vbCrLf & vbCrLf & _
-           "Make sure this file is inside your vista-pr-agent project folder.", vbCritical, "Vista Social PR Agent"
+           "Make sure this file is inside your project folder.", vbCritical, "Digital PR Agent"
     WScript.Quit 1
 End If
 
 If Not fso.FileExists(checkScript) Then
-    MsgBox "I couldn't find storage_self_check.py in:" & vbCrLf & projectDir, vbCritical, "Vista Social PR Agent"
+    MsgBox "I couldn't find storage_self_check.py in:" & vbCrLf & projectDir, vbCritical, "Digital PR Agent"
     WScript.Quit 1
 End If
 
@@ -32,12 +32,12 @@ If result = 0 Then
               "and a verified database backup was created." & vbCrLf & vbCrLf & _
               "Your real research database was not touched." & vbCrLf & vbCrLf & _
               "Details: " & logPath
-    MsgBox message, vbInformation, "Vista Social PR Agent"
+    MsgBox message, vbInformation, "Digital PR Agent"
 Else
     message = "Some storage checks did not pass." & vbCrLf & vbCrLf & _
               "Open this file to see exactly which checks failed:" & vbCrLf & logPath & vbCrLf & vbCrLf & _
               "Your real research database was not touched. Please share the log if you need help."
-    MsgBox message, vbExclamation, "Vista Social PR Agent"
+    MsgBox message, vbExclamation, "Digital PR Agent"
 End If
 
 WScript.Quit result

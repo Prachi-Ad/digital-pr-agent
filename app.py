@@ -2,6 +2,7 @@ import hashlib
 import streamlit as st
 
 from agent import (
+    BRAND_NAME,
     MODEL,
     AssetAnalysis,
     PRResearchResults,
@@ -41,7 +42,7 @@ from database import (
 # =========================================================
 
 st.set_page_config(
-    page_title="Vista Social PR Agent",
+    page_title=f"{BRAND_NAME} PR Agent",
     page_icon="✦",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -249,7 +250,7 @@ st.markdown(
 
 with st.sidebar:
     st.markdown(
-        '<div class="sidebar-brand">Vista Social</div>',
+        '<div class="sidebar-brand">Digital PR Agent</div>',
         unsafe_allow_html=True,
     )
     st.markdown(
@@ -280,23 +281,23 @@ with st.sidebar:
 
 if page == "PR Home":
     st.title("Digital PR")
-    st.caption("Turn existing Vista Social content into actionable PR research.")
+    st.caption("Turn existing content into actionable PR research.")
     st.divider()
 
-    st.subheader("Analyze a Vista Social asset")
-    st.write("Enter the URL of a published Vista Social article.")
+    st.subheader("Analyze an article")
+    st.write("Enter the URL of a published article.")
 
     article_url = st.text_input(
-        "Vista Social article URL",
+        "Article URL",
         value=st.session_state.article_url,
-        placeholder="https://vistasocial.com/insights/...",
+        placeholder="https://example.com/article",
     )
 
     if st.button("Analyze article", type="primary"):
         if not article_url:
             st.warning("Please enter an article URL.")
-        elif not article_url.startswith("https://vistasocial.com/"):
-            st.error("Please enter an HTTPS URL from vistasocial.com.")
+        elif not article_url.startswith("https://"):
+            st.error("Please enter a valid HTTPS URL.")
         else:
             st.session_state.article_url = article_url
             with st.spinner("Analyzing the article..."):
@@ -423,8 +424,8 @@ elif page == "PR Action Plans":
                 st.write(angle.story_hypothesis)
                 st.caption("WHY A PUBLICATION MIGHT CARE")
                 st.write(angle.why_useful)
-                st.caption("VISTA SOCIAL'S CONTRIBUTION")
-                st.write(angle.vista_contribution)
+                st.caption(f"{BRAND_NAME.upper()}'S CONTRIBUTION")
+                st.write(angle.brand_contribution)
 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -436,7 +437,7 @@ elif page == "PR Action Plans":
                     for item in angle.target_journalist_beats:
                         st.write(f"• {item}")
 
-                st.caption("RELEVANT VISTA SOCIAL ASSET")
+                st.caption("RELEVANT ASSET")
                 st.write(angle.relevant_asset)
                 st.caption("SUPPORTING EVIDENCE")
                 st.write(angle.evidence)
@@ -537,8 +538,8 @@ elif page == "PR Opportunities":
                 st.write(opportunity.topic)
                 st.caption("WHY IT MATCHES THE PR ANGLE")
                 st.write(opportunity.why_relevant)
-                st.caption("WHAT VISTA SOCIAL COULD CONTRIBUTE")
-                st.write(opportunity.vista_social_contribution)
+                st.caption(f"WHAT {BRAND_NAME.upper()} COULD CONTRIBUTE")
+                st.write(opportunity.brand_contribution)
                 st.caption("COMPETITOR PRESENCE")
                 st.write(opportunity.competitor_mention)
 
@@ -570,7 +571,7 @@ elif page == "PR Opportunities":
                 st.markdown("**Your review decision**")
                 st.caption(
                     "Approve only if the article is real, relevant, and offers "
-                    "a credible editorial opening for Vista Social."
+                    "a credible editorial opening."
                 )
 
                 st.selectbox(
@@ -621,7 +622,7 @@ elif page == "PR Opportunities":
 elif page == "Listicle Opportunities":
     st.title("Listicle Opportunities")
     st.caption(
-        "Find existing software roundups, best-tool lists, alternatives pages, comparisons, and directories where Vista Social may fit."
+        "Find existing software roundups, best-tool lists, alternatives pages, comparisons, and directories where your brand may fit."
     )
 
     st.info(
@@ -832,16 +833,16 @@ elif page == "Listicle Opportunities":
                 c1.write(item.published_or_updated)
                 c2.caption("PLACEMENT TYPE")
                 c2.write(item.placement_type)
-                c3.caption("CURRENTLY LISTS VISTA SOCIAL?")
-                c3.write(item.vista_social_currently_listed)
+                c3.caption(f"CURRENTLY LISTS {BRAND_NAME.upper()}?")
+                c3.write(item.brand_currently_listed)
 
                 st.divider()
                 st.caption("CATEGORY")
                 st.write(item.listicle_category)
                 st.caption("TARGET AUDIENCE")
                 st.write(item.target_audience)
-                st.caption("WHY VISTA SOCIAL MAY FIT")
-                st.write(item.vista_social_fit)
+                st.caption(f"WHY {BRAND_NAME.upper()} MAY FIT")
+                st.write(item.brand_fit)
                 st.caption("INCLUSION GAP")
                 st.write(item.inclusion_gap)
 
@@ -1109,7 +1110,7 @@ elif page == "Journalists":
 
     if not results or not analysis:
         st.info(
-            "First analyze a Vista Social article, research a PR angle, "
+            "First analyze an article, research a PR angle, "
             "and review its candidate articles."
         )
     else:
@@ -1162,7 +1163,7 @@ elif page == "Journalists":
                         if existing_result is None:
                             st.write(
                                 "Find writers who have covered this topic and could reasonably use "
-                                "Vista Social's contribution."
+                                "the brand's contribution."
                             )
                             if st.button(
                                 "Research journalists →",
@@ -1361,7 +1362,7 @@ elif page == "Research Library":
             st.download_button(
                 "Export listicle prospects as CSV",
                 data=listicle_csv_bytes(),
-                file_name="vista_social_listicle_prospects.csv",
+                file_name="listicle_prospects.csv",
                 mime="text/csv",
             )
 
@@ -1412,7 +1413,7 @@ elif page == "Research Library":
             st.download_button(
                 "Export PR opportunities as CSV",
                 data=opportunity_csv_bytes(),
-                file_name="vista_social_pr_opportunities.csv",
+                file_name="pr_opportunities.csv",
                 mime="text/csv",
             )
 
@@ -1436,7 +1437,7 @@ elif page == "Research Library":
             st.download_button(
                 "Export journalists as CSV",
                 data=journalist_csv_bytes(),
-                file_name="vista_social_journalists.csv",
+                file_name="journalists.csv",
                 mime="text/csv",
             )
 

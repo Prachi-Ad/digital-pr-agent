@@ -5,7 +5,7 @@ cd /d "%~dp0"
 if not exist ".venv\Scripts\activate.bat" (
     echo ERROR: The Python virtual environment was not found.
     echo Expected folder: .venv\Scripts\activate.bat
-    echo Make sure this file is inside your vista-pr-agent project folder.
+    echo Make sure this file is inside your project folder.
     pause
     exit /b 1
 )

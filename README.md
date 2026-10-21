@@ -1,18 +1,21 @@
-# Vista Social PR Agent
+# Digital PR Agent
 
-A local Streamlit research assistant for **Digital PR** and **listicle prospecting**
-at Vista Social. It turns published Vista Social articles into PR angles and
-editorial opportunities, finds listicle / roundup / alternatives / directory
-pages where Vista Social may fit, researches publisher contacts and publisher
-inclusion policies, and stores everything in a local SQLite database for human
-review.
+A local Streamlit research assistant for **Digital PR** and **listicle prospecting**.
+It turns published articles into PR angles and editorial opportunities, finds
+listicle / roundup / alternatives / directory pages where a brand may fit,
+researches publisher contacts and publisher inclusion policies, and stores
+everything in a local SQLite database for human review.
 
 **The app never emails publishers, submits forms, or sends outreach.** Every
 outreach step requires a human to act on the research manually.
 
+The target brand is configurable: set `BRAND_NAME` and `PRODUCT_DESCRIPTION`
+(see "Brand configuration" below). The defaults are neutral so the project can
+be shared or reused for any product.
+
 ## What it does
 
-- Analyse a published Vista Social article into PR angles and statistics.
+- Analyse a published article into PR angles and statistics.
 - Research digital PR opportunities (journalists, publications, pitch angles).
 - Find listicle prospects (roundups, alternatives, directories, comparisons).
 - Research publisher contacts and publisher inclusion policies.
@@ -48,13 +51,25 @@ setx OPENAI_API_KEY "sk-..."
 
 Then restart the app or terminal.
 
+## Brand configuration (optional)
+
+To research a specific brand instead of the neutral default, set:
+
+```powershell
+setx BRAND_NAME "Your Brand"
+setx PRODUCT_DESCRIPTION "a social media management platform"
+setx BRAND_DOMAIN "example.com"   # optional, for URL hints only
+```
+
+Legacy `VISTA_*` variable names are still accepted as fallbacks.
+
 ## Run
 
 One-click (recommended):
 
-- Double-click `launch_vista_pr_agent_hidden.vbs` to start.
+- Double-click `launch_pr_agent_hidden.vbs` to start.
 - Open `http://localhost:8501`.
-- Double-click `stop_vista_pr_agent.bat` to stop.
+- Double-click `stop_pr_agent.bat` to stop.
 
 From a shell:
 
@@ -76,14 +91,16 @@ The default model is **`gpt-5.4-nano`** (a low-cost nano model). Override it
 with an environment variable before launching:
 
 ```powershell
-setx VISTA_OPENAI_MODEL "gpt-5-nano"        # lowest per-token price
-setx VISTA_OPENAI_MODEL "gpt-4.1-nano"
+setx OPENAI_MODEL "gpt-5-nano"        # lowest per-token price
+setx OPENAI_MODEL "gpt-4.1-nano"
 ```
+
+(Legacy name `VISTA_OPENAI_MODEL` is also accepted.)
 
 Web-search context size (affects search token cost) can also be tuned:
 
 ```powershell
-setx VISTA_SEARCH_CONTEXT "medium"          # low | medium | high (default: high)
+setx SEARCH_CONTEXT_SIZE "medium"          # low | medium | high (default: high)
 ```
 
 The active model is shown in the app sidebar.
