@@ -267,6 +267,11 @@ st.markdown(
 # SIDEBAR
 # =========================================================
 
+# Handle programmatic navigation from quick-action buttons.
+if st.session_state.get("_goto"):
+    st.session_state["nav_radio"] = st.session_state.pop("_goto")
+    st.rerun()
+
 with st.sidebar:
     st.markdown(
         '<div class="sidebar-brand">Digital PR Agent</div>',
@@ -281,6 +286,7 @@ with st.sidebar:
     page = st.radio(
         "Navigation",
         [
+            "Dashboard",
             "PR Home",
             "Asset Analysis",
             "PR Action Plans",
@@ -291,7 +297,114 @@ with st.sidebar:
             "Research Library",
         ],
         label_visibility="collapsed",
+        key="nav_radio",
     )
+
+
+# =========================================================
+# DASHBOARD
+# =========================================================
+
+if page == "Dashboard":
+    st.title("📊 Dashboard")
+    st.caption("Overview of your research library and quick actions.")
+    st.divider()
+
+    # Load data
+    _listicles = list_listicle_prospects()
+    _opportunities = list_pr_opportunities()
+    _journalists = list_journalists()
+
+    # Key metrics
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Listicle Prospects", len(_listicles))
+    m2.metric("PR Opportunities", len(_opportunities))
+    m3.metric("Journalists", len(_journalists))
+    pending = sum(1 for r in _listicles if r.get("review_status", "") == "Awaiting review") + \
+              sum(1 for r in _opportunities if r.get("review_status", "") == "Awaiting review")
+    m4.metric("Pending Reviews", pending)
+
+    st.divider()
+
+    # Status breakdown
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("Listicle Prospects by Status")
+        if _listicles:
+            from collections import Counter
+            status_counts = Counter(r.get("review_status", "Unknown") for r in _listicles)
+            for status, count in status_counts.most_common():
+                st.write(f"- **{status}**: {count}")
+        else:
+            st.write("No prospects yet.")
+    with c2:
+        st.subheader("Placement Progress")
+        if _listicles:
+            from collections import Counter
+            progress_counts = Counter(r.get("placement_progress", "Unknown") for r in _listicles)
+            for progress, count in progress_counts.most_common():
+                st.write(f"- **{progress}**: {count}")
+        else:
+            st.write("No prospects yet.")
+
+    st.divider()
+
+    # Quick actions
+    st.subheader("Quick Actions")
+    qa1, qa2, qa3, qa4 = st.columns(4)
+    if qa1.button("🔍 Analyze Article", use_container_width=True):
+        st.session_state["_goto"] = "Asset Analysis"
+        st.rerun()
+    if qa2.button("📋 Search Listicles", use_container_width=True):
+        st.session_state["_goto"] = "Listicle Opportunities"
+        st.rerun()
+    if qa3.button("📰 PR Opportunities", use_container_width=True):
+        st.session_state["_goto"] = "PR Opportunities"
+        st.rerun()
+    if qa4.button("📚 Research Library", use_container_width=True):
+        st.session_state["_goto"] = "Research Library"
+        st.rerun()
+
+    st.divider()
+
+    # Recent listicle prospects
+    st.subheader("Recent Listicle Prospects")
+    if _listicles:
+        for r in _listicles[:5]:
+            with st.container():
+                st.markdown(f"**{r.get('title', 'Untitled')}** — {r.get('publication', '')}")
+                st.caption(f"Status: {r.get('review_status', '')} | Placement: {r.get('placement_progress', '')} | Updated: {r.get('updated_at', '')[:19]}")
+                st.divider()
+    else:
+        st.write("No listicle prospects yet. Start by searching for listicles.")
+
+    # Recent PR opportunities
+    st.subheader("Recent PR Opportunities")
+    if _opportunities:
+        for r in _opportunities[:5]:
+            st.markdown(f"**{r.get('title', 'Untitled')}** — {r.get('publication', '')}")
+            st.caption(f"Angle: {r.get('selected_angle', '')[:60]} | Status: {r.get('review_status', '')}")
+    else:
+        st.write("No PR opportunities yet. Analyze an article to find angles.")
+
+    st.divider()
+
+    # Storage health
+    st.subheader("Storage")
+    import glob as _glob
+    _backups = sorted(__import__('glob').glob(str(__import__('database')._backup_dir()) + "/*.sqlite3"), reverse=True)
+    if _backups:
+        st.write(f"Last backup: `{_backups[0].split(chr(92))[-1]}`")
+    else:
+        st.write("No backups yet.")
+    if st.button("Create backup now"):
+        try:
+            bp = create_database_backup()
+            st.success(f"Backup created: {bp}")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Backup failed: {e}")
+    st.caption(f"Database: {__import__('database').DB_PATH}")
 
 
 # =========================================================
