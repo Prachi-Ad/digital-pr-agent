@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { Loader2, Search, Users, FileText, List, Mail, Shield } from "lucide-react";
 
-const API = "/api/research";
+const API = "/api/analyze";
 
 type AnyObj = Record<string, any>;
 
