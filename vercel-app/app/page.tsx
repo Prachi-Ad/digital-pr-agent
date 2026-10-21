@@ -4,15 +4,28 @@ import { Loader2, Search, Users, FileText, List, Mail, Shield } from "lucide-rea
 
 type AnyObj = Record<string, any>;
 
-async function callApi(action: string, body: any = {}) {
-  const res = await fetch("/api/analyze", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, ...body }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.detail || data?.error || "Request failed");
-  return data;
+async function callApi(action: string, body: any = {}, onRetry?: (attempt: number) => void) {
+  const maxAttempts = 3;
+  let lastErr: any = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...body }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail || data?.error || "Request failed");
+      return data;
+    } catch (err: any) {
+      lastErr = err;
+      if (attempt < maxAttempts) {
+        if (onRetry) onRetry(attempt + 1);
+        await new Promise((r) => setTimeout(r, 1500 * attempt));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 function Spinner() {
@@ -32,6 +45,7 @@ export default function Home() {
   const tabs = ["Analyze", "Opportunities", "Journalists", "Listicles", "Contact", "Policy"] as const;
   type Tab = (typeof tabs)[number];
   const [tab, setTab] = useState<Tab>("Analyze");
+  const [retryMsg, setRetryMsg] = useState<string | null>(null);
 
   // Analyze state
   const [url, setUrl] = useState("");
@@ -77,14 +91,16 @@ export default function Home() {
     if (!url.trim()) return;
     setLoadingAnalyze(true);
     setErrAnalyze(null);
+    setRetryMsg(null);
     setAnalysis(null);
     try {
-      const data = await callApi("analyze", { article_url: url.trim() });
+      const data = await callApi("analyze", { article_url: url.trim() }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
       setAnalysis(data);
     } catch (err: any) {
       setErrAnalyze(err?.message || "Something went wrong");
     } finally {
       setLoadingAnalyze(false);
+      setRetryMsg(null);
     }
   }
 
@@ -92,14 +108,16 @@ export default function Home() {
     if (!selectedAngle) return;
     setLoadingOpp(true);
     setErrOpp(null);
+    setRetryMsg(null);
     setOpportunities(null);
     try {
-      const data = await callApi("opportunities", { angle: selectedAngle });
+      const data = await callApi("opportunities", { angle: selectedAngle }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
       setOpportunities(data);
     } catch (err: any) {
       setErrOpp(err?.message || "Something went wrong");
     } finally {
       setLoadingOpp(false);
+      setRetryMsg(null);
     }
   }
 
@@ -107,14 +125,16 @@ export default function Home() {
     if (!selectedAngle || !selectedOpp) return;
     setLoadingJourn(true);
     setErrJourn(null);
+    setRetryMsg(null);
     setJournalists(null);
     try {
-      const data = await callApi("journalists", { angle: selectedAngle, opportunity: selectedOpp });
+      const data = await callApi("journalists", { angle: selectedAngle, opportunity: selectedOpp }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
       setJournalists(data);
     } catch (err: any) {
       setErrJourn(err?.message || "Something went wrong");
     } finally {
       setLoadingJourn(false);
+      setRetryMsg(null);
     }
   }
 
@@ -123,6 +143,7 @@ export default function Home() {
     if (!listForm.search_theme.trim()) return;
     setLoadingList(true);
     setErrList(null);
+    setRetryMsg(null);
     setListicles(null);
     try {
       const data = await callApi("listicles", {
@@ -132,12 +153,13 @@ export default function Home() {
         target_market: listForm.target_market,
         competitors: listForm.competitors.split(",").map((s) => s.trim()).filter(Boolean),
         max_results: Number(listForm.max_results) || 15,
-      });
+      }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
       setListicles(data);
     } catch (err: any) {
       setErrList(err?.message || "Something went wrong");
     } finally {
       setLoadingList(false);
+      setRetryMsg(null);
     }
   }
 
@@ -146,14 +168,16 @@ export default function Home() {
     setTab("Contact");
     setLoadingContact(true);
     setErrContact(null);
+    setRetryMsg(null);
     setContact(null);
     try {
-      const data = await callApi("listicle-contact", { item });
+      const data = await callApi("listicle-contact", { item }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
       setContact(data);
     } catch (err: any) {
       setErrContact(err?.message || "Something went wrong");
     } finally {
       setLoadingContact(false);
+      setRetryMsg(null);
     }
   }
 
@@ -162,14 +186,16 @@ export default function Home() {
     setTab("Policy");
     setLoadingPolicy(true);
     setErrPolicy(null);
+    setRetryMsg(null);
     setPolicy(null);
     try {
-      const data = await callApi("publisher-policy", { item });
+      const data = await callApi("publisher-policy", { item }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
       setPolicy(data);
     } catch (err: any) {
       setErrPolicy(err?.message || "Something went wrong");
     } finally {
       setLoadingPolicy(false);
+      setRetryMsg(null);
     }
   }
 
@@ -189,6 +215,10 @@ export default function Home() {
           </button>
         ))}
       </nav>
+
+      {retryMsg && (
+        <div className="mt-4 rounded bg-blue-50 p-3 text-blue-700 text-sm">{retryMsg}</div>
+      )}
 
       {tab === "Analyze" && (
         <>

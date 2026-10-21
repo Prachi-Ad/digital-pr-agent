@@ -30,7 +30,7 @@ MODEL_SETTINGS = ModelSettings(
     verbosity="low",
 )
 
-MAX_TURNS = int(os.environ.get("MAX_TURNS", "4"))
+MAX_TURNS = int(os.environ.get("MAX_TURNS", "3"))
 
 # Fail fast (120s) on stalled OpenAI calls instead of hanging until Vercel kills
 # the function; retry connection errors at the SDK level.
