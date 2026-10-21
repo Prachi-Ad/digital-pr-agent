@@ -2,7 +2,7 @@ import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
 
-from agents import Agent, Runner, WebSearchTool
+from agents import Agent, Runner, WebSearchTool, ModelSettings
 from pydantic import BaseModel, Field
 
 
@@ -16,9 +16,16 @@ from pydantic import BaseModel, Field
 DEFAULT_MODEL = "gpt-5.4-nano"
 MODEL = (os.environ.get("OPENAI_MODEL") or os.environ.get("VISTA_OPENAI_MODEL") or DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
-SEARCH_CONTEXT_SIZE = (os.environ.get("SEARCH_CONTEXT_SIZE") or os.environ.get("VISTA_SEARCH_CONTEXT") or "high").strip().lower()
+SEARCH_CONTEXT_SIZE = (os.environ.get("SEARCH_CONTEXT_SIZE") or os.environ.get("VISTA_SEARCH_CONTEXT") or "medium").strip().lower()
 if SEARCH_CONTEXT_SIZE not in {"low", "medium", "high"}:
-    SEARCH_CONTEXT_SIZE = "high"
+    SEARCH_CONTEXT_SIZE = "medium"
+
+
+# Keep responses fast and cheap.
+MODEL_SETTINGS = ModelSettings(
+    reasoning={"effort": "low"} if MODEL.startswith("gpt-5") else None,
+    verbosity="low",
+)
 
 # Brand configuration (override to reuse this tool for any product/company)
 BRAND_NAME = (os.environ.get("BRAND_NAME") or os.environ.get("VISTA_BRAND_NAME") or "Your Brand").strip() or "Your Brand"
@@ -338,6 +345,7 @@ Return the requested structured fields.
 """,
     tools=[web_search],
     model=MODEL,
+    model_settings=MODEL_SETTINGS,
     output_type=AssetAnalysis,
 )
 
@@ -356,13 +364,13 @@ supplied PR angle.
 
 Research process:
 1. Understand the angle and {BRAND_NAME}'s contribution.
-2. Search the web using several relevant topic variations.
+2. Search the web using 2-3 relevant topic variations.
 3. Find specific existing articles, not just website homepages.
 4. Evaluate topical and editorial relevance.
 5. Check whether {BRAND_NAME} can make a credible contribution.
 6. Check competitor mentions when the evidence is available.
 7. Exclude generic SEO opportunities that lack a real editorial reason.
-8. Return the strongest candidates, up to 10.
+8. Return the strongest candidates, up to 5.
 
 Rules:
 - Search the live web.
@@ -382,6 +390,7 @@ Return only the requested structured fields.
 """,
     tools=[web_search],
     model=MODEL,
+    model_settings=MODEL_SETTINGS,
     output_type=PRResearchResults,
 )
 
@@ -429,6 +438,7 @@ Return only the requested structured fields.
 """,
     tools=[web_search],
     model=MODEL,
+    model_settings=MODEL_SETTINGS,
     output_type=JournalistResearchResults,
 )
 
@@ -473,7 +483,7 @@ Important rules:
 - Do not assume a competitor's inclusion guarantees {BRAND_NAME} qualifies.
 - Do not send emails or submit forms.
 - Do not invent email addresses.
-- Prefer a larger set of qualified candidates over a tiny set, while preserving relevance and deduplication.
+- Prefer a focused set of qualified candidates over a tiny set, while preserving relevance and deduplication.
 - Return no more than the requested maximum number of candidates.
 - If results are weak, return fewer candidates and explain the limitation.
 
@@ -490,6 +500,7 @@ Return only the requested structured fields.
 """,
     tools=[web_search],
     model=MODEL,
+    model_settings=MODEL_SETTINGS,
     output_type=ListicleResearchResults,
 )
 
@@ -526,6 +537,7 @@ Return only the requested structured fields.
 """,
     tools=[web_search],
     model=MODEL,
+    model_settings=MODEL_SETTINGS,
     output_type=ListicleContactResearchResults,
 )
 
@@ -577,6 +589,7 @@ Return only the requested structured fields.
 """,
     tools=[web_search],
     model=MODEL,
+    model_settings=MODEL_SETTINGS,
     output_type=PublisherPolicyAssessment,
 )
 
@@ -648,7 +661,7 @@ SUPPORTING EVIDENCE:
 
 Find real existing editorial articles that match this angle. Evaluate their
 topical relevance, editorial fit, evidence, competitor presence, and next action.
-Return up to 10 strong candidates.
+Return up to 5 strong candidates.
 """
     return _run_agent_in_worker(opportunity_agent, prompt)
 
@@ -703,7 +716,7 @@ def research_listicles(
     if not search_theme or not search_theme.strip():
         raise ValueError("A listicle search theme is required.")
 
-    max_results = max(5, min(int(max_results), 20))
+    max_results = max(3, min(int(max_results), 10))
     competitors = competitors or []
 
     prompt = f"""
@@ -727,10 +740,8 @@ COMPETITORS TO CHECK WHEN RELEVANT:
 RESULT LIMIT:
 Return up to {max_results} distinct candidate pages.
 
-{BRAND_NAME} is {PRODUCT_DESCRIPTION}. Its potential inclusion fit may involve
-social media management, scheduling and publishing, engagement, analytics, social listening,
-team workflows, and tools for agencies or businesses. Do not claim a feature is a fit unless
-it is relevant to the listicle topic.
+{BRAND_NAME} is {PRODUCT_DESCRIPTION}. Only claim a feature is a fit if it is
+relevant to the listicle topic. Do not invent capabilities.
 
 Search broadly across the supplied related queries and useful variants. Look for existing
 best-of articles, product roundups, alternatives pages, comparisons, and directories. Focus

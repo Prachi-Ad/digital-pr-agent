@@ -57,7 +57,7 @@ export default function Home() {
     target_audience: "All relevant audiences",
     target_market: "Global English-language",
     competitors: "Hootsuite, Sprout Social, Buffer, Later, SocialBee",
-    max_results: 15,
+    max_results: 8,
   });
   const [loadingList, setLoadingList] = useState(false);
   const [listicles, setListicles] = useState<AnyObj | null>(null);
