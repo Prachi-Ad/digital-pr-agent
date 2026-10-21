@@ -1,8 +1,10 @@
 import asyncio
+import json
 import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from openai import AsyncOpenAI
 from agents import Agent, Runner, WebSearchTool, ModelSettings, set_default_openai_client
@@ -12,11 +14,12 @@ from pydantic import BaseModel, Field
 # =========================================================
 # MODEL CONFIGURATION
 # =========================================================
-# Cost-optimized default. Override with an environment variable if needed:
-#   VISTA_OPENAI_MODEL=gpt-5-nano       (lowest per-token price)
-#   VISTA_OPENAI_MODEL=gpt-4.1-nano
-#   VISTA_SEARCH_CONTEXT=medium|low     (fewer search content tokens)
-DEFAULT_MODEL = "gpt-5.4-nano"
+# Cheapest reliable default. Override with an environment variable if needed:
+#   OPENAI_MODEL=gpt-5-nano-flex    (lowest per-token price, slower queue)
+#   OPENAI_MODEL=gpt-5-nano         (default)
+#   OPENAI_MODEL=gpt-5.4-nano
+#   SEARCH_CONTEXT_SIZE=low|medium|high
+DEFAULT_MODEL = "gpt-5-nano"
 MODEL = (os.environ.get("OPENAI_MODEL") or os.environ.get("VISTA_OPENAI_MODEL") or DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
 SEARCH_CONTEXT_SIZE = (os.environ.get("SEARCH_CONTEXT_SIZE") or os.environ.get("VISTA_SEARCH_CONTEXT") or "low").strip().lower()
@@ -36,9 +39,40 @@ MAX_TURNS = int(os.environ.get("MAX_TURNS", "3"))
 # the function; retry connection errors at the SDK level.
 set_default_openai_client(AsyncOpenAI(timeout=120.0, max_retries=2))
 
-# Brand configuration (override to reuse this tool for any product/company)
-BRAND_NAME = (os.environ.get("BRAND_NAME") or os.environ.get("VISTA_BRAND_NAME") or "Your Brand").strip() or "Your Brand"
-PRODUCT_DESCRIPTION = (os.environ.get("PRODUCT_DESCRIPTION") or os.environ.get("VISTA_PRODUCT_DESCRIPTION") or "a software product").strip() or "a software product"
+# Brand configuration (override to reuse this tool for any product/company).
+# Priority: environment variable > data/brand_config.json > neutral default.
+_PROJECT_ROOT = Path(__file__).resolve().parent
+
+
+def _read_brand_config() -> dict:
+    config_path = _PROJECT_ROOT / "data" / "brand_config.json"
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+_BRAND_CONFIG = _read_brand_config()
+
+BRAND_NAME = (
+    os.environ.get("BRAND_NAME")
+    or os.environ.get("VISTA_BRAND_NAME")
+    or _BRAND_CONFIG.get("brand_name")
+    or "Your Brand"
+).strip() or "Your Brand"
+PRODUCT_DESCRIPTION = (
+    os.environ.get("PRODUCT_DESCRIPTION")
+    or os.environ.get("VISTA_PRODUCT_DESCRIPTION")
+    or _BRAND_CONFIG.get("product_description")
+    or "a software product"
+).strip() or "a software product"
+BRAND_DOMAIN = (
+    os.environ.get("BRAND_DOMAIN")
+    or os.environ.get("VISTA_BRAND_DOMAIN")
+    or _BRAND_CONFIG.get("brand_domain")
+    or ""
+).strip()
 
 
 # =========================================================
@@ -95,7 +129,10 @@ class PROpportunity(BaseModel):
     topic: str = Field(description="The article's main topic.")
     opportunity_type: str = Field(description="The type of PR opportunity.")
     why_relevant: str = Field(description="Why this specific article matches the PR angle.")
-    brand_contribution: str = Field(description="What the brand could credibly contribute.")
+    brand_contribution: str = Field(
+        default="Not recorded in earlier research.",
+        description="What the brand could credibly contribute.",
+    )
     competitor_mention: str = Field(description="A verified competitor mention, or None identified.")
     topical_relevance: str = Field(description="High, Medium, or Low, with reasoning.")
     editorial_fit: str = Field(description="High, Medium, or Low, with reasoning.")
@@ -197,10 +234,12 @@ class ListicleOpportunity(BaseModel):
         description="Competitors explicitly visible in the article. Do not infer missing names."
     )
     brand_currently_listed: str = Field(
-        description="Use Yes, No, or Unclear, based on whether the article was actually checked for the brand."
+        default="Unclear",
+        description="Use Yes, No, or Unclear, based on whether the article was actually checked for the brand.",
     )
     brand_fit: str = Field(
-        description="Explain how the brand's known product category and capabilities match this listicle's inclusion criteria."
+        default="Not recorded in earlier research.",
+        description="Explain how the brand's known product category and capabilities match this listicle's inclusion criteria.",
     )
     inclusion_gap: str = Field(
         description="A verified reason to request consideration, or Unknown if the reason the brand is absent cannot be established. Do not guess why it was omitted."
@@ -311,6 +350,64 @@ class PublisherPolicyAssessment(BaseModel):
         description="The best next route: editorial consideration, official directory/vendor submission, affiliate/partner route, sponsored-content team, research further, or no outreach."
     )
     confidence: str = Field(description="High, Medium, or Low, based on the directness and recency of source evidence.")
+
+
+# =========================================================
+# OUTREACH DRAFT MODELS
+# =========================================================
+
+class OutreachDraft(BaseModel):
+    outreach_type: str = Field(
+        description="Either 'Digital PR pitch' or 'Listicle inclusion request'."
+    )
+    channel: str = Field(
+        description=(
+            "The verified route this draft is written for: email, official contact form, "
+            "author profile message, affiliate/partner route, or another named route. "
+            "Never invent a route."
+        )
+    )
+    recipient_name: str = Field(
+        description="The verified recipient name, or 'Editorial team' if only a team route is known."
+    )
+    recipient_role: str = Field(
+        description="The verified role, or Unknown if it could not be established."
+    )
+    publication: str = Field(description="The target publication or website.")
+    target_title: str = Field(
+        description="The exact target article, listicle, roundup, or directory page title."
+    )
+    target_url: str = Field(description="The exact target page URL supplied in the research.")
+    subject_line: str = Field(
+        description="A specific subject line under 70 characters. No clickbait, no fake urgency."
+    )
+    message_body: str = Field(
+        description=(
+            "The complete draft message. Concise, specific, and ready for human review. "
+            "Use [Your name] and [Your role] placeholders rather than inventing sender details."
+        )
+    )
+    personalization_evidence: str = Field(
+        description="The exact verified article, page, or policy evidence used to personalize the draft."
+    )
+    asset_used: str = Field(
+        description="The brand asset, data point, or contribution offered. Do not invent assets."
+    )
+    call_to_action: str = Field(
+        description="The single, low-pressure next step requested from the recipient."
+    )
+    facts_to_verify: list[str] = Field(
+        description="Facts, names, links, or claims a human must verify before sending."
+    )
+    compliance_notes: str = Field(
+        description=(
+            "Notes on publisher policy, paid/affiliate disclosure, or reasons the message "
+            "must not be sent as written."
+        )
+    )
+    confidence: str = Field(
+        description="High, Medium, or Low based on the quality of the underlying research."
+    )
 
 
 # =========================================================
@@ -604,6 +701,66 @@ Return only the requested structured fields.
 
 
 # =========================================================
+# OUTREACH DRAFT AGENT
+# =========================================================
+
+outreach_draft_agent = Agent(
+    name="Outreach Draft Writer",
+    instructions=f"""
+You prepare outreach drafts for a human to review and send manually on behalf of {BRAND_NAME}.
+
+You never send anything. You never claim that a message was sent, a relationship exists,
+or a publisher has agreed to anything. The human remains responsible for every send.
+
+Write only from the research supplied in the prompt. Do not invent:
+- statistics, customer names, coverage, awards, partnerships, or product capabilities
+- email addresses, recipient names, roles, or contact routes
+- publication policies, deadlines, or editorial commitments
+- familiarity with the recipient's personal life or previous conversations
+
+DIGITAL PR PITCH RULES:
+- 120-180 words in the message body.
+- Open with the specific article or topic and why it is relevant now.
+- Offer one credible asset: original data, expert commentary, a customer story, or a
+  concrete perspective. Explain why it helps the journalist's audience.
+- Reference the journalist's actual published work when supplied.
+- Do not ask for a link, mention Domain Rating, or offer payment.
+- End with one low-pressure next step.
+
+LISTICLE INCLUSION REQUEST RULES:
+- 100-160 words in the message body.
+- Name the exact page and the category where {BRAND_NAME} fits.
+- Use only verified product facts from the supplied description.
+- If the publisher's documented route is paid, sponsored, affiliate, or a directory
+  listing, ask about that route instead of requesting a free editorial inclusion.
+- Never imply that a competitor's inclusion guarantees acceptance.
+- Never demand a dofollow link or a specific placement.
+- End with one clear request: editorial consideration, the correct submission step,
+  or confirmation of the paid/affiliate process.
+
+STYLE:
+- Plain, professional, specific, and human.
+- No hype, flattery, fake urgency, or generic flattery.
+- Short paragraphs. No bullet-point walls.
+- Subject line under 70 characters and specific to the target.
+- Use [Your name] and [Your role] placeholders for sender details.
+- If a necessary fact is missing, leave a clear [verify: ...] placeholder and add it
+  to facts_to_verify.
+
+COMPLIANCE:
+- Record any publisher policy that affects the message in compliance_notes.
+- If the research says Do not pursue or Already listed, do not write a pitch; explain
+  the blocking issue in compliance_notes and keep the draft minimal.
+
+Return only the requested structured fields.
+""",
+    model=MODEL,
+    model_settings=MODEL_SETTINGS,
+    output_type=OutreachDraft,
+)
+
+
+# =========================================================
 # RUNNER HELPER: USE A SEPARATE THREAD AND EVENT LOOP
 # =========================================================
 
@@ -725,7 +882,7 @@ def research_listicles(
     if not search_theme or not search_theme.strip():
         raise ValueError("A listicle search theme is required.")
 
-    max_results = max(3, min(int(max_results), 10))
+    max_results = max(3, min(int(max_results), 20))
     competitors = competitors or []
 
     prompt = f"""
@@ -825,4 +982,131 @@ Return the specific policy source URL and factual evidence. Never contact the pu
 """
 
     return _run_agent_in_worker(publisher_policy_agent, prompt)
+
+
+# =========================================================
+# OUTREACH DRAFT FUNCTIONS
+# =========================================================
+
+def draft_journalist_pitch(
+    opportunity: PROpportunity,
+    person: JournalistProfile,
+    angle_context: str = "",
+    sender_name: str = "",
+    sender_role: str = "",
+) -> OutreachDraft:
+    """Draft a personalized Digital PR pitch for human review. Never sends."""
+
+    sender_line = (
+        f"SENDER NAME: {sender_name or '[Your name]'}\n"
+        f"SENDER ROLE: {sender_role or '[Your role]'}\n"
+    )
+
+    prompt = f"""
+Write a Digital PR pitch draft for human review. Do not send anything.
+
+{sender_line}
+BRAND: {BRAND_NAME}
+PRODUCT: {PRODUCT_DESCRIPTION}
+
+PR ANGLE:
+{angle_context or opportunity.why_relevant}
+
+TARGET JOURNALIST:
+Name: {person.name}
+Publication: {person.publication}
+Verified role: {person.current_role}
+Topic covered: {person.topic_covered}
+Relevant published article: {person.relevant_article_title}
+Article URL: {person.relevant_article_url}
+Article date: {person.article_date}
+Why relevant: {person.why_relevant}
+Suggested angle from research: {person.suggested_pitch_angle}
+Research evidence: {person.evidence}
+Known public profile or contact page: {person.author_profile_or_contact_page}
+
+TARGET OPPORTUNITY:
+Publication: {opportunity.publication}
+Article: {opportunity.article_title}
+URL: {opportunity.article_url}
+Published: {opportunity.published_date}
+Topic: {opportunity.topic}
+Why this article matters: {opportunity.why_relevant}
+Credible brand contribution: {opportunity.brand_contribution}
+Research evidence: {opportunity.evidence}
+
+Write a concise pitch that references the journalist's specific work and offers the
+brand's contribution. Use only the verified facts above. Put any missing sender detail
+in [verify: ...] placeholders and list it in facts_to_verify. If the journalist profile
+or contact route is Unknown, set channel to 'Official publication contact route' and
+note in compliance_notes that the route must be verified first.
+"""
+
+    return _run_agent_in_worker(outreach_draft_agent, prompt)
+
+
+def draft_listicle_inclusion_request(
+    item: ListicleOpportunity,
+    contact: ListicleContact,
+    policy: PublisherPolicyAssessment | None = None,
+    sender_name: str = "",
+    sender_role: str = "",
+) -> OutreachDraft:
+    """Draft a listicle inclusion request for human review. Never sends or submits."""
+
+    disposition = policy.recommended_disposition if policy else "Needs verification"
+    policy_text = policy.policy_summary if policy else "No policy assessment was supplied."
+    policy_route = policy.recommended_route if policy else "Research further"
+    policy_evidence = policy.policy_evidence if policy else "No policy evidence was supplied."
+
+    prompt = f"""
+Write a listicle inclusion request for human review. Do not send or submit anything.
+
+SENDER NAME: {sender_name or '[Your name]'}
+SENDER ROLE: {sender_role or '[Your role]'}
+
+BRAND: {BRAND_NAME}
+PRODUCT: {PRODUCT_DESCRIPTION}
+
+TARGET PAGE:
+Publication: {item.publication}
+Title: {item.listicle_title}
+URL: {item.listicle_url}
+Published or updated: {item.published_or_updated}
+Category: {item.listicle_category}
+Target audience: {item.target_audience}
+Placement type: {item.placement_type}
+Competitors verified on the page: {', '.join(item.competitors_listed) if item.competitors_listed else 'None verified'}
+Brand currently listed: {item.brand_currently_listed}
+Why the brand may fit: {item.brand_fit}
+Inclusion gap: {item.inclusion_gap}
+Initial contact route: {item.contact_route}
+
+VERIFIED CONTACT:
+Name: {contact.contact_name}
+Role: {contact.current_role}
+Professional email: {contact.professional_email}
+Best contact method: {contact.contact_method}
+Contact page: {contact.contact_page_url}
+Why this contact: {contact.why_this_contact}
+Evidence: {contact.evidence}
+
+PUBLISHER POLICY:
+Recommended disposition: {disposition}
+Recommended route: {policy_route}
+Policy summary: {policy_text}
+Policy evidence: {policy_evidence}
+
+Rules:
+- If the recommended disposition is Do not pursue or Already listed, do not write a pitch.
+  Put the blocking reason in compliance_notes and keep the body to a brief internal note.
+- If the documented route is paid, sponsored, affiliate, or a directory listing, ask about
+  that documented process. Do not request a free editorial inclusion.
+- Do not claim the brand is better than a listed competitor.
+- Use only verified product facts. Put missing details in [verify: ...] placeholders.
+- The channel must match the verified contact method. If no email is published, use the
+  official form or contact page, not an invented email.
+"""
+
+    return _run_agent_in_worker(outreach_draft_agent, prompt)
 

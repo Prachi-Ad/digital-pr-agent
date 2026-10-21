@@ -1,14 +1,15 @@
 [server]
 headless = true
 port = 8501
-enableCORS = false
+enableCORS = true
+corsAllowedOrigins = ["http://localhost:8501", "http://127.0.0.1:8501"]
 enableXsrfProtection = true
 
 [browser]
 gatherUsageStats = false
 
 [theme]
-primaryColor = "#2563eb"
+primaryColor = "#5b5bd6"
 backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f3f4f6"
-textColor = "#111827"
+secondaryBackgroundColor = "#f7f8fb"
+textColor = "#232135"

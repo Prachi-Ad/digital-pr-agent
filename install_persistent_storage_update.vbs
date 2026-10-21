@@ -124,10 +124,10 @@ result = shell.Run(command, 0, True)
 ' Smoke-test existing AI functions and the SQLite functions without making API calls.
 smokePath = fso.BuildPath(projectFolder, "_persistent_storage_smoke_check.py")
 content = "import agent, database" & vbCrLf & _
-          "required_agent = ['analyze_article', 'research_opportunities', 'research_journalists', 'research_listicles', 'research_listicle_contact', 'research_publisher_policy']" & vbCrLf & _
+          "required_agent = ['analyze_article', 'research_opportunities', 'research_journalists', 'research_listicles', 'research_listicle_contact', 'research_publisher_policy', 'draft_journalist_pitch', 'draft_listicle_inclusion_request']" & vbCrLf & _
           "missing = [name for name in required_agent if not callable(getattr(agent, name, None))]" & vbCrLf & _
           "assert not missing, 'Missing agent functions: ' + ', '.join(missing)" & vbCrLf & _
-          "required_db = ['init_db', 'load_app_snapshot', 'save_app_snapshot', 'upsert_listicle_prospect', 'upsert_pr_opportunity', 'upsert_journalist', 'create_database_backup']" & vbCrLf & _
+          "required_db = ['init_db', 'load_app_snapshot', 'save_app_snapshot', 'upsert_listicle_prospect', 'upsert_pr_opportunity', 'upsert_journalist', 'upsert_outreach_draft', 'update_outreach_draft', 'list_outreach_drafts', 'create_database_backup']" & vbCrLf & _
           "missing_db = [name for name in required_db if not callable(getattr(database, name, None))]" & vbCrLf & _
           "assert not missing_db, 'Missing database functions: ' + ', '.join(missing_db)" & vbCrLf & _
           "database.init_db()" & vbCrLf & _

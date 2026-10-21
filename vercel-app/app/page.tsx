@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Loader2, Search, Users, FileText, List, Mail, Shield } from "lucide-react";
+import { Loader2, Search, Users, FileText, List, Mail, Shield, LayoutDashboard, BarChart3 } from "lucide-react";
 
 type AnyObj = Record<string, any>;
 
@@ -32,19 +32,22 @@ function Spinner() {
   return <Loader2 className="animate-spin inline-block" size={18} />;
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
   return (
-    <section className="mt-6">
-      <h2 className="text-xl font-semibold mb-2">{title}</h2>
-      {children}
-    </section>
+    <div className="rounded border bg-white p-4 flex items-center gap-3">
+      <div className="text-blue-600">{icon}</div>
+      <div>
+        <div className="text-2xl font-bold">{value}</div>
+        <div className="text-sm text-gray-500">{label}</div>
+      </div>
+    </div>
   );
 }
 
 export default function Home() {
-  const tabs = ["Analyze", "Opportunities", "Journalists", "Listicles", "Contact", "Policy"] as const;
+  const tabs = ["Dashboard", "Analyze", "Opportunities", "Journalists", "Listicles", "Contact", "Policy"] as const;
   type Tab = (typeof tabs)[number];
-  const [tab, setTab] = useState<Tab>("Analyze");
+  const [tab, setTab] = useState<Tab>("Dashboard");
   const [retryMsg, setRetryMsg] = useState<string | null>(null);
 
   // Analyze state
@@ -86,13 +89,20 @@ export default function Home() {
   const [policy, setPolicy] = useState<AnyObj | null>(null);
   const [errPolicy, setErrPolicy] = useState<string | null>(null);
 
+  // Derived counts
+  const angleCount = analysis?.pr_angles?.length || 0;
+  const oppCount = opportunities?.opportunities?.length || 0;
+  const journCount = journalists?.journalists?.length || 0;
+  const listCount = listicles?.opportunities?.length || 0;
+  const contactCount = contact?.contacts?.length || 0;
+
   async function analyze(e: React.FormEvent) {
     e.preventDefault();
     if (!url.trim()) return;
     setLoadingAnalyze(true);
     setErrAnalyze(null);
-    setRetryMsg(null);
     setAnalysis(null);
+    setRetryMsg(null);
     try {
       const data = await callApi("analyze", { article_url: url.trim() }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
       setAnalysis(data);
@@ -108,8 +118,8 @@ export default function Home() {
     if (!selectedAngle) return;
     setLoadingOpp(true);
     setErrOpp(null);
-    setRetryMsg(null);
     setOpportunities(null);
+    setRetryMsg(null);
     try {
       const data = await callApi("opportunities", { angle: selectedAngle }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
       setOpportunities(data);
@@ -125,8 +135,8 @@ export default function Home() {
     if (!selectedAngle || !selectedOpp) return;
     setLoadingJourn(true);
     setErrJourn(null);
-    setRetryMsg(null);
     setJournalists(null);
+    setRetryMsg(null);
     try {
       const data = await callApi("journalists", { angle: selectedAngle, opportunity: selectedOpp }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
       setJournalists(data);
@@ -143,8 +153,8 @@ export default function Home() {
     if (!listForm.search_theme.trim()) return;
     setLoadingList(true);
     setErrList(null);
-    setRetryMsg(null);
     setListicles(null);
+    setRetryMsg(null);
     try {
       const data = await callApi("listicles", {
         search_theme: listForm.search_theme.trim(),
@@ -152,7 +162,7 @@ export default function Home() {
         target_audience: listForm.target_audience,
         target_market: listForm.target_market,
         competitors: listForm.competitors.split(",").map((s) => s.trim()).filter(Boolean),
-        max_results: Number(listForm.max_results) || 15,
+        max_results: Number(listForm.max_results) || 8,
       }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
       setListicles(data);
     } catch (err: any) {
@@ -168,8 +178,8 @@ export default function Home() {
     setTab("Contact");
     setLoadingContact(true);
     setErrContact(null);
-    setRetryMsg(null);
     setContact(null);
+    setRetryMsg(null);
     try {
       const data = await callApi("listicle-contact", { item }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
       setContact(data);
@@ -186,8 +196,8 @@ export default function Home() {
     setTab("Policy");
     setLoadingPolicy(true);
     setErrPolicy(null);
-    setRetryMsg(null);
     setPolicy(null);
+    setRetryMsg(null);
     try {
       const data = await callApi("publisher-policy", { item }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
       setPolicy(data);
@@ -218,6 +228,56 @@ export default function Home() {
 
       {retryMsg && (
         <div className="mt-4 rounded bg-blue-50 p-3 text-blue-700 text-sm">{retryMsg}</div>
+      )}
+
+      {tab === "Dashboard" && (
+        <>
+          <div className="mt-6 grid grid-cols-2 md:grid-cols-3 gap-4">
+            <Card label="PR Angles Found" value={angleCount} icon={<BarChart3 size={24} />} />
+            <Card label="PR Opportunities" value={oppCount} icon={<FileText size={24} />} />
+            <Card label="Journalists Found" value={journCount} icon={<Users size={24} />} />
+            <Card label="Listicle Candidates" value={listCount} icon={<List size={24} />} />
+            <Card label="Contacts Found" value={contactCount} icon={<Mail size={24} />} />
+            <Card label="Policies Checked" value={policy ? 1 : 0} icon={<Shield size={24} />} />
+          </div>
+
+          <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+            <button onClick={() => setTab("Analyze")} className="rounded bg-gray-800 px-3 py-2 text-sm text-white">Analyze Article</button>
+            <button onClick={() => setTab("Listicles")} className="rounded bg-gray-800 px-3 py-2 text-sm text-white">Search Listicles</button>
+            <button onClick={() => setTab("Opportunities")} className="rounded bg-gray-800 px-3 py-2 text-sm text-white">PR Opportunities</button>
+            <button onClick={() => setTab("Journalists")} className="rounded bg-gray-800 px-3 py-2 text-sm text-white">Journalists</button>
+          </div>
+
+          {analysis && (
+            <div className="mt-6 rounded border bg-white p-4">
+              <h3 className="font-semibold">Last Analyzed Article</h3>
+              <p className="text-sm text-gray-600">{analysis.article_title}</p>
+              <p className="text-sm">{analysis.assessment}</p>
+            </div>
+          )}
+
+          {opportunities && (
+            <div className="mt-4 rounded border bg-white p-4">
+              <h3 className="font-semibold">Last Opportunities Research</h3>
+              <p className="text-sm text-gray-600">{opportunities.research_summary}</p>
+              <p className="text-sm">{opportunities.opportunities?.length || 0} opportunities found</p>
+            </div>
+          )}
+
+          {listicles && (
+            <div className="mt-4 rounded border bg-white p-4">
+              <h3 className="font-semibold">Last Listicle Search</h3>
+              <p className="text-sm text-gray-600">{listicles.research_summary}</p>
+              <p className="text-sm">{listicles.opportunities?.length || 0} candidates found</p>
+            </div>
+          )}
+
+          {!analysis && !opportunities && !listicles && (
+            <div className="mt-6 rounded border bg-gray-50 p-6 text-center text-gray-500">
+              No research yet. Start by analyzing an article or searching listicles.
+            </div>
+          )}
+        </>
       )}
 
       {tab === "Analyze" && (
@@ -266,7 +326,7 @@ export default function Home() {
               </div>
               <div>
                 <h3 className="text-xl font-semibold">Statistics ({analysis.statistics?.length || 0})</h3>
-                <ul className="mt-2 space-y-1">
+                <ul className="mt-2 space-y-2">
                   {analysis.statistics?.map((s: AnyObj, i: number) => (
                     <li key={i} className="text-sm">
                       <span className="font-medium">{s.statistic}</span> — {s.source} ({s.data_provenance})
@@ -294,7 +354,7 @@ export default function Home() {
               >
                 {loadingOpp ? <Spinner /> : <Search size={18} />} Run research
               </button>
-              {errOpp && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errOpp} <span className="block mt-1 text-sm">Tip: research can be flaky on Vercel; click "Run research" to retry, or use the local Streamlit app for heavy runs.</span></div>}
+              {errOpp && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errOpp} <span className="block mt-1 text-sm">Tip: research can be flaky on Vercel; click "Run research" to retry.</span></div>}
               {opportunities && (
                 <div className="mt-6 space-y-3">
                   <p className="text-sm text-gray-600">{opportunities.research_summary}</p>
@@ -417,8 +477,8 @@ export default function Home() {
               <label className="block text-sm font-medium">Max results</label>
               <input
                 type="number"
-                min={5}
-                max={20}
+                min={3}
+                max={10}
                 value={listForm.max_results}
                 onChange={(e) => setListForm({ ...listForm, max_results: Number(e.target.value) })}
                 className="mt-1 w-32 rounded border px-3 py-2"
@@ -469,7 +529,7 @@ export default function Home() {
                 <span className="font-medium">{selectedItem.listicle_title}</span> — {selectedItem.publication}
               </div>
               {loadingContact && <div className="mt-4"><Spinner /> Researching contact...</div>}
-              {errContact && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errContact}</div>}
+              {errContact && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errContact} <span className="block mt-1 text-sm">Tip: research can be flaky on Vercel; click to retry.</span></div>}
               {contact && (
                 <div className="mt-6 space-y-3">
                   <p className="text-sm text-gray-600">{contact.research_summary}</p>
@@ -507,7 +567,7 @@ export default function Home() {
                 <span className="font-medium">{selectedItem.listicle_title}</span> — {selectedItem.publication}
               </div>
               {loadingPolicy && <div className="mt-4"><Spinner /> Checking policy...</div>}
-              {errPolicy && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errPolicy}</div>}
+              {errPolicy && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errPolicy} <span className="block mt-1 text-sm">Tip: research can be flaky on Vercel; click to retry.</span></div>}
               {policy && (
                 <div className="mt-6 space-y-3 rounded border bg-white p-4">
                   <div><span className="font-medium">Status:</span> {policy.policy_status}</div>

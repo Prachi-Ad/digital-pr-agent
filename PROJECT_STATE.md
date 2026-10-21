@@ -5,69 +5,95 @@ Last updated: Wed Oct 21 2026
 ## Objective
 
 A local Streamlit research assistant for Digital PR and listicle prospecting.
-The app turns published articles into PR angles and editorial opportunities,
-finds listicle / roundup / alternatives / directory pages, researches publisher
-contacts and inclusion policies, and stores everything in a local SQLite
-database. It never emails publishers, submits forms, or sends outreach
-automatically. The target brand is configurable via `BRAND_NAME` /
-`PRODUCT_DESCRIPTION` (defaults are neutral so the project can be shared).
+It turns published articles into PR angles, finds editorial and listicle
+opportunities, researches publisher contacts and policies, prepares outreach
+drafts for human review, and stores everything locally. It never sends email,
+submits forms, or contacts publishers.
+
+## Current UI
+
+Three pages only:
+
+1. **Workspace** - one guided workflow with two paths:
+   - Digital PR: Article -> PR angles -> Opportunities -> Journalists -> Outreach.
+   - Listicles: Search -> Prospects (contacts/policy) -> Outreach.
+2. **Research Library** - listicles, PR opportunities, journalists, outreach
+   drafts, CSV exports, backups.
+3. **Settings** - brand, sender details, model/cost, storage, safety.
+
+The old separate pages (Dashboard, PR Home, Asset Analysis, PR Action Plans,
+Outreach, etc.) were merged into the guided Workspace. Saved work is restored
+after a restart, and the start screen offers both "Continue saved..." and
+"Start new..." buttons for each workflow.
 
 ## Completed work
 
-### Storage hardening (validated)
-- Full storage validation passed with a temporary DB and a copy of the real DB.
-- Fixed `updated_at` churn; contact/policy/journalist research save immediately.
-- Fixed journalist co-author collision with person-specific keys + migration.
-- Repaired installer (same-folder self-copy guard); tested both branches.
-- Backup integrity verification and CSV formula-injection protection.
-- `storage_self_check.py` (43 checks) and `run_storage_check.vbs`; all pass.
-- `.gitignore`, `.gitattributes`, `requirements.txt`.
+### Storage (validated)
+- Full storage check passes: listicles, contacts, policy, review decisions,
+  placement progress, PR opportunities, journalists, co-authors, outreach
+  drafts, restart/restore, exports, backups, and edge cases.
+- New `outreach_drafts` table with human edits and status tracking.
+- `storage_self_check.py` now covers outreach drafts and currently passes all checks.
+- Streamlit AppTest smoke run completes with no exceptions on Workspace, Settings,
+  and Research Library.
+- Backup integrity verification and CSV formula-injection protection remain.
+- Older saved payloads missing newly added fields are accepted with safe defaults.
 
-### Model / cost
-- All six agents use `model=MODEL`, default `gpt-5.4-nano`.
-- `OPENAI_MODEL` / `SEARCH_CONTEXT_SIZE` overrides (legacy `VISTA_*` accepted).
-- Live-tested `analyze_article`: ~30s, 5 angles, 20 statistics.
+### Outreach preparation
+- New `OutreachDraft` structured model and draft agent (no web search).
+- Digital PR pitch and listicle inclusion request generation.
+- Human-editable subject/body, status, verification checklist, and text download.
+- Draft status: Draft, Approved for manual send, Sent manually, Replied,
+  Placement confirmed, Declined, Do not send.
+- No sending or form submission, ever.
 
-### Vercel deployment (analyze workflow)
-- Created `vercel-app/`: Next.js frontend + FastAPI Python serverless function (`api/analyze.py`).
-- Deployed to production: https://vercel-app-gules-three.vercel.app
-- `/api/analyze` returns structured article analysis (verified end-to-end).
-- Env var `OPENAI_API_KEY` set in Vercel (production/preview/development).
-- Remaining workflows (PR opportunities, journalists, listicles, storage) not yet ported.
-- Brand is configurable via env vars; defaults are neutral.
-- DB filename migrated from `vista_pr_agent.sqlite3` to `pr_agent.sqlite3`
-  (one-time rename on startup, data preserved).
-- Launchers renamed to `launch_pr_agent_hidden.vbs`, `run_pr_agent.bat`,
-  `stop_pr_agent.bat`.
+### Cost
+- Default model changed to `gpt-5-nano` (cheapest standard nano).
+- Search context defaults to `low`; max turns 3.
+- On-demand contact/policy/journalist research only.
+- Draft generation uses no web search and one short model call.
+- Optional `gpt-5-nano-flex` for lower per-token cost.
 
-### Hosting
-- Prepared for Render (render.yaml blueprint) and Railway (Procfile) with persistent disk.
-- Database/backup paths are env-overridable (`VISTA_DATA_DIR`, `VISTA_BACKUP_DIR`).
-- All 43 storage checks pass.
-- Contains code/docs only; no DB, backups, venv, or secrets.
+### UX / decluttering
+- One Workspace with a short stepper instead of nine separate pages.
+- "Switch workflow" reliably returns to the mode chooser; workflow inference
+  runs only on first load, so it no longer undoes a manual switch.
+- Active workflow pages use one compact header. The workflow name replaces the
+  generic page title, and large step headings were folded into short captions.
+- Global library totals appear on the mode chooser and Research Library only.
+  Active review pages use a compact four-number queue strip; filter labels stay
+  short (Needs review / Approved / All).
+- Auto-save review selects; removed repetitive Save buttons.
+- Needs review / Approved / All filters on the prospect and PR opportunity lists.
+- Review cards keep title, metadata, and the open-page action in one header.
+  Full details, evidence, and optional contact/policy research sit behind one
+  expander, so the list stays scannable.
+- Streamlit theme primary is indigo `#5b5bd6`; the old red theme is gone, and
+  primary buttons use the indigo gradient.
+- Brand config in `data/brand_config.json`, editable in Settings, including an
+  optional website / `BRAND_DOMAIN`.
+- Sender name/role stored in the workspace and used in drafts.
+- Sidebar uses three small monochrome CSS-mask icons; no emoji or icon-heavy rows.
+- Tighter 12px vertical rhythm and compact metric tiles.
+- CORS configuration corrected for local Streamlit.
 
-## Remaining work
+### Hosting and repo
+- Render blueprint, Railway Procfile, and Vercel analyze demo remain optional.
+- `.gitignore` excludes `.venv/`, `data/`, `backups/`, and secrets.
+- Local brand file and database stay out of git.
 
-1. Verify renamed repo remote contents and URL.
-2. Run `storage_self_check.py` once more after edits.
-3. Optionally test `research_listicles` end-to-end with the nano model.
-4. Optionally rename the local project folder from `vista-pr-agent` to
-   `pr-agent` (not required; installer now uses its own folder).
+## Known caveats
 
-## Known bugs / caveats
-
-- None blocking. All 43 storage checks pass.
-- Web search calls dominate cost (~$10 per 1,000 calls).
-
-## Important decisions
-
-- Default model: `gpt-5.4-nano`.
-- GitHub repo private by default; local DB/backups excluded.
-- No automatic outreach, ever.
-- Brand configurable; neutral defaults for shareability.
+- Web search dominates cost (~$10 per 1,000 calls). Research runs only on click.
+- The Vercel demo covers article analysis only; the local app is the full tool.
+- A saved PR opportunity queue can be reviewed after a restart without the
+  original full asset analysis. Re-analyzing the article restores journalist
+  research for new candidates.
+- The app never sends outreach. Every send is manual.
 
 ## Recommended next steps
 
-1. Run `storage_self_check.py` again and report results.
-2. Rename GitHub repo to `digital-pr-agent` and update remote.
-3. Verify remote file list excludes `.venv/`, `data/`, `backups/`.
+1. Run one real Digital PR workflow end-to-end with the nano model and review output quality.
+2. Run one real listicle workflow end-to-end, including contact and policy research.
+3. Test one generated pitch and one inclusion request, then edit and track status.
+4. Decide whether to retire or keep the optional Vercel analyze-only demo.

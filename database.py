@@ -9,16 +9,19 @@ import csv
 import hashlib
 import io
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-import os
-from pathlib import Path
 ROOT = Path(__file__).resolve().parent
-DATA_DIR = Path(os.environ.get("VISTA_DATA_DIR", ROOT / "data"))
+DATA_DIR = Path(
+    os.environ.get("PR_AGENT_DATA_DIR")
+    or os.environ.get("VISTA_DATA_DIR")
+    or ROOT / "data"
+)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Migrate legacy DB filename (if present) to the generic name once.
@@ -36,7 +39,7 @@ if _LEGACY_DB.exists() and not DB_PATH.exists():
         DB_PATH = _LEGACY_DB
 
 def _backup_dir() -> Path:
-    env = os.environ.get("VISTA_BACKUP_DIR")
+    env = os.environ.get("PR_AGENT_BACKUP_DIR") or os.environ.get("VISTA_BACKUP_DIR")
     if env:
         return Path(env)
     return ROOT / "backups"
@@ -138,6 +141,21 @@ def init_db() -> None:
                 relevant_article_url TEXT,
                 related_opportunity_url TEXT,
                 qualification_status TEXT NOT NULL DEFAULT 'Needs review',
+                payload_json TEXT NOT NULL,
+                first_seen TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS outreach_drafts (
+                draft_key TEXT PRIMARY KEY,
+                draft_type TEXT NOT NULL,
+                recipient_name TEXT NOT NULL DEFAULT '',
+                publication TEXT NOT NULL DEFAULT '',
+                target_url TEXT NOT NULL DEFAULT '',
+                related_url TEXT NOT NULL DEFAULT '',
+                subject TEXT NOT NULL DEFAULT '',
+                body TEXT NOT NULL DEFAULT '',
+                draft_status TEXT NOT NULL DEFAULT 'Draft',
                 payload_json TEXT NOT NULL,
                 first_seen TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -496,6 +514,148 @@ def list_journalists() -> list[dict[str, Any]]:
     with _connect() as conn:
         rows = conn.execute("SELECT * FROM journalist_records ORDER BY updated_at DESC, rowid DESC").fetchall()
     return [_row_to_record(row) for row in rows if row is not None]
+
+
+def _draft_key(draft_type: str, target_url: str, recipient_name: str) -> str:
+    basis = "|".join(
+        (
+            (draft_type or "outreach").strip().lower(),
+            canonical_url(target_url),
+            (recipient_name or "").strip().lower(),
+        )
+    )
+    return "draft:" + hashlib.sha256(basis.encode("utf-8")).hexdigest()
+
+
+def _row_to_draft(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    result = dict(row)
+    result["payload"] = _load(result.pop("payload_json"), {})
+    return result
+
+
+def get_outreach_draft(
+    draft_type: str, target_url: str, recipient_name: str
+) -> dict[str, Any] | None:
+    init_db()
+    key = _draft_key(draft_type, target_url, recipient_name)
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM outreach_drafts WHERE draft_key=?", (key,)
+        ).fetchone()
+    return _row_to_draft(row)
+
+
+def upsert_outreach_draft(
+    draft: Any,
+    draft_type: str,
+    target_url: str = "",
+    related_url: str = "",
+    draft_status: str | None = None,
+) -> str:
+    """Save a generated draft. Human edits are preserved unless regenerated."""
+    init_db()
+    recipient = getattr(draft, "recipient_name", "") or ""
+    publication = getattr(draft, "publication", "") or ""
+    resolved_target = target_url or getattr(draft, "target_url", "") or ""
+    key = _draft_key(draft_type, resolved_target, recipient)
+    stamp = _now()
+    payload_json = _dump(draft) or "{}"
+    subject = getattr(draft, "subject_line", "") or ""
+    body = getattr(draft, "message_body", "") or ""
+    status = draft_status
+
+    with _connect() as conn:
+        existing = conn.execute(
+            "SELECT * FROM outreach_drafts WHERE draft_key=?", (key,)
+        ).fetchone()
+
+        if existing is not None:
+            unchanged = (
+                publication == existing["publication"]
+                and resolved_target == existing["target_url"]
+                and (related_url == "" or related_url == existing["related_url"])
+                and subject == existing["subject"]
+                and body == existing["body"]
+                and (status is None or status == existing["draft_status"])
+                and payload_json == existing["payload_json"]
+            )
+            if unchanged:
+                return key
+
+        conn.execute(
+            """INSERT INTO outreach_drafts(
+                   draft_key, draft_type, recipient_name, publication, target_url,
+                   related_url, subject, body, draft_status, payload_json,
+                   first_seen, updated_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(draft_key) DO UPDATE SET
+                   recipient_name=excluded.recipient_name,
+                   publication=excluded.publication,
+                   target_url=excluded.target_url,
+                   related_url=CASE WHEN excluded.related_url <> '' THEN excluded.related_url ELSE outreach_drafts.related_url END,
+                   subject=excluded.subject,
+                   body=excluded.body,
+                   draft_status=CASE WHEN ? IS NOT NULL THEN ? ELSE outreach_drafts.draft_status END,
+                   payload_json=excluded.payload_json,
+                   updated_at=excluded.updated_at""",
+            (
+                key, draft_type, recipient, publication, resolved_target,
+                related_url, subject, body, status or "Draft", payload_json,
+                stamp, stamp, status, status,
+            ),
+        )
+    return key
+
+
+def update_outreach_draft(
+    draft_key: str,
+    subject: str,
+    body: str,
+    draft_status: str,
+) -> None:
+    """Save a human-edited draft and its review status."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM outreach_drafts WHERE draft_key=?", (draft_key,)
+        ).fetchone()
+        if row is None:
+            raise KeyError("That outreach draft no longer exists.")
+        payload = _load(row["payload_json"], {}) or {}
+        if isinstance(payload, dict):
+            payload["subject_line"] = subject
+            payload["message_body"] = body
+        conn.execute(
+            """UPDATE outreach_drafts SET
+                   subject=?, body=?, draft_status=?, payload_json=?, updated_at=?
+               WHERE draft_key=?""",
+            (subject, body, draft_status, _dump(payload) or "{}", _now(), draft_key),
+        )
+
+
+def list_outreach_drafts() -> list[dict[str, Any]]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM outreach_drafts ORDER BY updated_at DESC, rowid DESC"
+        ).fetchall()
+    return [_row_to_draft(row) for row in rows if row is not None]
+
+
+def outreach_csv_bytes() -> bytes:
+    rows = list_outreach_drafts()
+    out = io.StringIO(newline="")
+    columns = [
+        "draft_type", "recipient_name", "publication", "target_url", "subject",
+        "body", "draft_status", "related_url", "first_seen", "updated_at",
+    ]
+    writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: _csv_safe(value) for key, value in row.items() if key in columns})
+    return out.getvalue().encode("utf-8-sig")
 
 
 def listicle_csv_bytes() -> bytes:

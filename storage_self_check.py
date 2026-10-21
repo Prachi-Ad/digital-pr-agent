@@ -76,6 +76,7 @@ def main() -> int:
         ListicleContactResearchResults,
         ListicleOpportunity,
         ListicleResearchResults,
+        OutreachDraft,
         PRAngle,
         PROpportunity,
         PRResearchResults,
@@ -237,19 +238,67 @@ def main() -> int:
         research_summary="Two verified co-authors on the same article.",
         journalists=[journalist, co_author],
     )
+    journalist_draft = OutreachDraft(
+        outreach_type="Digital PR pitch",
+        channel="Official contact form",
+        recipient_name=journalist.name,
+        recipient_role=journalist.current_role,
+        publication=journalist.publication,
+        target_title=opportunity.article_title,
+        target_url=opportunity.article_url,
+        subject_line="A data angle on measurement trust",
+        message_body=(
+            "Hi Jordan,\n\nYour recent piece on measurement stood out. "
+            "I can share the brand's aggregate data on platform reporting gaps.\n\n"
+            "[Your name]"
+        ),
+        personalization_evidence="The journalist's verified measurement article.",
+        asset_used="Aggregate platform data.",
+        call_to_action="Would the data be useful for a follow-up?",
+        facts_to_verify=["Confirm the data is approved for external use."],
+        compliance_notes="No publisher policy conflict found.",
+        confidence="Medium",
+    )
+    listicle_draft = OutreachDraft(
+        outreach_type="Listicle inclusion request",
+        channel="Official contact form",
+        recipient_name="Alex Editor",
+        recipient_role="Editor",
+        publication=item.publication,
+        target_title=item.listicle_title,
+        target_url=item.listicle_url,
+        subject_line="Suggestion for your social tools roundup",
+        message_body=(
+            "Hi Alex,\n\nThe brand fits the agency category in your roundup. "
+            "I would be glad to send the details for editorial consideration.\n\n"
+            "[Your name]"
+        ),
+        personalization_evidence="The target page and the verified editorial contact route.",
+        asset_used="Verified product information.",
+        call_to_action="Is the official form the right route for consideration?",
+        facts_to_verify=["Confirm the current product category."],
+        compliance_notes="Policy review found no explicit restriction.",
+        confidence="Medium",
+    )
 
     # --------------------------------------------------------------
     # 1. Listicle: save, enrich, decide, track placement
     # --------------------------------------------------------------
     emit("1. Listicle workflow")
     app = new_app()
-    go(app, "Listicle Opportunities")
+    app.session_state["workflow_mode"] = "listicles"
+    app.session_state["listicle_step"] = "Prospects"
     app.session_state["listicle_results"] = listicle_results
     app.session_state["listicle_run_id"] = 1
     app.session_state["listicle_reviews"] = {}
     app.session_state["listicle_placement_progress"] = {}
     app.session_state["listicle_contact_results"] = {"1:0": contacts}
     app.session_state["listicle_policy_results"] = {"1:0": policy}
+    app.run()
+    if list(app.exception):
+        raise AssertionError(f"Listicle prospects raised an error: {list(app.exception)}")
+
+    app.get_by_key("listicle_focus_1").set_value("All")
     app.run()
 
     saved = database.list_listicle_prospects()
@@ -260,11 +309,7 @@ def main() -> int:
 
     app.get_by_key("listicle_review_decision_1_0").set_value("Approve to pursue")
     app.run()
-    app.get_by_key("save_listicle_review_1_0").click()
-    app.run()
     app.get_by_key("listicle_placement_progress_1_0").set_value("Placement confirmed")
-    app.run()
-    app.get_by_key("save_listicle_progress_1_0").click()
     app.run()
 
     row = database.get_listicle_prospect(url, item.listicle_title, item.publication) or {}
@@ -301,7 +346,11 @@ def main() -> int:
     emit("2. Restart and restore")
     app2 = new_app()
     check("workspace is restored after restart", app2.session_state["listicle_results"] is not None)
-    go(app2, "Listicle Opportunities")
+    check("workflow mode is restored", app2.session_state["workflow_mode"] == "listicles", app2.session_state["workflow_mode"])
+    check("workflow step is restored", app2.session_state["listicle_step"] == "Prospects", app2.session_state["listicle_step"])
+    app2.run()
+    app2.get_by_key("listicle_focus_1").set_value("All")
+    app2.run()
     restored_status = app2.get_by_key("listicle_review_decision_1_0").value
     restored_progress = app2.get_by_key("listicle_placement_progress_1_0").value
     check("review decision is restored", restored_status == "Approve to pursue", restored_status)
@@ -316,16 +365,17 @@ def main() -> int:
     # --------------------------------------------------------------
     emit()
     emit("3. PR opportunity workflow")
+    app2.session_state["workflow_mode"] = "digital_pr"
+    app2.session_state["pr_step"] = "Opportunities"
     app2.session_state["analysis"] = analysis
     app2.session_state["selected_angle_index"] = 0
     app2.session_state["opportunity_results"] = opportunity_results
     app2.session_state["research_run_id"] = 1
     app2.session_state["opportunity_reviews"] = {}
-    app2.run()
-    go(app2, "PR Opportunities")
-    app2.get_by_key("review_decision_1_0").set_value("Approve for journalist research")
-    app2.run()
-    app2.get_by_key("save_review_1_0").click()
+    go(app2, "Workspace")
+    if list(app2.exception):
+        raise AssertionError(f"PR opportunities raised an error: {list(app2.exception)}")
+    app2.get_by_key("opp_status_1_0").set_value("Approve for journalist research")
     app2.run()
 
     row = database.get_pr_opportunity(opportunity.article_url, opportunity.article_title, opportunity.publication) or {}
@@ -344,12 +394,13 @@ def main() -> int:
     # --------------------------------------------------------------
     emit()
     emit("4. Journalist workflow")
+    app2.session_state["pr_step"] = "Journalists"
     app2.session_state["journalist_results"] = {"1:0": journalist_results}
     app2.session_state["journalist_reviews"] = {}
-    go(app2, "Journalists")
-    app2.get_by_key("journalist_status_1_0_0").set_value("Qualified pitch target")
     app2.run()
-    app2.get_by_key("save_journalist_status_1_0_0").click()
+    if list(app2.exception):
+        raise AssertionError(f"Journalists raised an error: {list(app2.exception)}")
+    app2.get_by_key("journalist_status_1_0_0").set_value("Qualified pitch target")
     app2.run()
 
     row = database.get_journalist_record(journalist, opportunity.article_url) or {}
@@ -364,15 +415,17 @@ def main() -> int:
 
     app2.get_by_key("journalist_status_1_0_1").set_value("Relevant writer")
     app2.run()
-    app2.get_by_key("save_journalist_status_1_0_1").click()
-    app2.run()
     row = database.get_journalist_record(journalist, opportunity.article_url) or {}
     co_row = database.get_journalist_record(co_author, opportunity.article_url) or {}
     check("co-author qualification is saved", co_row.get("qualification_status") == "Relevant writer", co_row.get("qualification_status"))
     check("saving one co-author does not change the other", row.get("qualification_status") == "Qualified pitch target", row.get("qualification_status"))
 
     app3 = new_app()
-    go(app3, "Outreach")
+    check("digital PR mode is restored", app3.session_state["workflow_mode"] == "digital_pr", app3.session_state["workflow_mode"])
+    app3.get_by_key("pr_step").set_value("Outreach")
+    app3.run()
+    if list(app3.exception):
+        raise AssertionError(f"Outreach raised an error: {list(app3.exception)}")
     outreach_text = " ".join(text.value for text in app3.markdown) + " ".join(text.value for text in app3.subheader)
     check("outreach queue is restored after restart", "Jordan Writer" in outreach_text, outreach_text[:200])
     check("unqualified co-author is not in the outreach queue", "Sam Coauthor" not in outreach_text)
@@ -382,20 +435,80 @@ def main() -> int:
     check("library shows all three record types", library_counts[:3] == ["1", "1", "2"], library_counts)
 
     # --------------------------------------------------------------
-    # 5. Exports and backup
+    # 5. Outreach drafts
     # --------------------------------------------------------------
     emit()
-    emit("5. Exports and backup")
+    emit("5. Outreach drafts")
+    draft_key = database.upsert_outreach_draft(
+        journalist_draft,
+        "journalist_pitch",
+        target_url=opportunity.article_url,
+        related_url=journalist.relevant_article_url,
+        draft_status="Draft",
+    )
+    saved_draft = database.get_outreach_draft(
+        "journalist_pitch", opportunity.article_url, journalist.name
+    ) or {}
+    check("journalist draft is saved", saved_draft.get("draft_key") == draft_key)
+    check("draft subject is saved", saved_draft.get("subject") == journalist_draft.subject_line, saved_draft.get("subject"))
+
+    database.update_outreach_draft(
+        draft_key,
+        "Updated subject line",
+        "Updated body text for human review.",
+        "Approved for manual send",
+    )
+    updated_draft = database.get_outreach_draft(
+        "journalist_pitch", opportunity.article_url, journalist.name
+    ) or {}
+    check("human edits are saved", updated_draft.get("subject") == "Updated subject line", updated_draft.get("subject"))
+    check("draft status is saved", updated_draft.get("draft_status") == "Approved for manual send", updated_draft.get("draft_status"))
+
+    database.upsert_outreach_draft(
+        listicle_draft,
+        "listicle_request",
+        target_url=item.listicle_url,
+        related_url=policy.policy_source_url,
+        draft_status="Draft",
+    )
+    check("listicle draft is saved separately", len(database.list_outreach_drafts()) == 2, len(database.list_outreach_drafts()))
+
+    app3.session_state["workflow_mode"] = "digital_pr"
+    app3.session_state["pr_step"] = "Outreach"
+    go(app3, "Workspace")
+    draft_text = " ".join(text.value for text in app3.markdown) + " ".join(
+        text.value for text in app3.text_input
+    )
+    check("saved draft appears in inbox", "Updated subject line" in draft_text, draft_text[:300])
+
+    app4 = new_app()
+    app4.session_state["workflow_mode"] = "listicles"
+    app4.session_state["listicle_step"] = "Outreach"
+    app4.run()
+    if list(app4.exception):
+        raise AssertionError(f"Listicle outreach raised an error: {list(app4.exception)}")
+    listicle_draft_text = " ".join(text.value for text in app4.markdown) + " ".join(
+        text.value for text in app4.text_input
+    )
+    check("listicle outreach shows the approved prospect", "Alex Editor" in listicle_draft_text, listicle_draft_text[:300])
+
+    # --------------------------------------------------------------
+    # 6. Exports and backup
+    # --------------------------------------------------------------
+    emit()
+    emit("6. Exports and backup")
     for label, data, expected in [
         ("listicle CSV", database.listicle_csv_bytes(), "Probe Publication"),
         ("PR CSV", database.opportunity_csv_bytes(), "Why measurement is hard"),
         ("journalist CSV", database.journalist_csv_bytes(), "Jordan Writer"),
+        ("outreach CSV", database.outreach_csv_bytes(), "Updated subject line"),
     ]:
         text = data.decode("utf-8-sig")
         rows = list(csv.DictReader(io.StringIO(text)))
         check(f"{label} exports the record", expected in text and len(rows) >= 1, f"rows={len(rows)}")
         check(f"{label} opens cleanly in Excel", data.startswith(b"\xef\xbb\xbf"))
 
+    go(app3, "Research Library")
     backup_button = [button for button in app3.button if button.label == "Create database backup"][0]
     backup_button.click()
     app3.run()
@@ -408,16 +521,17 @@ def main() -> int:
                 ("listicle_prospects", 1),
                 ("pr_opportunities", 1),
                 ("journalist_records", 2),
+                ("outreach_drafts", 2),
                 ("app_state", 1),
             ]:
                 count = connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 check(f"backup contains {table}", count == expected, count)
 
     # --------------------------------------------------------------
-    # 6. Data safety edge cases
+    # 7. Data safety edge cases
     # --------------------------------------------------------------
     emit()
-    emit("6. Data safety edge cases")
+    emit("7. Data safety edge cases")
 
     tricky = ListicleOpportunity(
         publication='Probe "Quoted" Pub',

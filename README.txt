@@ -1,59 +1,68 @@
-Digital PR Agent - Research Library and Storage Guide
+Digital PR Agent - Quick Guide
 
-WHAT THE APP DOES
-- Turns published articles into PR angles and editorial opportunities.
-- Finds listicle, roundup, alternatives, and directory pages where a brand may fit.
-- Researches publisher contacts and publisher inclusion policies for a human to review.
-- Saves every listicle prospect, PR opportunity, journalist record, decision, contact finding, policy finding, and placement status in a local database.
-- Never emails publishers, submits forms, or sends outreach automatically.
+WHAT IT DOES
+- Digital PR: published article -> PR angles -> editorial opportunities -> journalists -> outreach draft.
+- Listicles: search -> prospects -> contacts and policy -> inclusion request.
+- Saves every prospect, opportunity, journalist, contact, policy finding, draft, decision, and placement locally.
+- Never sends email, submits forms, or contacts anyone. You approve every send.
 
 ONE-CLICK START
 1. Double-click launch_pr_agent_hidden.vbs.
-2. Your browser opens the app at http://localhost:8501.
-3. To stop the app, double-click stop_pr_agent.bat.
+2. Open http://localhost:8501 if the browser does not open.
+3. To stop, double-click stop_pr_agent.bat.
+4. After an update, double-click restart_pr_agent.vbs to load the new code.
+
+THE THREE PAGES
+- Workspace: the daily workflow. Pick Digital PR or Listicle inclusion and follow the numbered steps.
+- Research Library: all saved records, CSV exports, and verified database backups.
+- Settings: brand, sender details, model/cost information, storage, and safety rules.
+
+DAILY WORKFLOW
+Digital PR
+1. Paste an article URL and analyze it.
+2. Pick one PR angle.
+3. Research opportunities and approve the strongest ones.
+4. Research journalists and mark a qualified pitch target.
+5. Prepare a draft, edit it, and mark your own status. Send it yourself outside the app.
+
+Listicle inclusion
+1. Search a category.
+2. Review each prospect. Use the Needs review / Approved / All filter to focus the list. Set its status and placement progress, then run contact and policy research only for the ones worth pursuing.
+3. Prepare an inclusion request for an approved prospect with a saved contact. Send or submit it yourself.
+
+SAVING AND BACKUPS
+- Database: project folder\data\pr_agent.sqlite3
+- Backups: project folder\backups\
+- Research Library > Create database backup makes a dated, verified backup.
+- Data does not sync to other computers. Keep backups somewhere safe.
+- To restore, close the app and replace data\pr_agent.sqlite3 with a backup. Keep a copy of the current file first.
 
 CHECK THAT SAVING WORKS (ONE CLICK)
 1. Double-click run_storage_check.vbs.
-2. The check opens the real app against a temporary database, saves a prospect at every stage, restarts the session, exports the data, creates a backup, and checks the backup.
-3. A message tells you whether every check passed.
-4. Full details are written to backups\latest_storage_check.txt (and a dated copy).
+2. It uses a temporary database and never touches your real research.
+3. It takes about 20-40 seconds and does not call the OpenAI API.
+4. Full details: backups\latest_storage_check.txt.
 
-The check never reads or changes your real research database. It is safe to run at any time.
-It takes about 20-40 seconds and does not call the OpenAI API.
+COST CONTROLS
+- Default model: gpt-5-nano.
+- Default web search context: low.
+- Agent turns: 3.
+- Contact, policy, and journalist research run only when you click their buttons.
+- Outreach drafts use no web search.
+- The active model is shown in the sidebar and Settings.
 
-WHERE DATA IS STORED
-- Main database: C:\Users\<your Windows user>\pr-agent\data\pr_agent.sqlite3 (or your project folder\data\pr_agent.sqlite3)
-- Code and database backups: <project folder>\backups\
-- Storage check logs: backups\latest_storage_check.txt and backups\storage_check_<date>.txt
-
-DATA BEHAVIOR
-- Listicle prospects are keyed by normalized URL, so rerunning a search keeps their contact research, policy check, review decision, and placement progress.
-- PR opportunities and journalist decisions are saved as soon as research finishes.
-- Journalists are stored per person rather than per article, so co-authors on the same article remain separate records with independent decisions.
-- Existing journalist records saved under the old article-only key are migrated automatically on the next launch.
-- Contact research and publisher policy results are saved immediately when the research completes, not only when the page is closed.
-- "Last updated" changes only when a record actually changes. Simply viewing a page no longer rewrites every timestamp.
-- The active workspace snapshot is saved after each app run, so the current analysis and research results return after a restart.
-- CSV exports are UTF-8 and protected against spreadsheet formula injection.
-- Every database backup is checked with SQLite's integrity check before the app reports success.
-- Data stays on this PC. It is not synced to other computers, so keep database backups somewhere safe.
-
-BACKUP AND RESTORE
-- Research Library > Create database backup creates a dated, verified backup.
-- To restore, close the app and replace data\pr_agent.sqlite3 with a backup file. Keep a copy of the current file first.
-- Back up before installing updates or moving to another computer.
-
-INSTALLING UPDATES
-- Use install_persistent_storage_update.vbs only when you have a full update package containing agent.py, app.py, and database.py.
-- The installer stops the app, backs up your current code and database, installs the files, and checks Python syntax and required functions. If a check fails, it restores the previous code.
-- When the installer is run from inside the project folder, it now runs the checks without trying to copy files onto themselves.
-- Older single-feature installers are kept in backups\legacy-installers and should not be used.
+BRAND AND SENDER
+- Settings > Brand saves data\brand_config.json. Restart the app to apply.
+- Settings > Your sender details fills your name and role into draft placeholders.
+- Environment variables BRAND_NAME and PRODUCT_DESCRIPTION override the saved file.
 
 SAFETY
-- Publisher research is informational and must be checked by a human.
-- Policy findings are recommendations, not permission or a placement guarantee.
-- The app does not contact publishers or send outreach. Human approval is required at every step.
+- Publisher research and policy findings are recommendations, not permission.
+- Paid or affiliate placements are labelled clearly.
+- Always verify names, links, claims, and publisher rules before sending.
+- The app never performs outreach.
 
-BRAND CONFIGURATION
-- Set BRAND_NAME and PRODUCT_DESCRIPTION in Windows environment variables to research a specific brand.
-- Legacy VISTA_* variable names are still accepted.
+INSTALLING UPDATES
+- Use install_persistent_storage_update.vbs only with a full update package containing agent.py, app.py, and database.py.
+- It backs up your code and database, checks syntax and required functions, and rolls back on failure.
+- After any update, double-click restart_pr_agent.vbs. If the browser shows an ImportError, the old app was still running; restart it.

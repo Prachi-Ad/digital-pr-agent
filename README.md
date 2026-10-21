@@ -1,33 +1,60 @@
 # Digital PR Agent
 
-A local Streamlit research assistant for **Digital PR** and **listicle prospecting**.
-It turns published articles into PR angles and editorial opportunities, finds
-listicle / roundup / alternatives / directory pages where a brand may fit,
-researches publisher contacts and publisher inclusion policies, and stores
-everything in a local SQLite database for human review.
+A local Streamlit workspace for **Digital PR** and **listicle prospecting**.
+It turns published articles into PR angles, finds editorial and listicle
+opportunities, researches contacts and publisher policies, prepares outreach
+drafts for human review, and stores every record locally.
 
-**The app never emails publishers, submits forms, or sends outreach.** Every
-outreach step requires a human to act on the research manually.
+**The app never sends email, submits a publisher form, or contacts anyone.**
+You approve every decision and send every message yourself.
 
-The target brand is configurable: set `BRAND_NAME` and `PRODUCT_DESCRIPTION`
-(see "Brand configuration" below). The defaults are neutral so the project can
-be shared or reused for any product.
+## The simple workflow
 
-## What it does
+The app has three pages:
 
-- Analyse a published article into PR angles and statistics.
-- Research digital PR opportunities (journalists, publications, pitch angles).
-- Find listicle prospects (roundups, alternatives, directories, comparisons).
-- Research publisher contacts and publisher inclusion policies.
-- Track review decisions, contact findings, policy findings, and placement status.
-- Export prospects and decisions to CSV.
-- Create verified database backups.
+1. **Workspace** - the daily workflow. Choose one of two paths:
+   - **Digital PR:** article → PR angles → opportunities → journalists → outreach draft.
+   - **Listicle inclusion:** search → prospects, contacts, and policy → inclusion request.
+2. **Research Library** - saved prospects, PR opportunities, journalists, drafts,
+   CSV exports, and verified database backups.
+3. **Settings** - brand, sender details, model/cost information, storage, safety.
 
-## Local data stays local
+Each path is a short numbered stepper. Saved work is restored when you reopen
+the app, and the Workspace shows a "Continue saved..." button on the start screen.
+Active workflow pages stay compact: one header, the stepper, a short context
+line, a four-number queue strip, and the review list. Cards keep title, key
+metadata, and the main action together, with details and optional research
+behind one expander. The interface uses an indigo accent and small monochrome
+sidebar icons rather than emoji.
 
-Research data (contacts, policy findings, decisions) lives in a local SQLite
-database under `data/` and is **not** committed to this repository. Backups
-live under `backups/`. The application creates these folders at runtime.
+## What each step does
+
+- **Asset analysis:** extracts topics, audiences, claims, statistics, and PR angles.
+- **PR opportunities:** finds real existing articles that could fit an angle.
+- **Journalist research:** verifies writers through their published work.
+- **Listicle research:** finds roundups, alternatives, comparisons, and directories.
+- **Contact research:** finds authors, editors, and official contact routes.
+- **Publisher policy:** checks whether a publisher accepts inclusion requests,
+  uses a paid/affiliate/directory route, or should be skipped.
+- **Outreach preparation:** writes a personalized draft using only verified
+  research. Drafts are editable and tracked as Draft, Approved for manual send,
+  Sent manually, Replied, Placement confirmed, Declined, or Do not send.
+- **Tracking:** review decisions and placement progress are saved immediately
+  in a local SQLite database.
+
+## Cost controls
+
+The default model is **`gpt-5-nano`**, the cheapest standard nano option. To go
+lower, set `OPENAI_MODEL` to `gpt-5-nano-flex` before launching.
+
+- Web search context defaults to **low** (`SEARCH_CONTEXT_SIZE=low`).
+- Agent turns are limited to 3 by default (`MAX_TURNS=3`).
+- Contact, policy, and journalist research run only when you click their buttons.
+- Outreach drafts use **no web search** and one short model call.
+- The active model and search context are shown in the sidebar and Settings.
+
+Web search is the largest cost, not the model. The app deliberately researches
+only the prospects you choose.
 
 ## Requirements
 
@@ -43,7 +70,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Set your OpenAI API key in the Windows environment:
+Set your OpenAI API key once in the Windows environment:
 
 ```powershell
 setx OPENAI_API_KEY "sk-..."
@@ -51,25 +78,17 @@ setx OPENAI_API_KEY "sk-..."
 
 Then restart the app or terminal.
 
-## Brand configuration (optional)
-
-To research a specific brand instead of the neutral default, set:
-
-```powershell
-setx BRAND_NAME "Your Brand"
-setx PRODUCT_DESCRIPTION "a social media management platform"
-setx BRAND_DOMAIN "example.com"   # optional, for URL hints only
-```
-
-Legacy `VISTA_*` variable names are still accepted as fallbacks.
-
 ## Run
 
 One-click (recommended):
 
 - Double-click `launch_pr_agent_hidden.vbs` to start.
-- Open `http://localhost:8501`.
+- Open `http://localhost:8501` if the browser does not open.
 - Double-click `stop_pr_agent.bat` to stop.
+- After an update, double-click `restart_pr_agent.vbs` to load the new code.
+
+If you see an `ImportError` after changing files, the old app is still running.
+Stop it and relaunch, or use `restart_pr_agent.vbs`.
 
 From a shell:
 
@@ -77,72 +96,57 @@ From a shell:
 streamlit run app.py
 ```
 
+## Brand configuration
+
+The active brand, website, and product description are shown in **Settings**.
+You can edit them there; they are saved to `data/brand_config.json`. Restart the
+app to apply. Environment variables `BRAND_NAME`, `BRAND_DOMAIN`, and
+`PRODUCT_DESCRIPTION` override the file.
+
+The local `data/brand_config.json` file is private and gitignored, so you can use
+the tool for a specific brand without changing the shareable defaults.
+
 ## Health check (one click)
 
 Double-click `run_storage_check.vbs`. It runs the full storage test against a
-temporary database, saves a prospect at every stage, restarts the session,
-exports data, creates a backup, and verifies the backup. It never touches the
-real research database and does not call the OpenAI API. Full details are
-written to `backups\latest_storage_check.txt`.
+temporary database, saves a record at every stage, restarts the session,
+exercises outreach drafts, exports data, creates a backup, and verifies it.
+It never touches the real research database and does not call the OpenAI API.
+Details are written to `backups\latest_storage_check.txt`.
 
-## Model and cost
+## Local data and backups
 
-The default model is **`gpt-5.4-nano`** (a low-cost nano model). Override it
-with an environment variable before launching:
+- Database: `data/pr_agent.sqlite3`
+- Backups: `backups/`
+- Data is **not synced** to other computers. Back up before updating or moving.
+- Research Library → **Create database backup** creates a dated backup and
+  verifies its integrity before reporting success.
+- To restore, close the app and replace `data/pr_agent.sqlite3` with a backup.
+  Keep a copy of the current file first.
 
-```powershell
-setx OPENAI_MODEL "gpt-5-nano"        # lowest per-token price
-setx OPENAI_MODEL "gpt-4.1-nano"
-```
+## Safety rules
 
-(Legacy name `VISTA_OPENAI_MODEL` is also accepted.)
-
-Web-search context size (affects search token cost) can also be tuned:
-
-```powershell
-setx SEARCH_CONTEXT_SIZE "medium"          # low | medium | high (default: high)
-```
-
-The active model is shown in the app sidebar.
-
-## Deploy to Render (recommended for full app)
-
-The repo includes a `render.yaml` blueprint for one-click deploy on Render with a
-persistent disk (so your research database and backups survive restarts).
-
-1. Push this repo to GitHub (already done).
-2. Go to https://render.com → "New" → "Blueprint" → connect your repo.
-3. Render reads `render.yaml` and creates the web service + disk.
-4. In the service's "Environment" tab, set `OPENAI_API_KEY` (and optionally
-   `BRAND_NAME`, `PRODUCT_DESCRIPTION`).
-5. Deploy. Your app will be live at `https://<name>.onrender.com`.
-
-The disk is mounted at the project's `data/` folder, so the SQLite database and
-backups persist across deploys and restarts.
-
-For Railway instead, use the included `Procfile` and add a persistent volume
-mounted at the project root.
-
-- `.gitignore` excludes `.venv/`, `data/`, `backups/`, logs, and local code
-  snapshots. Research data never leaves this machine through git.
-- Publisher research is informational and must be checked by a human.
-- Policy findings are recommendations, not permission or a placement guarantee.
-- The app does not contact publishers or send outreach.
+- The app never performs outreach.
+- Contacts and policy findings are research, not permission or a guarantee.
+- Approval only prepares the next step; it does not send anything.
+- Always verify names, links, claims, and publisher rules before sending.
+- Do not treat paid or affiliate placements as independent editorial endorsements.
 
 ## Project structure
 
-- `app.py` - Streamlit UI.
-- `agent.py` - OpenAI Agents SDK research agents and prompts.
-- `database.py` - SQLite storage, backups, exports, migrations.
-- `storage_self_check.py` - end-to-end storage test (43 checks).
+- `app.py` - the three-page Streamlit workspace.
+- `agent.py` - OpenAI Agents SDK prompts and structured output models.
+- `database.py` - SQLite storage, migrations, CSVs, and verified backups.
+- `storage_self_check.py` - end-to-end storage test.
 - `run_storage_check.vbs` - one-click health check.
+- `launch_pr_agent_hidden.vbs` - one-click launcher.
+- `restart_pr_agent.vbs` - one-click restart after an update.
 - `install_persistent_storage_update.vbs` - update installer with rollback.
-- `README.txt` - local user guide.
+- `README.txt` - short local user guide.
 
 ## Updating
 
-Use `install_persistent_storage_update.vbs` only when you have a full update
-package containing `agent.py`, `app.py`, and `database.py`. It stops the app,
-backs up your current code and database, installs the files, checks Python
-syntax and required functions, and rolls back on failure. Older single-feature
-installers live in `backups\legacy-installers` and should not be used.
+Use `install_persistent_storage_update.vbs` only with a full update package
+containing `agent.py`, `app.py`, and `database.py`. It stops the app, backs up
+your code and database, installs the files, checks Python syntax and required
+functions, and rolls back on failure.

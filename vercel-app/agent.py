@@ -13,10 +13,10 @@ from pydantic import BaseModel, Field
 # MODEL CONFIGURATION
 # =========================================================
 # Cost-optimized default. Override with an environment variable if needed:
-#   VISTA_OPENAI_MODEL=gpt-5-nano       (lowest per-token price)
-#   VISTA_OPENAI_MODEL=gpt-4.1-nano
-#   VISTA_SEARCH_CONTEXT=medium|low     (fewer search content tokens)
-DEFAULT_MODEL = "gpt-5.4-nano"
+#   VISTA_OPENAI_MODEL=gpt-5-nano-flex    (lowest per-token price, slower queue)
+#   VISTA_OPENAI_MODEL=gpt-5-nano         (default)
+#   VISTA_SEARCH_CONTEXT=low|medium|high  (fewer search content tokens)
+DEFAULT_MODEL = "gpt-5-nano"
 MODEL = (os.environ.get("OPENAI_MODEL") or os.environ.get("VISTA_OPENAI_MODEL") or DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
 SEARCH_CONTEXT_SIZE = (os.environ.get("SEARCH_CONTEXT_SIZE") or os.environ.get("VISTA_SEARCH_CONTEXT") or "low").strip().lower()
@@ -30,7 +30,7 @@ MODEL_SETTINGS = ModelSettings(
     verbosity="low",
 )
 
-MAX_TURNS = int(os.environ.get("MAX_TURNS", "4"))
+MAX_TURNS = int(os.environ.get("MAX_TURNS", "3"))
 
 # Fail fast (120s) on stalled OpenAI calls instead of hanging until Vercel kills
 # the function; retry connection errors at the SDK level.
