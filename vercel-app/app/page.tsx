@@ -2,15 +2,13 @@
 import { useState } from "react";
 import { Loader2, Search, Users, FileText, List, Mail, Shield } from "lucide-react";
 
-const API = "/api";
-
 type AnyObj = Record<string, any>;
 
-async function callApi(path: string, body: any) {
-  const res = await fetch(`${API}${path}`, {
+async function callApi(action: string, body: any = {}) {
+  const res = await fetch("/api/analyze", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ action, ...body }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.detail || data?.error || "Request failed");
@@ -81,7 +79,7 @@ export default function Home() {
     setErrAnalyze(null);
     setAnalysis(null);
     try {
-      const data = await callApi("/analyze", { article_url: url.trim() });
+      const data = await callApi("analyze", { article_url: url.trim() });
       setAnalysis(data);
     } catch (err: any) {
       setErrAnalyze(err?.message || "Something went wrong");
@@ -96,7 +94,7 @@ export default function Home() {
     setErrOpp(null);
     setOpportunities(null);
     try {
-      const data = await callApi("/opportunities", { angle: selectedAngle });
+      const data = await callApi("opportunities", { angle: selectedAngle });
       setOpportunities(data);
     } catch (err: any) {
       setErrOpp(err?.message || "Something went wrong");
@@ -111,7 +109,7 @@ export default function Home() {
     setErrJourn(null);
     setJournalists(null);
     try {
-      const data = await callApi("/journalists", { angle: selectedAngle, opportunity: selectedOpp });
+      const data = await callApi("journalists", { angle: selectedAngle, opportunity: selectedOpp });
       setJournalists(data);
     } catch (err: any) {
       setErrJourn(err?.message || "Something went wrong");
@@ -127,7 +125,7 @@ export default function Home() {
     setErrList(null);
     setListicles(null);
     try {
-      const data = await callApi("/listicles", {
+      const data = await callApi("listicles", {
         search_theme: listForm.search_theme.trim(),
         related_queries: listForm.related_queries,
         target_audience: listForm.target_audience,
@@ -150,7 +148,7 @@ export default function Home() {
     setErrContact(null);
     setContact(null);
     try {
-      const data = await callApi("/listicle_contact", { item });
+      const data = await callApi("listicle-contact", { item });
       setContact(data);
     } catch (err: any) {
       setErrContact(err?.message || "Something went wrong");
@@ -166,7 +164,7 @@ export default function Home() {
     setErrPolicy(null);
     setPolicy(null);
     try {
-      const data = await callApi("/publisher_policy", { item });
+      const data = await callApi("publisher-policy", { item });
       setPolicy(data);
     } catch (err: any) {
       setErrPolicy(err?.message || "Something went wrong");
