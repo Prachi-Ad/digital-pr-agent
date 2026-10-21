@@ -28,8 +28,12 @@ automatically. The target brand is configurable via `BRAND_NAME` /
 - `OPENAI_MODEL` / `SEARCH_CONTEXT_SIZE` overrides (legacy `VISTA_*` accepted).
 - Live-tested `analyze_article`: ~30s, 5 angles, 20 statistics.
 
-### Generalization
-- Removed Vista Social branding from code, UI, prompts, docs, launchers, installer.
+### Vercel deployment (analyze workflow)
+- Created `vercel-app/`: Next.js frontend + FastAPI Python serverless function (`api/analyze.py`).
+- Deployed to production: https://vercel-app-gules-three.vercel.app
+- `/api/analyze` returns structured article analysis (verified end-to-end).
+- Env var `OPENAI_API_KEY` set in Vercel (production/preview/development).
+- Remaining workflows (PR opportunities, journalists, listicles, storage) not yet ported.
 - Brand is configurable via env vars; defaults are neutral.
 - DB filename migrated from `vista_pr_agent.sqlite3` to `pr_agent.sqlite3`
   (one-time rename on startup, data preserved).
