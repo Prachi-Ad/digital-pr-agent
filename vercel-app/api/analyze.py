@@ -21,7 +21,7 @@ from agent import (
 app = FastAPI()
 
 
-class AnalyzeReq(BaseModel):
+class AnalyzeRequest(BaseModel):
     action: str = "analyze"
     article_url: str = ""
     angle: PRAngle | None = None
@@ -42,13 +42,7 @@ def _check_url(url: str) -> str:
     return url
 
 
-@app.get("/")
-def root():
-    return {"status": "ok", "service": "digital-pr-agent"}
-
-
-@app.post("/")
-def handle(req: AnalyzeReq):
+def _dispatch(req: AnalyzeRequest):
     action = (req.action or "analyze").strip().lower()
     try:
         if action == "analyze":
@@ -73,11 +67,11 @@ def handle(req: AnalyzeReq):
                 competitors=req.competitors or None,
                 max_results=req.max_results,
             ).model_dump()
-        if action == "listicle-contact":
+        if action in ("listicle-contact", "listicle_contact"):
             if req.item is None:
                 raise HTTPException(status_code=400, detail="item is required")
             return research_listicle_contact(req.item).model_dump()
-        if action == "publisher-policy":
+        if action in ("publisher-policy", "publisher_policy"):
             if req.item is None:
                 raise HTTPException(status_code=400, detail="item is required")
             return research_publisher_policy(req.item).model_dump()
@@ -86,3 +80,17 @@ def handle(req: AnalyzeReq):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/")
+@app.get("/analyze")
+@app.get("/api/analyze")
+def health():
+    return {"status": "ok", "service": "digital-pr-agent"}
+
+
+@app.post("/")
+@app.post("/analyze")
+@app.post("/api/analyze")
+def handle(req: AnalyzeRequest):
+    return _dispatch(req)
