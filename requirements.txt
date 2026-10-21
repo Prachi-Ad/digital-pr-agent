@@ -1,0 +1,8 @@
+# Vista Social PR Agent dependencies
+# Versions match the tested local environment.
+
+streamlit==1.64.0
+openai==3.20.0
+openai-agents==0.22.3
+pydantic==2.13.5
+pandas==3.0.6

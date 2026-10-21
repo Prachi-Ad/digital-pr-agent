@@ -1,0 +1,30 @@
+# Local Python environment
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Local research data (private; never commit)
+data/
+backups/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.log
+
+# Older local code snapshots
+*_backup_before_*.py
+vista_pr_agent_agent*.py
+vista_pr_agent_app*.py
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
