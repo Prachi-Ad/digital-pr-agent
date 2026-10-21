@@ -1,8 +1,11 @@
 import asyncio
 import os
+import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 
-from agents import Agent, Runner, WebSearchTool, ModelSettings
+from openai import AsyncOpenAI
+from agents import Agent, Runner, WebSearchTool, ModelSettings, set_default_openai_client
 from pydantic import BaseModel, Field
 
 
@@ -26,6 +29,10 @@ MODEL_SETTINGS = ModelSettings(
     reasoning={"effort": "low"} if MODEL.startswith("gpt-5") else None,
     verbosity="low",
 )
+
+# Fail fast (120s) on stalled OpenAI calls instead of hanging until Vercel kills
+# the function; retry connection errors at the SDK level.
+set_default_openai_client(AsyncOpenAI(timeout=120.0, max_retries=2))
 
 # Brand configuration (override to reuse this tool for any product/company)
 BRAND_NAME = (os.environ.get("BRAND_NAME") or os.environ.get("VISTA_BRAND_NAME") or "Your Brand").strip() or "Your Brand"
