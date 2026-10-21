@@ -34,7 +34,7 @@ class Statistic(BaseModel):
     source: str = Field(description="The source of the statistic, if identified.")
     data_provenance: str = Field(
         description=(
-            "Classify as {BRAND_NAME} original data, external primary source, "
+            "Classify as the brand's original data, external primary source, "
             "external survey, company-reported, secondary source, or unknown."
         )
     )
@@ -50,7 +50,7 @@ class PRAngle(BaseModel):
     brand_contribution: str = Field(description="What the brand can credibly contribute.")
     target_publication_types: list[str] = Field(description="Types of publications that may fit the story.")
     target_journalist_beats: list[str] = Field(description="Relevant journalist topics to research later.")
-    relevant_asset: str = Field(description="The existing the brand asset supporting the angle.")
+    relevant_asset: str = Field(description="The existing brand asset supporting the angle.")
     evidence: str = Field(description="Evidence supporting the angle.")
     next_action: str = Field(description="The single most useful next action.")
     confidence: str = Field(description="Confidence level: High, Medium, or Low.")
@@ -602,7 +602,7 @@ def _run_agent_in_worker(agent_to_run, prompt: str):
 # =========================================================
 
 def analyze_article(article_url: str) -> AssetAnalysis:
-    """Analyze a the brand article and return structured asset intelligence."""
+    """Analyze an article and return structured asset intelligence."""
     prompt = f"""
 Analyze this exact {BRAND_NAME} article:
 
@@ -698,7 +698,7 @@ def research_listicles(
     competitors: list[str] | None = None,
     max_results: int = 15,
 ) -> ListicleResearchResults:
-    """Find and qualify existing listicles for potential the brand inclusion."""
+    """Find and qualify existing listicles for potential brand inclusion."""
 
     if not search_theme or not search_theme.strip():
         raise ValueError("A listicle search theme is required.")
