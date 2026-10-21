@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { Loader2, Search, Users, FileText, List, Mail, Shield } from "lucide-react";
 
-const API = "/api/analyze";
+const API = "/api";
 
 type AnyObj = Record<string, any>;
 
@@ -150,7 +150,7 @@ export default function Home() {
     setErrContact(null);
     setContact(null);
     try {
-      const data = await callApi("/listicle-contact", { item });
+      const data = await callApi("/listicle_contact", { item });
       setContact(data);
     } catch (err: any) {
       setErrContact(err?.message || "Something went wrong");
@@ -166,7 +166,7 @@ export default function Home() {
     setErrPolicy(null);
     setPolicy(null);
     try {
-      const data = await callApi("/publisher-policy", { item });
+      const data = await callApi("/publisher_policy", { item });
       setPolicy(data);
     } catch (err: any) {
       setErrPolicy(err?.message || "Something went wrong");
