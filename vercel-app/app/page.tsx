@@ -264,7 +264,7 @@ export default function Home() {
               >
                 {loadingOpp ? <Spinner /> : <Search size={18} />} Run research
               </button>
-              {errOpp && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errOpp}</div>}
+              {errOpp && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errOpp} <span className="block mt-1 text-sm">Tip: research can be flaky on Vercel; click "Run research" to retry, or use the local Streamlit app for heavy runs.</span></div>}
               {opportunities && (
                 <div className="mt-6 space-y-3">
                   <p className="text-sm text-gray-600">{opportunities.research_summary}</p>
@@ -308,7 +308,7 @@ export default function Home() {
               >
                 {loadingJourn ? <Spinner /> : <Users size={18} />} Run research
               </button>
-              {errJourn && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errJourn}</div>}
+              {errJourn && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errJourn} <span className="block mt-1 text-sm">Tip: research can be flaky on Vercel; click "Run research" to retry.</span></div>}
               {journalists && (
                 <div className="mt-6 space-y-3">
                   <p className="text-sm text-gray-600">{journalists.research_summary}</p>
@@ -398,7 +398,7 @@ export default function Home() {
               {loadingList ? <Spinner /> : <List size={18} />} Search listicles
             </button>
           </form>
-          {errList && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errList}</div>}
+          {errList && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errList} <span className="block mt-1 text-sm">Tip: research can be flaky on Vercel; submit again to retry.</span></div>}
           {listicles && (
             <div className="mt-6 space-y-3">
               <p className="text-sm text-gray-600">{listicles.research_summary}</p>
