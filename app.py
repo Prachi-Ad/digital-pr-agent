@@ -142,6 +142,7 @@ LISTICLE_STEPS = ["Search", "Prospects", "Outreach"]
 
 DEFAULTS = {
     "analysis": None,
+    "asset_analyses": {},
     "article_url": "",
     "selected_angle_index": None,
     "opportunity_results": None,
@@ -233,6 +234,18 @@ if not st.session_state.get("_persistent_state_loaded", False):
     st.session_state["listicle_policy_results"] = _restore_map(
         "listicle_policy_results", PublisherPolicyAssessment
     )
+    st.session_state["asset_analyses"] = _restore_map(
+        "asset_analyses", AssetAnalysis
+    )
+    # Older snapshots stored one active analysis. Seed the batch map from it.
+    if st.session_state.analysis is not None:
+        active_key = (st.session_state.article_url or "").strip()
+        if active_key:
+            st.session_state.asset_analyses[active_key] = st.session_state.analysis
+    elif st.session_state.asset_analyses:
+        first_key = next(iter(st.session_state.asset_analyses))
+        st.session_state.article_url = first_key
+        st.session_state.analysis = st.session_state.asset_analyses[first_key]
     # Infer a sensible starting workflow only on the first load. This must not
     # run on every rerun, or "Switch workflow" would immediately undo itself.
     if st.session_state.workflow_mode is None:
@@ -914,6 +927,52 @@ def _render_analysis_details(analysis):
     st.info(analysis.assessment)
 
 
+def _find_saved_analysis(url: str):
+    """Return the saved analysis matching a URL, if one exists."""
+    target = (url or "").strip()
+    item = (st.session_state.get("asset_analyses") or {}).get(target)
+    if item is not None:
+        return target, item
+    return None, None
+
+
+def _reset_pr_downstream():
+    st.session_state.selected_angle_index = None
+    st.session_state.opportunity_results = None
+    st.session_state.opportunity_reviews = {}
+    st.session_state.research_run_id = 0
+    st.session_state.journalist_results = {}
+    st.session_state.journalist_reviews = {}
+
+
+def _activate_asset(key: str, force_reset: bool = False):
+    analyses = st.session_state.get("asset_analyses") or {}
+    item = analyses.get(key)
+    if item is None:
+        return
+    if force_reset or st.session_state.get("article_url") != key:
+        _reset_pr_downstream()
+    st.session_state.article_url = key
+    st.session_state.analysis = item
+
+
+def _parse_article_urls(raw: str):
+    """Parse one URL per line, deduplicate, and return valid and invalid URLs."""
+    valid = []
+    invalid = []
+    seen = set()
+    for line in (raw or "").splitlines():
+        url = line.strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        if not url.startswith("https://"):
+            invalid.append(url)
+            continue
+        valid.append(url)
+    return valid, invalid
+
+
 def _render_draft_editor(record, key_prefix):
     payload = record.get("payload") or {}
     st.divider()
@@ -1002,40 +1061,129 @@ def _render_no_draft(record_label, button_label, button_key, on_prepare, disable
 # =========================================================
 
 def _render_pr_article():
-    st.caption("Paste a published article from your brand, a client, or an industry source. The agent extracts useful angles and evidence.")
-
-    if "article_url_input" not in st.session_state:
-        st.session_state.article_url_input = st.session_state.article_url
-    article_url = st.text_input(
-        "Article URL",
-        key="article_url_input",
-        placeholder="https://example.com/article",
+    st.caption(
+        "Paste up to 5 published article URLs, one per line. The agent extracts "
+        "useful angles and evidence for each."
     )
 
-    if st.button("Analyze article", type="primary", width="stretch"):
-        if not article_url.strip():
-            st.warning("Paste an article URL first.")
-        elif not article_url.startswith("https://"):
-            st.error("Please enter a valid HTTPS URL.")
+    if "article_urls_input" not in st.session_state:
+        st.session_state.article_urls_input = (st.session_state.article_url or "").strip()
+
+    urls_text = st.text_area(
+        "Article URLs",
+        key="article_urls_input",
+        height=130,
+        placeholder=(
+            "https://example.com/article-1\n"
+            "https://example.com/article-2\n"
+            "https://example.com/article-3\n"
+            "https://example.com/article-4\n"
+            "https://example.com/article-5"
+        ),
+        help="Up to 5 HTTPS URLs, one per line.",
+    )
+    reanalyze = st.checkbox(
+        "Re-analyze URLs already saved",
+        value=False,
+        help="Off by default to avoid extra API calls. Saved analyses are reused.",
+    )
+    st.caption("Each new URL runs one analysis call. Up to 5 calls per batch.")
+
+    if st.button("Analyze articles", type="primary", width="stretch"):
+        urls, invalid = _parse_article_urls(urls_text)
+        if invalid:
+            st.error("Use full HTTPS URLs. Fix: " + ", ".join(invalid[:5]))
+        elif not urls:
+            st.warning("Paste at least one article URL.")
+        elif len(urls) > 5:
+            st.warning(f"Analyze up to 5 articles at a time. You entered {len(urls)}.")
         else:
-            with st.spinner("Reading the article and building PR angles..."):
+            existing = {}
+            for url in urls:
+                key, item = _find_saved_analysis(url)
+                if item is not None:
+                    existing[url] = (key, item)
+
+            loaded = 0
+            analyzed = 0
+            reanalyzed_keys = set()
+            errors = []
+            batch_keys = []
+            progress = st.progress(0.0, text="Preparing article analysis...")
+
+            for index, url in enumerate(urls, start=1):
+                progress.progress(
+                    (index - 1) / len(urls),
+                    text=f"Processing {index} of {len(urls)}...",
+                )
+                if not reanalyze and url in existing:
+                    key, _ = existing[url]
+                    if key not in batch_keys:
+                        batch_keys.append(key)
+                    loaded += 1
+                    continue
                 try:
-                    analysis = analyze_article(article_url.strip())
-                    st.session_state.article_url = article_url.strip()
-                    st.session_state.analysis = analysis
-                    st.session_state.selected_angle_index = None
-                    st.session_state.opportunity_results = None
-                    st.session_state.opportunity_reviews = {}
-                    st.session_state.journalist_results = {}
-                    st.session_state.journalist_reviews = {}
-                    go(pr_step="PR angles")
+                    item = analyze_article(url)
+                    key = url.strip()
+                    old_key = existing.get(url, (None, None))[0]
+                    if old_key and old_key != key:
+                        st.session_state.asset_analyses.pop(old_key, None)
+                    st.session_state.asset_analyses[key] = item
+                    if key not in batch_keys:
+                        batch_keys.append(key)
+                    reanalyzed_keys.add(key)
+                    analyzed += 1
                 except Exception as exc:
-                    st.error("Article analysis failed.")
-                    st.exception(exc)
+                    errors.append((url, str(exc)))
+
+            progress.progress(1.0, text="Batch analysis complete.")
+            progress.empty()
+
+            active_key = (st.session_state.article_url or "").strip()
+            if active_key not in st.session_state.asset_analyses:
+                if batch_keys:
+                    _activate_asset(batch_keys[0], force_reset=True)
+            elif active_key in reanalyzed_keys:
+                _activate_asset(active_key, force_reset=True)
+
+            if analyzed or loaded:
+                st.success(
+                    f"Batch complete: {analyzed} analyzed, "
+                    f"{loaded} loaded from saved."
+                )
+            if errors:
+                st.error(f"{len(errors)} article(s) could not be analyzed.")
+                with st.expander("Show failed URLs"):
+                    for url, message in errors:
+                        st.write(f"**{url}** — {message}")
+            if not analyzed and not loaded:
+                st.warning("No articles were analyzed. Check the URLs and try again.")
+
+    analyses = st.session_state.get("asset_analyses") or {}
+    if len(analyses) > 1:
+        st.divider()
+        st.markdown(f"**Analyzed articles ({len(analyses)})**")
+        for key, item in analyses.items():
+            with st.container(border=True):
+                c1, c2 = st.columns([5, 1.4], vertical_alignment="center")
+                with c1:
+                    st.markdown(f"**{item.article_title}**")
+                    st.caption(key)
+                with c2:
+                    if key == st.session_state.get("article_url"):
+                        st.caption("Active")
+                    elif st.button(
+                        "Use this article",
+                        key=f"use_asset_{_widget_suffix(key)}",
+                        width="stretch",
+                    ):
+                        _activate_asset(key, force_reset=True)
+                        st.rerun()
 
     analysis = st.session_state.analysis
     if analysis:
-        st.success(f"Current asset: {analysis.article_title}")
+        st.success(f"Active asset: {analysis.article_title}")
+        st.caption(st.session_state.article_url)
         with st.expander("View the saved asset analysis"):
             _render_analysis_details(analysis)
         if st.button("Continue to PR angles →", width="stretch"):
@@ -2492,6 +2640,7 @@ else:
 
 _PERSISTED_STATE_KEYS = [
     "analysis",
+    "asset_analyses",
     "article_url",
     "selected_angle_index",
     "opportunity_results",

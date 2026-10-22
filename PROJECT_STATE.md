@@ -32,8 +32,9 @@ left sidebar, "Working for Vista Social" chip, Workspace / Research Library /
 Settings navigation, WORKSPACE eyebrow, workflow stepper, indigo palette, and
 compact research cards. The old dashboard/tab layout is gone. Settings shows
 the fixed sender identity, Prachi / SEO Specialist. The local Streamlit app
-remains the full tool; the port does not add saved libraries, draft generation,
-accounts, quotas, or billing.
+remains the full tool. The Vercel Article step also accepts up to five URLs, but
+keeps results in memory only; the port does not add saved libraries, draft
+generation, accounts, quotas, or billing.
 
 ## Completed work
 
@@ -57,10 +58,30 @@ accounts, quotas, or billing.
 - Fixed sender identity in every draft: Prachi, SEO Specialist.
 - No sending or form submission, ever.
 
+### Batch article analysis
+- The Article step accepts up to five HTTPS article URLs, one per line.
+- URLs are deduplicated and validated before analysis. Invalid URLs and batches
+  larger than five are rejected with a clear message.
+- Each URL gets its own asset analysis. Partial failures are reported per URL,
+  and successful analyses are kept.
+- Analyses are stored in `asset_analyses`, keyed by the input URL, and persisted
+  in the workspace snapshot.
+- Saved analyses are reused by default to avoid repeat API spend. The optional
+  "Re-analyze URLs already saved" checkbox forces fresh calls.
+- "Use this article" switches the active asset. Switching articles clears stale
+  PR angles, opportunities, reviews, and journalist results before the next step.
+- The active asset still drives the existing PR angles -> Opportunities ->
+  Journalists -> Outreach flow.
+- The Vercel demo mirrors the same batch input, sequential analysis, active
+  article selection, and downstream reset, but keeps results in browser memory
+  only.
+
 ### Cost
 - Default model changed to `gpt-5-nano` (cheapest standard nano).
 - Search context defaults to `low`; max turns 3.
 - Listicle searches can be limited to 5, 10, 15, or 20 candidate pages per run.
+- Article analysis runs once per new URL, up to five per batch. Saved analyses
+  are reused unless "Re-analyze URLs already saved" is checked.
 - On-demand contact/policy/journalist research only.
 - Draft generation uses no web search and one short model call.
 - Optional `gpt-5-nano-flex` for lower per-token cost.
@@ -104,6 +125,11 @@ accounts, quotas, or billing.
 - Verified with a fake `Runner.run` across repeated and concurrent calls, a
   Streamlit UI smoke test, and the full local storage check.
 - Fix commit: `acd5c9d`; the Vercel production deployment uses the same code.
+- The real workspace snapshot was restored from
+  `backups/pr_agent_before_sender_hardcode_20261022-174929.sqlite3` after a test
+  AppTest run saved fake batch analyses into the live database. Future AppTest
+  runs should set `PR_AGENT_DATA_DIR` to a temporary directory so they cannot
+  overwrite the live workspace.
 
 ### Hosting and repo
 - GitHub repository: `https://github.com/Prachi-Ad/digital-pr-agent` (private).
@@ -120,8 +146,9 @@ accounts, quotas, or billing.
   demo from this subfolder, not the Streamlit repository root.
 - Deployment: Vercel Git integration builds the `vercel-app` subfolder on each
   push to `main`; the production alias is verified healthy.
-- Code deployed: commit `0b88d53` (includes the hardcoded sender Settings from
-  `dd2f9d0`, building on the Vercel UI parity commits `f446a79` and `187fa67`).
+- Code deployed: latest `main` commit (batch article analysis for up to five
+  URLs, building on the hardcoded sender work in `0b88d53` / `dd2f9d0` and the
+  Vercel UI parity commits `f446a79` and `187fa67`).
 - Status: READY; production alias live as of 2026-10-22. Latest UI deployment:
   `https://vercel-jga286tsy-prachi-8a13.vercel.app` (deployment URL, protected
   by Vercel Authentication). Public alias:
@@ -145,6 +172,8 @@ accounts, quotas, or billing.
 - The Vercel demo is a Next.js visual port, not the Streamlit runtime. It covers
   the research actions but has no persistence, accounts, quotas, review library,
   or draft generation. The local Streamlit app is the full tool.
+- The Vercel demo accepts up to five article URLs per batch, but analyses are
+  kept only in browser memory and are lost on reload.
 - A saved PR opportunity queue can be reviewed after a restart without the
   original full asset analysis. Re-analyzing the article restores journalist
   research for new candidates.

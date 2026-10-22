@@ -26,6 +26,7 @@ type DigitalStep = (typeof digitalSteps)[number];
 type ListicleStep = (typeof listicleSteps)[number];
 type Nav = "Workspace" | "Research Library" | "Settings";
 type Workflow = "digital" | "listicles";
+type AnalyzedArticle = { url: string; analysis: AnyObj };
 
 async function callApi(action: string, body: any = {}, onRetry?: (attempt: number) => void) {
   const maxAttempts = 3;
@@ -102,8 +103,10 @@ export default function Home() {
   const [retryMsg, setRetryMsg] = useState<string | null>(null);
 
   // Analyze state
-  const [url, setUrl] = useState("");
+  const [urlsText, setUrlsText] = useState("");
   const [loadingAnalyze, setLoadingAnalyze] = useState(false);
+  const [analyses, setAnalyses] = useState<AnalyzedArticle[]>([]);
+  const [activeUrl, setActiveUrl] = useState("");
   const [analysis, setAnalysis] = useState<AnyObj | null>(null);
   const [errAnalyze, setErrAnalyze] = useState<string | null>(null);
 
@@ -162,25 +165,82 @@ export default function Home() {
     setNav("Workspace");
   }
 
-  async function analyze(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!url.trim()) return;
-    setLoadingAnalyze(true);
-    setErrAnalyze(null);
-    setAnalysis(null);
+  function resetAnalysisDownstream() {
     setSelectedAngle(null);
     setOpportunities(null);
     setSelectedOpp(null);
     setJournalists(null);
+    setErrOpp(null);
+    setErrJourn(null);
     setRetryMsg(null);
+  }
+
+  function activateAnalyzedArticle(item: AnalyzedArticle) {
+    setAnalysis(item.analysis);
+    setActiveUrl(item.url);
+    resetAnalysisDownstream();
+  }
+
+  async function analyze(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const rawUrls = urlsText
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const seen = new Set<string>();
+    const urls = rawUrls.filter((value) => {
+      if (seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    });
+
+    if (urls.length === 0) {
+      setErrAnalyze("Paste at least one article URL.");
+      return;
+    }
+    if (urls.length > 5) {
+      setErrAnalyze(`Analyze up to 5 articles at a time. You entered ${urls.length}.`);
+      return;
+    }
+    const invalid = urls.filter((value) => !value.startsWith("https://"));
+    if (invalid.length > 0) {
+      setErrAnalyze(`Use full HTTPS URLs. Fix: ${invalid.join(", ")}`);
+      return;
+    }
+
+    setLoadingAnalyze(true);
+    setErrAnalyze(null);
+    setAnalyses([]);
+    setActiveUrl("");
+    setAnalysis(null);
+    resetAnalysisDownstream();
+
+    const results: AnalyzedArticle[] = [];
+    const failures: string[] = [];
     try {
-      const data = await callApi("analyze", { article_url: url.trim() }, (a) =>
-        setRetryMsg(`Retrying (attempt ${a}/3)...`)
-      );
-      setAnalysis(data);
-      setDigitalStep("PR angles");
-    } catch (err: any) {
-      setErrAnalyze(err?.message || "Something went wrong");
+      for (let index = 0; index < urls.length; index += 1) {
+        const articleUrl = urls[index];
+        setRetryMsg(`Analyzing ${index + 1} of ${urls.length}...`);
+        try {
+          const data = await callApi("analyze", { article_url: articleUrl }, (attempt) =>
+            setRetryMsg(`Analyzing ${index + 1} of ${urls.length} - retry ${attempt}/3...`)
+          );
+          results.push({ url: articleUrl, analysis: data });
+        } catch (err: any) {
+          failures.push(`${articleUrl}: ${err?.message || "failed"}`);
+        }
+      }
+
+      setAnalyses(results);
+      if (results.length > 0) {
+        setAnalysis(results[0].analysis);
+        setActiveUrl(results[0].url);
+      }
+      if (failures.length > 0) {
+        setErrAnalyze(
+          `${failures.length} article(s) could not be analyzed. ${failures.join(" | ")}`
+        );
+      }
     } finally {
       setLoadingAnalyze(false);
       setRetryMsg(null);
@@ -432,31 +492,66 @@ export default function Home() {
               {workflow === "digital" && digitalStep === "Article" && (
                 <div className="stack">
                   <section className="card">
-                    <h2 className="section-title">Analyze an article</h2>
+                    <h2 className="section-title">Analyze articles</h2>
                     <p className="body-text">
-                      Paste a published article. The agent extracts the strongest PR angles, the evidence behind them,
-                      and the next useful action.
+                      Paste up to 5 published article URLs, one per line. The agent extracts the strongest PR angles,
+                      the evidence behind them, and the next useful action for each.
                     </p>
-                    <form onSubmit={analyze} className="form-row">
-                      <input
-                        type="url"
+                    <form onSubmit={analyze} style={{ marginTop: 16 }}>
+                      <textarea
                         required
-                        value={url}
-                        onChange={(e) => setUrl(e.target.value)}
-                        placeholder="https://example.com/article"
+                        value={urlsText}
+                        onChange={(e) => setUrlsText(e.target.value)}
+                        placeholder={
+                          "https://example.com/article-1\nhttps://example.com/article-2\nhttps://example.com/article-3\nhttps://example.com/article-4\nhttps://example.com/article-5"
+                        }
                         className="input"
+                        rows={4}
+                        style={{ minHeight: 110, resize: "vertical" }}
                       />
-                      <button type="submit" disabled={loadingAnalyze} className="btn-primary">
-                        {loadingAnalyze ? <Spinner /> : <Search size={17} />}
-                        Analyze article
-                      </button>
+                      <div className="actions" style={{ marginTop: 10 }}>
+                        <button type="submit" disabled={loadingAnalyze} className="btn-primary">
+                          {loadingAnalyze ? <Spinner /> : <Search size={17} />}
+                          {loadingAnalyze ? "Analyzing articles..." : "Analyze articles"}
+                        </button>
+                      </div>
                     </form>
+                    <p className="meta" style={{ marginTop: 8 }}>
+                      Each new URL runs one analysis call. Up to 5 calls per batch.
+                    </p>
                     {errAnalyze && <Note tone="warn">{errAnalyze}</Note>}
                   </section>
+
+                  {analyses.length > 1 && (
+                    <section className="card">
+                      <h2 className="section-title">Analyzed articles ({analyses.length})</h2>
+                      <div className="stack-sm">
+                        {analyses.map((item) => (
+                          <div key={item.url} className="context-card">
+                            <div className="context-label">
+                              {activeUrl === item.url ? "Active article" : "Saved analysis"}
+                            </div>
+                            <div className="context-value">{item.analysis.article_title}</div>
+                            <p className="meta">{item.url}</p>
+                            {activeUrl !== item.url && (
+                              <button
+                                type="button"
+                                className="btn-secondary"
+                                onClick={() => activateAnalyzedArticle(item)}
+                              >
+                                Use this article
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
                   {analysis && (
                     <section className="card">
                       <h2 className="section-title">{analysis.article_title}</h2>
+                      {activeUrl && <p className="meta">{activeUrl}</p>}
                       <p className="meta">{analysis.main_topic}</p>
                       <p className="body-text">{analysis.assessment}</p>
                       {analysis.statistics?.length > 0 && (
