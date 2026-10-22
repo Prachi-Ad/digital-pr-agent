@@ -87,6 +87,7 @@ after a restart, and the start screen offers both "Continue saved..." and
   concurrent agent calls reuse the same open loop.
 - Verified with a fake `Runner.run` across repeated and concurrent calls, a
   Streamlit UI smoke test, and the full local storage check.
+- Fix commit: `acd5c9d`; the Vercel production deployment uses the same code.
 
 ### Hosting and repo
 - GitHub repository: `https://github.com/Prachi-Ad/digital-pr-agent` (private).
