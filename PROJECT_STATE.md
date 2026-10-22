@@ -151,7 +151,7 @@ generation, accounts, quotas, or billing.
   URLs, building on the hardcoded sender work in `0b88d53` / `dd2f9d0` and the
   Vercel UI parity commits `f446a79` and `187fa67`).
 - Status: READY; production alias live as of 2026-10-22. Latest UI deployment:
-  `https://vercel-phxpmxh80-prachi-8a13.vercel.app` (deployment URL, protected
+  `https://vercel-ax0my87i4-prachi-8a13.vercel.app` (deployment URL, protected
   by Vercel Authentication). Public alias:
   `https://vercel-app-gules-three.vercel.app`.
 - Batch article analysis was verified on the public alias: "+ Add URL" creates
