@@ -100,6 +100,8 @@ after a restart, and the start screen offers both "Continue saved..." and
 ### Deployment (live)
 - Vercel project: `vercel-app` under team `prachi-8a13`.
 - Production URL: `https://vercel-app-gules-three.vercel.app`
+- Git integration root directory: `vercel-app`. Vercel must build the Next.js
+  demo from this subfolder, not the Streamlit repository root.
 - Deployment ID: `dpl_756vfrFfdrwRZ6GmE27oKmLimSK7`
 - Code deployed: commit `acd5c9d` (persistent event-loop fix).
 - Status: READY; production alias live as of 2026-10-22. This deployment
