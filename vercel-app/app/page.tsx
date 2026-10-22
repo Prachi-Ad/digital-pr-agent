@@ -1158,6 +1158,14 @@ export default function Home() {
                     <strong>Vista Social</strong>
                   </div>
                   <div className="setting-row">
+                    <span>Sender name</span>
+                    <strong>Prachi</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Job role</span>
+                    <strong>SEO Specialist</strong>
+                  </div>
+                  <div className="setting-row">
                     <span>Model</span>
                     <strong>gpt-5-nano</strong>
                   </div>

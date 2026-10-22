@@ -26,6 +26,10 @@ SEARCH_CONTEXT_SIZE = (os.environ.get("SEARCH_CONTEXT_SIZE") or os.environ.get("
 if SEARCH_CONTEXT_SIZE not in {"low", "medium", "high"}:
     SEARCH_CONTEXT_SIZE = "low"
 
+# Fixed sender identity used in every outreach draft.
+HARDCODED_SENDER_NAME = "Prachi"
+HARDCODED_SENDER_ROLE = "SEO Specialist"
+
 
 # Keep responses fast and cheap.
 MODEL_SETTINGS = ModelSettings(
@@ -384,7 +388,7 @@ class OutreachDraft(BaseModel):
     message_body: str = Field(
         description=(
             "The complete draft message. Concise, specific, and ready for human review. "
-            "Use [Your name] and [Your role] placeholders rather than inventing sender details."
+            "Use the supplied sender name and role exactly; do not invent or alter them."
         )
     )
     personalization_evidence: str = Field(
@@ -743,7 +747,7 @@ STYLE:
 - No hype, flattery, fake urgency, or generic flattery.
 - Short paragraphs. No bullet-point walls.
 - Subject line under 70 characters and specific to the target.
-- Use [Your name] and [Your role] placeholders for sender details.
+- Use the supplied sender name and role exactly. Do not invent or alter them.
 - If a necessary fact is missing, leave a clear [verify: ...] placeholder and add it
   to facts_to_verify.
 
@@ -1030,14 +1034,14 @@ def draft_journalist_pitch(
     opportunity: PROpportunity,
     person: JournalistProfile,
     angle_context: str = "",
-    sender_name: str = "",
-    sender_role: str = "",
+    sender_name: str = HARDCODED_SENDER_NAME,
+    sender_role: str = HARDCODED_SENDER_ROLE,
 ) -> OutreachDraft:
     """Draft a personalized Digital PR pitch for human review. Never sends."""
 
     sender_line = (
-        f"SENDER NAME: {sender_name or '[Your name]'}\n"
-        f"SENDER ROLE: {sender_role or '[Your role]'}\n"
+        f"SENDER NAME: {sender_name or HARDCODED_SENDER_NAME}\n"
+        f"SENDER ROLE: {sender_role or HARDCODED_SENDER_ROLE}\n"
     )
 
     prompt = f"""
@@ -1074,8 +1078,9 @@ Credible brand contribution: {opportunity.brand_contribution}
 Research evidence: {opportunity.evidence}
 
 Write a concise pitch that references the journalist's specific work and offers the
-brand's contribution. Use only the verified facts above. Put any missing sender detail
-in [verify: ...] placeholders and list it in facts_to_verify. If the journalist profile
+brand's contribution. Use only the verified facts above. Use the supplied sender name
+and role exactly; do not invent or alter them. Put any other missing detail in
+[verify: ...] placeholders and list it in facts_to_verify. If the journalist profile
 or contact route is Unknown, set channel to 'Official publication contact route' and
 note in compliance_notes that the route must be verified first.
 """
@@ -1087,8 +1092,8 @@ def draft_listicle_inclusion_request(
     item: ListicleOpportunity,
     contact: ListicleContact,
     policy: PublisherPolicyAssessment | None = None,
-    sender_name: str = "",
-    sender_role: str = "",
+    sender_name: str = HARDCODED_SENDER_NAME,
+    sender_role: str = HARDCODED_SENDER_ROLE,
 ) -> OutreachDraft:
     """Draft a listicle inclusion request for human review. Never sends or submits."""
 
@@ -1100,8 +1105,8 @@ def draft_listicle_inclusion_request(
     prompt = f"""
 Write a listicle inclusion request for human review. Do not send or submit anything.
 
-SENDER NAME: {sender_name or '[Your name]'}
-SENDER ROLE: {sender_role or '[Your role]'}
+SENDER NAME: {sender_name or HARDCODED_SENDER_NAME}
+SENDER ROLE: {sender_role or HARDCODED_SENDER_ROLE}
 
 BRAND: {BRAND_NAME}
 PRODUCT: {PRODUCT_DESCRIPTION}

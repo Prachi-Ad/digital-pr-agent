@@ -29,6 +29,8 @@ from agent import (
     PRODUCT_DESCRIPTION,
     MODEL,
     SEARCH_CONTEXT_SIZE,
+    HARDCODED_SENDER_NAME,
+    HARDCODED_SENDER_ROLE,
     AssetAnalysis,
     JournalistProfile,
     JournalistResearchResults,
@@ -156,8 +158,8 @@ DEFAULTS = {
     "workflow_mode": None,
     "pr_step": "Article",
     "listicle_step": "Search",
-    "sender_name": "",
-    "sender_role": "",
+    "sender_name": HARDCODED_SENDER_NAME,
+    "sender_role": HARDCODED_SENDER_ROLE,
     "main_nav": "Workspace",
 }
 
@@ -244,6 +246,10 @@ if st.session_state.pr_step not in PR_STEPS:
     st.session_state.pr_step = PR_STEPS[0]
 if st.session_state.listicle_step not in LISTICLE_STEPS:
     st.session_state.listicle_step = LISTICLE_STEPS[0]
+
+# Sender identity is fixed for this workspace. Override any older saved values.
+st.session_state.sender_name = HARDCODED_SENDER_NAME
+st.session_state.sender_role = HARDCODED_SENDER_ROLE
 
 
 # =========================================================
@@ -1450,13 +1456,8 @@ def _render_pr_outreach():
     )
 
     with st.expander("Your sender details (used in drafts)"):
-        c1, c2 = st.columns(2)
-        st.session_state.sender_name = c1.text_input(
-            "Your name", value=st.session_state.sender_name, key="sender_name_input"
-        )
-        st.session_state.sender_role = c2.text_input(
-            "Your role", value=st.session_state.sender_role, key="sender_role_input"
-        )
+        st.markdown(f"**{HARDCODED_SENDER_NAME}** · {HARDCODED_SENDER_ROLE}")
+        st.caption("Hardcoded for this workspace.")
 
     targets = _qualified_journalist_targets()
     if not targets:
@@ -1983,13 +1984,8 @@ def _render_listicle_outreach():
     )
 
     with st.expander("Your sender details (used in drafts)"):
-        c1, c2 = st.columns(2)
-        st.session_state.sender_name = c1.text_input(
-            "Your name", value=st.session_state.sender_name, key="sender_name_input"
-        )
-        st.session_state.sender_role = c2.text_input(
-            "Your role", value=st.session_state.sender_role, key="sender_role_input"
-        )
+        st.markdown(f"**{HARDCODED_SENDER_NAME}** · {HARDCODED_SENDER_ROLE}")
+        st.caption("Hardcoded for this workspace.")
 
     targets = _listicle_outreach_targets()
     if not targets:
@@ -2414,15 +2410,8 @@ def _render_settings():
 
     st.divider()
     st.subheader("Your sender details")
-    with st.form("sender_form"):
-        sender_name = st.text_input("Your name", value=st.session_state.sender_name)
-        sender_role = st.text_input("Your role", value=st.session_state.sender_role)
-        if st.form_submit_button("Save sender details"):
-            st.session_state.sender_name = sender_name.strip()
-            st.session_state.sender_role = sender_role.strip()
-            st.session_state["sender_name_input"] = sender_name.strip()
-            st.session_state["sender_role_input"] = sender_role.strip()
-            st.success("Sender details saved for future drafts.")
+    st.markdown(f"**{HARDCODED_SENDER_NAME}** · {HARDCODED_SENDER_ROLE}")
+    st.caption("This sender identity is hardcoded and used in every outreach draft.")
 
     st.divider()
     st.subheader("Storage and safety")
