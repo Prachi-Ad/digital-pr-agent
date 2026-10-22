@@ -102,9 +102,9 @@ after a restart, and the start screen offers both "Continue saved..." and
 - Production URL: `https://vercel-app-gules-three.vercel.app`
 - Git integration root directory: `vercel-app`. Vercel must build the Next.js
   demo from this subfolder, not the Streamlit repository root.
-- Deployment ID: `dpl_ESYwz7rCLC6YNi7Xd9e15EbtRgdT`
-- Code deployed: commit `acd5c9d` (persistent event-loop fix); Git-triggered
-  build from commit `429c40d`.
+- Deployment: Vercel Git integration builds the `vercel-app` subfolder on each
+  push to `main`; the production alias is verified healthy.
+- Code deployed: commit `acd5c9d` (persistent event-loop fix).
 - Status: READY; production alias live as of 2026-10-22. The Git-triggered
   deployment builds the `vercel-app` subfolder and serves the demo correctly.
 - Vercel environment: `OPENAI_API_KEY` is configured for Production,
