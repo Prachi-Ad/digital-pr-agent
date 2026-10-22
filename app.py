@@ -1566,8 +1566,9 @@ def _render_listicle_search():
             )
             max_results = st.select_slider(
                 "Maximum candidate pages",
-                options=[10, 15, 20],
+                options=[5, 10, 15, 20],
                 value=15,
+                help="Choose 5 for a smaller, faster search.",
             )
         submitted = st.form_submit_button(
             "Find listicle opportunities",

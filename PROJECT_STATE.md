@@ -60,6 +60,7 @@ accounts, quotas, or billing.
 ### Cost
 - Default model changed to `gpt-5-nano` (cheapest standard nano).
 - Search context defaults to `low`; max turns 3.
+- Listicle searches can be limited to 5, 10, 15, or 20 candidate pages per run.
 - On-demand contact/policy/journalist research only.
 - Draft generation uses no web search and one short model call.
 - Optional `gpt-5-nano-flex` for lower per-token cost.
