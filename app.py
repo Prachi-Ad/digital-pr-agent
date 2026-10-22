@@ -1062,26 +1062,45 @@ def _render_no_draft(record_label, button_label, button_key, on_prepare, disable
 
 def _render_pr_article():
     st.caption(
-        "Paste up to 5 published article URLs, one per line. The agent extracts "
-        "useful angles and evidence for each."
+        "Add up to 5 published article URLs. The agent extracts useful angles "
+        "and evidence for each."
     )
 
-    if "article_urls_input" not in st.session_state:
-        st.session_state.article_urls_input = (st.session_state.article_url or "").strip()
+    if "article_url_slot_count" not in st.session_state:
+        st.session_state.article_url_slot_count = 1
+    if st.session_state.pop("_remove_last_article_url", False):
+        last_index = max(0, st.session_state.article_url_slot_count - 1)
+        st.session_state.pop(f"article_url_{last_index}", None)
+        st.session_state.article_url_slot_count = max(1, last_index)
+    if "article_url_0" not in st.session_state:
+        st.session_state.article_url_0 = (st.session_state.article_url or "").strip()
 
-    urls_text = st.text_area(
-        "Article URLs",
-        key="article_urls_input",
-        height=130,
-        placeholder=(
-            "https://example.com/article-1\n"
-            "https://example.com/article-2\n"
-            "https://example.com/article-3\n"
-            "https://example.com/article-4\n"
-            "https://example.com/article-5"
-        ),
-        help="Up to 5 HTTPS URLs, one per line.",
-    )
+    slot_count = max(1, min(5, int(st.session_state.article_url_slot_count)))
+    st.session_state.article_url_slot_count = slot_count
+    url_values = []
+    for index in range(slot_count):
+        url_values.append(
+            st.text_input(
+                f"Article URL {index + 1}",
+                key=f"article_url_{index}",
+                placeholder="https://example.com/article",
+            )
+        )
+
+    add_col, remove_col, _ = st.columns([1.2, 1.2, 3.6])
+    with add_col:
+        if slot_count < 5 and st.button(
+            "+ Add URL", key="add_article_url", width="content"
+        ):
+            st.session_state.article_url_slot_count = slot_count + 1
+            st.rerun()
+    with remove_col:
+        if slot_count > 1 and st.button(
+            "− Remove last", key="remove_article_url", width="content"
+        ):
+            st.session_state["_remove_last_article_url"] = True
+            st.rerun()
+
     reanalyze = st.checkbox(
         "Re-analyze URLs already saved",
         value=False,
@@ -1090,11 +1109,11 @@ def _render_pr_article():
     st.caption("Each new URL runs one analysis call. Up to 5 calls per batch.")
 
     if st.button("Analyze articles", type="primary", width="stretch"):
-        urls, invalid = _parse_article_urls(urls_text)
+        urls, invalid = _parse_article_urls("\n".join(url_values))
         if invalid:
             st.error("Use full HTTPS URLs. Fix: " + ", ".join(invalid[:5]))
         elif not urls:
-            st.warning("Paste at least one article URL.")
+            st.warning("Add at least one article URL.")
         elif len(urls) > 5:
             st.warning(f"Analyze up to 5 articles at a time. You entered {len(urls)}.")
         else:

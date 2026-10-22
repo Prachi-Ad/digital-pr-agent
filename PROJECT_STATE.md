@@ -59,9 +59,10 @@ generation, accounts, quotas, or billing.
 - No sending or form submission, ever.
 
 ### Batch article analysis
-- The Article step accepts up to five HTTPS article URLs, one per line.
-- URLs are deduplicated and validated before analysis. Invalid URLs and batches
-  larger than five are rejected with a clear message.
+- The Article step starts with one URL field. "+ Add URL" adds up to five
+  separate HTTPS fields; "− Remove last" removes the most recent field.
+- Empty fields are ignored, and duplicate URLs are deduplicated before analysis.
+  Invalid URLs are rejected with a clear message.
 - Each URL gets its own asset analysis. Partial failures are reported per URL,
   and successful analyses are kept.
 - Analyses are stored in `asset_analyses`, keyed by the input URL, and persisted
@@ -72,9 +73,9 @@ generation, accounts, quotas, or billing.
   PR angles, opportunities, reviews, and journalist results before the next step.
 - The active asset still drives the existing PR angles -> Opportunities ->
   Journalists -> Outreach flow.
-- The Vercel demo mirrors the same batch input, sequential analysis, active
-  article selection, and downstream reset, but keeps results in browser memory
-  only.
+- The Vercel demo mirrors the same add/remove URL fields, sequential analysis,
+  active article selection, and downstream reset, but keeps results in browser
+  memory only.
 
 ### Cost
 - Default model changed to `gpt-5-nano` (cheapest standard nano).
@@ -153,8 +154,8 @@ generation, accounts, quotas, or billing.
   `https://vercel-phxpmxh80-prachi-8a13.vercel.app` (deployment URL, protected
   by Vercel Authentication). Public alias:
   `https://vercel-app-gules-three.vercel.app`.
-- Batch article analysis was verified on the public alias: the 5-URL textarea
-  renders, a 6-URL batch is rejected before any API call, and non-HTTPS URLs
+- Batch article analysis was verified on the public alias: "+ Add URL" creates
+  up to five separate fields, a sixth field is prevented, and non-HTTPS URLs
   show the validation message.
 - Vercel environment: `OPENAI_API_KEY` is configured for Production,
   Preview, and Development (value not stored in the repo).

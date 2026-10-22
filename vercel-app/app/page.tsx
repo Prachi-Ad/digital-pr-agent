@@ -12,10 +12,12 @@ import {
   List,
   Loader2,
   Mail,
+  Plus,
   Search,
   Shield,
   SlidersHorizontal,
   Users,
+  X,
 } from "lucide-react";
 
 type AnyObj = Record<string, any>;
@@ -103,7 +105,7 @@ export default function Home() {
   const [retryMsg, setRetryMsg] = useState<string | null>(null);
 
   // Analyze state
-  const [urlsText, setUrlsText] = useState("");
+  const [urlInputs, setUrlInputs] = useState<string[]>([""]);
   const [loadingAnalyze, setLoadingAnalyze] = useState(false);
   const [analyses, setAnalyses] = useState<AnalyzedArticle[]>([]);
   const [activeUrl, setActiveUrl] = useState("");
@@ -165,6 +167,21 @@ export default function Home() {
     setNav("Workspace");
   }
 
+  function addUrlInput() {
+    setUrlInputs((current) => (current.length >= 5 ? current : [...current, ""]));
+  }
+
+  function updateUrlInput(index: number, value: string) {
+    setUrlInputs((current) => current.map((item, i) => (i === index ? value : item)));
+  }
+
+  function removeUrlInput(index: number) {
+    setUrlInputs((current) => {
+      if (current.length <= 1) return current;
+      return current.filter((_, i) => i !== index);
+    });
+  }
+
   function resetAnalysisDownstream() {
     setSelectedAngle(null);
     setOpportunities(null);
@@ -183,10 +200,7 @@ export default function Home() {
 
   async function analyze(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const rawUrls = urlsText
-      .split(/\r?\n/)
-      .map((value) => value.trim())
-      .filter(Boolean);
+    const rawUrls = urlInputs.map((value) => value.trim()).filter(Boolean);
     const seen = new Set<string>();
     const urls = rawUrls.filter((value) => {
       if (seen.has(value)) return false;
@@ -195,7 +209,7 @@ export default function Home() {
     });
 
     if (urls.length === 0) {
-      setErrAnalyze("Paste at least one article URL.");
+      setErrAnalyze("Add at least one article URL.");
       return;
     }
     if (urls.length > 5) {
@@ -494,22 +508,44 @@ export default function Home() {
                   <section className="card">
                     <h2 className="section-title">Analyze articles</h2>
                     <p className="body-text">
-                      Paste up to 5 published article URLs, one per line. The agent extracts the strongest PR angles,
-                      the evidence behind them, and the next useful action for each.
+                      Add up to 5 published article URLs. Use the plus button to add another field. The agent extracts
+                      the strongest PR angles, the evidence behind them, and the next useful action for each.
                     </p>
                     <form onSubmit={analyze} style={{ marginTop: 16 }}>
-                      <textarea
-                        required
-                        value={urlsText}
-                        onChange={(e) => setUrlsText(e.target.value)}
-                        placeholder={
-                          "https://example.com/article-1\nhttps://example.com/article-2\nhttps://example.com/article-3\nhttps://example.com/article-4\nhttps://example.com/article-5"
-                        }
-                        className="input"
-                        rows={4}
-                        style={{ minHeight: 110, resize: "vertical" }}
-                      />
+                      <div className="stack-sm">
+                        {urlInputs.map((value, index) => (
+                          <div
+                            key={index}
+                            style={{ display: "flex", gap: 8, alignItems: "center" }}
+                          >
+                            <input
+                              type="url"
+                              value={value}
+                              onChange={(e) => updateUrlInput(index, e.target.value)}
+                              placeholder={`https://example.com/article-${index + 1}`}
+                              className="input"
+                            />
+                            {urlInputs.length > 1 && (
+                              <button
+                                type="button"
+                                className="btn-secondary"
+                                onClick={() => removeUrlInput(index)}
+                                aria-label={`Remove article URL ${index + 1}`}
+                                title="Remove URL"
+                              >
+                                <X size={16} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                       <div className="actions" style={{ marginTop: 10 }}>
+                        {urlInputs.length < 5 && (
+                          <button type="button" className="btn-secondary" onClick={addUrlInput}>
+                            <Plus size={16} /> Add URL
+                          </button>
+                        )}
+                        {urlInputs.length >= 5 && <span className="meta">Maximum 5 URLs.</span>}
                         <button type="submit" disabled={loadingAnalyze} className="btn-primary">
                           {loadingAnalyze ? <Spinner /> : <Search size={17} />}
                           {loadingAnalyze ? "Analyzing articles..." : "Analyze articles"}
