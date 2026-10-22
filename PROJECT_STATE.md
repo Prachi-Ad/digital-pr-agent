@@ -102,15 +102,15 @@ after a restart, and the start screen offers both "Continue saved..." and
 - Production URL: `https://vercel-app-gules-three.vercel.app`
 - Git integration root directory: `vercel-app`. Vercel must build the Next.js
   demo from this subfolder, not the Streamlit repository root.
-- Deployment ID: `dpl_756vfrFfdrwRZ6GmE27oKmLimSK7`
-- Code deployed: commit `acd5c9d` (persistent event-loop fix).
-- Status: READY; production alias live as of 2026-10-22. This deployment
-  includes the persistent event-loop fix.
+- Deployment ID: `dpl_ESYwz7rCLC6YNi7Xd9e15EbtRgdT`
+- Code deployed: commit `acd5c9d` (persistent event-loop fix); Git-triggered
+  build from commit `429c40d`.
+- Status: READY; production alias live as of 2026-10-22. The Git-triggered
+  deployment builds the `vercel-app` subfolder and serves the demo correctly.
 - Vercel environment: `OPENAI_API_KEY` is configured for Production,
   Preview, and Development (value not stored in the repo).
-- Build verified: Next.js 14.2.15 production build and Python dependencies
-  complete successfully; `/api/analyze` health returns
-  `{"status":"ok","service":"digital-pr-agent"}`.
+- Build verified: Git-triggered Next.js 14.2.15 production build and Python
+  dependencies complete successfully; root and `/api/analyze` both return 200.
 - Demo scope: the Vercel app can call analyze, PR opportunities, journalists,
   listicles, contact, and policy research actions. It does not yet have
   persistence, accounts, review-library storage, usage quotas, or billing.
