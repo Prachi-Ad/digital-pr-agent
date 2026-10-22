@@ -748,6 +748,7 @@ STYLE:
 - Short paragraphs. No bullet-point walls.
 - Subject line under 70 characters and specific to the target.
 - Use the supplied sender name and role exactly. Do not invent or alter them.
+- Never emit [Your name], [Your role], or [verify: sender ...] placeholders.
 - If a necessary fact is missing, leave a clear [verify: ...] placeholder and add it
   to facts_to_verify.
 
