@@ -100,7 +100,8 @@ after a restart, and the start screen offers both "Continue saved..." and
 ### Deployment (live)
 - Vercel project: `vercel-app` under team `prachi-8a13`.
 - Production URL: `https://vercel-app-gules-three.vercel.app`
-- Deployment ID: `dpl_FNzs5QLrGffAWwXADfW65TDGdqWv`
+- Deployment ID: `dpl_756vfrFfdrwRZ6GmE27oKmLimSK7`
+- Code deployed: commit `acd5c9d` (persistent event-loop fix).
 - Status: READY; production alias live as of 2026-10-22. This deployment
   includes the persistent event-loop fix.
 - Vercel environment: `OPENAI_API_KEY` is configured for Production,
