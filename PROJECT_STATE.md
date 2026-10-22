@@ -116,9 +116,9 @@ draft generation, accounts, quotas, or billing.
 - Deployment: Vercel Git integration builds the `vercel-app` subfolder on each
   push to `main`; the production alias is verified healthy.
 - Code deployed: commit `f446a79` (Vercel UI parity, building on `187fa67`).
-- Status: READY; production alias live as of 2026-10-22. Latest production
-  deployment: `https://vercel-3blbjzkur-prachi-8a13.vercel.app` (deployment URL,
-  protected by Vercel Authentication). Public alias:
+- Status: READY; production alias live as of 2026-10-22. Latest UI deployment:
+  `https://vercel-3blbjzkur-prachi-8a13.vercel.app` (deployment URL, protected
+  by Vercel Authentication). Public alias:
   `https://vercel-app-gules-three.vercel.app`.
 - Vercel environment: `OPENAI_API_KEY` is configured for Production,
   Preview, and Development (value not stored in the repo).
