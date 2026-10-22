@@ -144,7 +144,7 @@ content = "import agent, database, email_sender" & vbCrLf & _
           "required_db = ['init_db', 'load_app_snapshot', 'save_app_snapshot', 'upsert_listicle_prospect', 'upsert_pr_opportunity', 'upsert_journalist', 'upsert_outreach_draft', 'update_outreach_draft', 'list_outreach_drafts', 'create_database_backup', 'count_emails_sent_today', 'email_sends_csv_bytes', 'is_email_suppressed']" & vbCrLf & _
           "missing_db = [name for name in required_db if not callable(getattr(database, name, None))]" & vbCrLf & _
           "assert not missing_db, 'Missing database functions: ' + ', '.join(missing_db)" & vbCrLf & _
-          "required_email = ['load_email_config', 'save_email_config', 'is_valid_email', 'send_email', 'test_connection']" & vbCrLf & _
+          "required_email = ['load_email_config', 'save_email_config', 'is_valid_email', 'send_email', 'test_connection', 'create_oauth_state', 'validate_oauth_state', 'build_oauth_url', 'complete_oauth', 'disconnect_oauth', 'get_oauth_access_token', 'is_oauth_connected', 'missing_config_fields']" & vbCrLf & _
           "missing_email = [name for name in required_email if not callable(getattr(email_sender, name, None))]" & vbCrLf & _
           "assert not missing_email, 'Missing email_sender functions: ' + ', '.join(missing_email)" & vbCrLf & _
           "database.init_db()" & vbCrLf & _

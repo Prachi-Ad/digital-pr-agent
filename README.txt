@@ -16,7 +16,7 @@ ONE-CLICK START
 THE THREE PAGES
 - Workspace: the daily workflow. Pick Digital PR or Listicle inclusion and follow the numbered steps.
 - Research Library: all saved records, email send history, CSV exports, and verified database backups.
-- Settings: brand, sender details, Gmail SMTP, do-not-send list, model/cost information, storage, and safety rules.
+- Settings: brand, sender details, email sending (Google Workspace OAuth, app password, or custom SMTP), do-not-send list, model/cost information, storage, and safety rules.
 
 DAILY WORKFLOW
 Digital PR
@@ -32,13 +32,39 @@ Listicle inclusion
 3. Prepare an inclusion request for an approved prospect with a saved contact. Add the verified recipient email, approve it for automated send, and confirm the batch, or send/submit it yourself.
 
 EMAIL SENDING (LOCAL ONLY)
+Choose one of two Google connection methods in Settings > Email sending.
+
+OPTION A - GOOGLE WORKSPACE SIGN-IN (OAUTH)
+Use this for a work/school account when app passwords are blocked.
+1. Create a Google Cloud project inside your Workspace organization.
+2. Configure the OAuth consent screen. Choose Internal for a durable Workspace connection. External testing works, but Google expires refresh tokens after 7 days.
+3. Add scopes: openid, email, https://mail.google.com/
+4. Create an OAuth client ID of type Web application. Add this authorized redirect URI exactly: http://localhost:8501/
+5. Settings > Email sending > Google Workspace sign-in (OAuth): paste the client ID and secret, save, then click Connect Google Workspace account.
+6. Sign in with the work account and approve. Click Test Google sign-in.
+- A custom local app cannot reuse Instantly's or ContactOut's OAuth client. You need your own Google Cloud OAuth client.
+- A Workspace admin may need to allow this OAuth app and the Gmail scope. The app cannot bypass an admin block. Ask the admin to allow the client ID or enable app passwords.
+- Gmail SMTP over OAuth requires the broad https://mail.google.com/ scope. The app only logs in and sends; it does not read mail.
+- If the admin will not approve the scope, ask them to enable app passwords for your user or use an approved SMTP provider.
+
+OPTION B - GOOGLE APP PASSWORD
 1. Turn on 2-Step Verification for the Google account.
 2. Create a Google app password at https://myaccount.google.com/apppasswords.
-3. Settings > Email sending: enter the full Gmail / Google Workspace address and the app password. Set delay (default 30 seconds), daily cap (default 20), and mailing address. Click Test SMTP connection.
-4. Draft status must be Approved for automated send. Batch sending also requires a separate confirmation checkbox.
-5. Every email gets an opt-out line. All attempts are in Research Library > Email send log.
-6. If someone opts out, add their address to Settings > Do-not-send list before any further batch.
-- Credentials are stored in data\email_config.json (gitignored, plaintext app password). Protect the computer.
+3. Settings > Email sending > Google app password: enter the full Gmail / Google Workspace address and the app password. Set delay (default 30 seconds), daily cap (default 20), and mailing address. Click Test SMTP connection.
+- If Google says the setting is not available for your account, the Workspace admin has disabled app passwords. Use OAuth or ask the admin.
+
+OPTION C - CUSTOM SMTP / DESIGNATED EMAIL
+1. Settings > Email sending > Custom SMTP / designated email.
+2. Enter the designated From email address and the SMTP host, port, connection security (STARTTLS usually 587, SSL/TLS usually 465), username, and password or API key from your email host or SMTP service.
+3. Save custom SMTP settings, then Test custom SMTP connection.
+- The provider must allow the From address or its domain. If the mailbox is Google Workspace, Google normally requires OAuth or an admin-approved SMTP relay; a normal Google password will not work.
+- If you do not have SMTP credentials, ask the provider or Workspace admin, or use a sending service such as Resend, SendGrid, Mailgun, Postmark, Brevo, or SMTP2GO after verifying the sending domain.
+
+ALL METHODS
+1. Draft status must be Approved for automated send. Batch sending also requires a separate confirmation checkbox.
+2. Every email gets an opt-out line. All attempts are in Research Library > Email send log.
+3. If someone opts out, add their address to Settings > Do-not-send list before any further batch.
+- Credentials are stored in data\email_config.json (gitignored; may contain an app password, SMTP password, OAuth client secret, and refresh token in plaintext). Protect the computer.
 - Sending is sequential, with a delay and daily cap. There is no scheduler or unattended sending. Keep the tab open while a batch runs.
 - The local launchers bind the app to 127.0.0.1 so other devices on your network cannot reach the sending UI.
 

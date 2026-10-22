@@ -104,6 +104,68 @@ st.set_page_config(
 )
 
 
+# The Google OAuth redirect returns to this page with ?code=...&state=...
+# Handle it before the normal page is rendered. The state file and refresh
+# token stay in the local, gitignored data folder.
+def _handle_google_oauth_callback() -> None:
+    params = st.query_params
+    code = params.get("code")
+    state = params.get("state")
+    error = params.get("error")
+    if not code and not error:
+        return
+    callback_id = hashlib.sha256(
+        f"{code or ''}|{state or ''}|{error or ''}".encode("utf-8")
+    ).hexdigest()[:16]
+    if st.session_state.get("_oauth_callback_handled") == callback_id:
+        return
+    st.session_state["_oauth_callback_handled"] = callback_id
+    st.session_state["main_nav"] = "Settings"
+
+    if error:
+        if state:
+            email_sender.validate_oauth_state(state)
+        detail = params.get("error_description") or error
+        st.session_state["_email_settings_notice"] = (
+            "warning",
+            f"Google sign-in did not complete: {detail}",
+        )
+        st.query_params.clear()
+        st.rerun()
+        return
+
+    if not email_sender.validate_oauth_state(state or ""):
+        st.session_state["_email_settings_notice"] = (
+            "error",
+            "Google sign-in state did not match or expired. Start the connection "
+            "again from Settings.",
+        )
+        st.query_params.clear()
+        st.rerun()
+        return
+
+    config = email_sender.load_email_config()
+    try:
+        with st.spinner("Connecting Google Workspace account..."):
+            result = email_sender.complete_oauth(config, code or "")
+    except Exception as exc:
+        result = email_sender.OAuthResult(
+            False, error=f"Could not complete Google sign-in: {exc}"
+        )
+    if result.success:
+        st.session_state["_email_settings_notice"] = (
+            "success",
+            f"Connected {result.email}. Google Workspace sign-in is ready.",
+        )
+    else:
+        st.session_state["_email_settings_notice"] = ("error", result.error)
+    st.query_params.clear()
+    st.rerun()
+
+
+_handle_google_oauth_callback()
+
+
 # =========================================================
 # SESSION STATE
 # =========================================================
@@ -3004,7 +3066,7 @@ def _render_settings():
     _page_header(
         "Settings",
         "Make it yours.",
-        f"Brand profile for {BRAND_NAME}, Gmail sending, model cost, sender details, "
+        f"Brand profile for {BRAND_NAME}, email sending, model cost, sender details, "
         "and local storage.",
     )
 
@@ -3080,125 +3142,538 @@ def _render_settings():
     st.caption("This sender identity is hardcoded and used in every outreach draft.")
 
     st.divider()
-    st.subheader("Email sending (Gmail / Google Workspace)")
+    st.subheader("Email sending (designated sender)")
     st.caption(
-        "Sending is local only. Use a Google app password, not your normal Google "
-        "password. Google requires 2-Step Verification before it will create one. "
-        "Credentials are stored in data/email_config.json, which is gitignored."
-    )
-    st.markdown(
-        "Create an app password at "
-        "[myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). "
-        "Use `smtp.gmail.com` on port `587` with STARTTLS."
+        "Sending is local only. Use Google Workspace sign-in (OAuth) or a Google "
+        "app password for Gmail/Workspace. Use Custom SMTP to send from another "
+        "designated mailbox with the host, username, and password from that "
+        "provider. Credentials and tokens are stored in data/email_config.json, "
+        "which is gitignored."
     )
     email_notice = st.session_state.pop("_email_settings_notice", None)
     if email_notice:
         notice_kind, notice_text = email_notice
         if notice_kind == "success":
             st.success(notice_text)
+        elif notice_kind == "error":
+            st.error(notice_text)
         else:
             st.warning(notice_text)
+
     email_config = email_sender.load_email_config()
-    if email_config.app_password:
-        st.caption("A Google app password is saved locally. Leave the password field blank to keep it.")
+    AUTH_APP_PASSWORD_LABEL = "Google app password"
+    AUTH_OAUTH_LABEL = "Google Workspace sign-in (OAuth)"
+    AUTH_SMTP_LABEL = "Custom SMTP / designated email"
+
+    def _save_email_auth_method() -> None:
+        current = email_sender.load_email_config()
+        selected = st.session_state.get(
+            "email_auth_mode_label", AUTH_APP_PASSWORD_LABEL
+        )
+        if selected == AUTH_OAUTH_LABEL:
+            current.auth_method = "oauth"
+        elif selected == AUTH_SMTP_LABEL:
+            current.auth_method = "smtp"
+        else:
+            current.auth_method = "app_password"
+        email_sender.save_email_config(current)
+
+    auth_index = 0
+    if email_config.auth_method == "oauth":
+        auth_index = 1
+    elif email_config.auth_method == "smtp":
+        auth_index = 2
+    selected_label = st.radio(
+        "Sending method",
+        [AUTH_APP_PASSWORD_LABEL, AUTH_OAUTH_LABEL, AUTH_SMTP_LABEL],
+        index=auth_index,
+        horizontal=True,
+        key="email_auth_mode_label",
+        on_change=_save_email_auth_method,
+        help=(
+            "Changing this saves the method immediately. OAuth is the option for "
+            "Google Workspace accounts where app passwords are blocked. Custom "
+            "SMTP works with any provider that gives you SMTP login details."
+        ),
+    )
+    email_config = email_sender.load_email_config()
+    if selected_label == AUTH_OAUTH_LABEL:
+        selected_mode = "oauth"
+    elif selected_label == AUTH_SMTP_LABEL:
+        selected_mode = "smtp"
     else:
-        st.warning("No Google app password is saved yet. Batch sending is disabled until you add one.")
+        selected_mode = "app_password"
     st.caption(f"Local config file: {email_sender.CONFIG_PATH}")
 
-    with st.form("email_settings_form"):
-        from_email = st.text_input(
-            "Gmail / Google Workspace address",
-            value=email_config.from_email,
-            placeholder="you@yourdomain.com",
-            help="The full address that will appear in the From header.",
-        )
-        app_password = st.text_input(
-            "Google app password",
-            value="",
-            type="password",
-            help=(
-                "The 16-character app password. Spaces are ignored. Leave blank to "
-                "keep the saved password."
-            ),
-        )
-        clear_password = st.checkbox(
-            "Delete the saved app password",
-            value=False,
-            help="Check this only when you want to remove the saved credential.",
-        )
-        delay_col, cap_col = st.columns(2)
-        delay_seconds = delay_col.number_input(
-            "Delay between sends (seconds)",
-            min_value=email_sender.MIN_DELAY_SECONDS,
-            max_value=email_sender.MAX_DELAY_SECONDS,
-            value=email_config.delay_seconds,
-            step=5,
-        )
-        daily_cap = cap_col.number_input(
-            "Daily send cap",
-            min_value=1,
-            max_value=email_sender.MAX_DAILY_CAP,
-            value=email_config.daily_cap,
-            step=1,
-            help="Successful sends per local day. Keep this well below your Gmail limit.",
-        )
-        postal_address = st.text_area(
-            "Mailing address (optional, recommended)",
-            value=email_config.postal_address,
-            height=70,
-            placeholder="Company name, street address, city, country",
-            help=(
-                "Appended to every outgoing email. Commercial email rules often require "
-                "a physical postal address."
-            ),
-        )
-        st.caption(
-            f"From name: {email_sender.DEFAULT_FROM_NAME} (fixed). Every email also gets "
-            "an automatic opt-out line."
-        )
-        save_email = st.form_submit_button(
-            "Save email settings", type="primary", width="stretch"
-        )
-        test_email = st.form_submit_button(
-            "Test SMTP connection", width="stretch"
-        )
-
-        if save_email or test_email:
-            password = (app_password or "").strip().replace(" ", "")
-            if not password and not clear_password:
-                password = email_config.app_password
-            if clear_password:
-                password = ""
-            candidate = email_sender.EmailConfig(
-                from_email=(from_email or "").strip(),
-                app_password=password,
-                delay_seconds=int(delay_seconds),
-                daily_cap=int(daily_cap),
-                postal_address=(postal_address or "").strip(),
+    if selected_mode == "oauth":
+        if email_sender.is_oauth_connected(email_config):
+            st.success(
+                f"Connected as {email_config.from_email}. Batch sending will use "
+                "this Google Workspace account."
             )
-            if save_email:
+            st.caption(
+                "Run Test Google sign-in once to confirm that Google accepts the "
+                "SMTP connection for this account."
+            )
+        elif email_config.oauth_refresh_token:
+            st.warning(
+                "A Google account is connected, but the sender address is missing. "
+                "Reconnect the account below."
+            )
+        else:
+            st.warning(
+                "No Google Workspace account is connected yet. Add the OAuth client "
+                "details below, then connect."
+            )
+
+        with st.expander(
+            "How to create the Google OAuth client",
+            expanded=not bool(email_config.oauth_client_id),
+        ):
+            st.markdown(
+                """
+1. Open [Google Cloud Console](https://console.cloud.google.com/) and create or select a project in your Google Workspace organization.
+2. Open **APIs & Services → OAuth consent screen**. Choose **Internal** for a Workspace account. If you cannot use Internal, choose **External** and add your work email as a test user.
+3. Add these scopes: `openid`, `email`, `https://mail.google.com/`.
+4. Open **Credentials → Create credentials → OAuth client ID → Web application**.
+5. Add this authorized redirect URI exactly: `http://localhost:8501/`
+6. Copy the client ID and client secret below, save, then click **Connect Google Workspace account**.
+
+A Workspace admin may need to allow this OAuth app and the Gmail scope. Instantly and ContactOut use their own registered OAuth apps; this local app needs its own client.
+"""
+            )
+
+        with st.form("email_oauth_form"):
+            oauth_client_id = st.text_input(
+                "Google OAuth client ID",
+                value=email_config.oauth_client_id,
+                placeholder="....apps.googleusercontent.com",
+                help="The client ID from your Google Cloud OAuth Web application.",
+            )
+            oauth_client_secret = st.text_input(
+                "Google OAuth client secret",
+                value="",
+                type="password",
+                help="Leave blank to keep the saved secret.",
+            )
+            clear_oauth_secret = st.checkbox(
+                "Delete the saved OAuth client secret",
+                value=False,
+                help="Check this only when you want to remove the saved client secret.",
+            )
+            delay_col, cap_col = st.columns(2)
+            delay_seconds = delay_col.number_input(
+                "Delay between sends (seconds)",
+                min_value=email_sender.MIN_DELAY_SECONDS,
+                max_value=email_sender.MAX_DELAY_SECONDS,
+                value=email_config.delay_seconds,
+                step=5,
+            )
+            daily_cap = cap_col.number_input(
+                "Daily send cap",
+                min_value=1,
+                max_value=email_sender.MAX_DAILY_CAP,
+                value=email_config.daily_cap,
+                step=1,
+                help="Successful sends per local day. Keep this well below your Gmail limit.",
+            )
+            postal_address = st.text_area(
+                "Mailing address (optional, recommended)",
+                value=email_config.postal_address,
+                height=70,
+                placeholder="Company name, street address, city, country",
+                help=(
+                    "Appended to every outgoing email. Commercial email rules often "
+                    "require a physical postal address."
+                ),
+            )
+            save_oauth = st.form_submit_button(
+                "Save OAuth settings", type="primary", width="stretch"
+            )
+            if save_oauth:
+                client_id = (oauth_client_id or "").strip()
+                secret = (oauth_client_secret or "").strip()
+                if not secret and not clear_oauth_secret:
+                    secret = email_config.oauth_client_secret
+                if clear_oauth_secret:
+                    secret = ""
+                refresh_token = email_config.oauth_refresh_token
+                oauth_email = email_config.oauth_email
+                if client_id != email_config.oauth_client_id.strip():
+                    refresh_token = ""
+                    oauth_email = ""
+                candidate = email_sender.EmailConfig(
+                    from_email=email_config.from_email,
+                    app_password=email_config.app_password,
+                    auth_method="oauth",
+                    smtp_host=email_config.smtp_host,
+                    smtp_port=email_config.smtp_port,
+                    smtp_username=email_config.smtp_username,
+                    smtp_password=email_config.smtp_password,
+                    smtp_security=email_config.smtp_security,
+                    oauth_client_id=client_id,
+                    oauth_client_secret=secret,
+                    oauth_refresh_token=refresh_token,
+                    oauth_email=oauth_email,
+                    oauth_redirect_uri=email_config.oauth_redirect_uri,
+                    delay_seconds=int(delay_seconds),
+                    daily_cap=int(daily_cap),
+                    postal_address=(postal_address or "").strip(),
+                )
                 email_sender.save_email_config(candidate)
-                missing = email_sender.missing_config_fields(candidate)
-                if missing:
+                if not client_id or not secret:
+                    notice = (
+                        "OAuth settings saved. Add both the client ID and client "
+                        "secret, then connect the account."
+                    )
+                elif not refresh_token:
+                    notice = (
+                        "OAuth client settings saved. Now connect your Google "
+                        "Workspace account below."
+                    )
+                else:
+                    notice = "OAuth settings saved. Google Workspace sign-in is ready."
+                st.session_state["_email_settings_notice"] = ("success", notice)
+                st.rerun()
+
+        if not email_config.oauth_client_id or not email_config.oauth_client_secret:
+            st.info(
+                "Save the OAuth client ID and client secret first. The Connect "
+                "button appears after they are stored."
+            )
+        else:
+            st.caption(
+                "Authorized redirect URI — add this exact value to the Google OAuth "
+                "client:"
+            )
+            st.code(email_config.oauth_redirect_uri, language="text")
+            connected = email_sender.is_oauth_connected(email_config)
+            if connected:
+                test_col, disconnect_col = st.columns(2)
+                if test_col.button(
+                    "Test Google sign-in",
+                    key="oauth_test_connection",
+                    width="stretch",
+                ):
+                    connected_ok, message = email_sender.test_connection(email_config)
+                    if connected_ok:
+                        st.success(message)
+                    else:
+                        st.error(message)
+                if disconnect_col.button(
+                    "Disconnect Google account",
+                    key="oauth_disconnect",
+                    width="stretch",
+                ):
+                    email_sender.disconnect_oauth(email_config)
                     st.session_state["_email_settings_notice"] = (
                         "warning",
-                        "Settings saved, but sending is not ready. Add "
-                        + " and ".join(missing)
-                        + ".",
+                        "Disconnected the local Google Workspace sign-in. The "
+                        "OAuth client details were kept. To revoke the app at "
+                        "Google, remove it from your Google Account permissions.",
                     )
-                else:
-                    st.session_state["_email_settings_notice"] = (
-                        "success",
-                        "Email settings saved locally. Batch sending is ready.",
-                    )
-                st.rerun()
-            if test_email:
-                connected, message = email_sender.test_connection(candidate)
-                if connected:
-                    st.success(message)
-                else:
-                    st.error(message)
+                    st.rerun()
+            try:
+                oauth_state = email_sender.create_oauth_state()
+                oauth_url = email_sender.build_oauth_url(email_config, oauth_state)
+            except email_sender.OAuthError as exc:
+                st.error(str(exc))
+            else:
+                oauth_label = (
+                    "Reconnect Google Workspace account"
+                    if connected
+                    else "Connect Google Workspace account"
+                )
+                st.markdown(
+                    f'<a href="{html.escape(oauth_url, quote=True)}" target="_self" '
+                    'style="display:inline-flex;align-items:center;justify-content:center;'
+                    'padding:0.55rem 1rem;border-radius:0.5rem;background:#ff4b4b;'
+                    'color:#ffffff;text-decoration:none;font-weight:600;">'
+                    f"{oauth_label}</a>",
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    "Google opens its consent screen. After approving, you return "
+                    "here automatically."
+                )
 
+    elif selected_mode == "smtp":
+        st.info(
+            "Use this when you have a designated sending mailbox from your email "
+            "host or an SMTP service. Enter the From address and the SMTP login "
+            "that provider gives you. The provider must allow that From address."
+        )
+        if email_config.smtp_password:
+            st.caption(
+                "A custom SMTP password is saved locally. Leave the password field "
+                "blank to keep it."
+            )
+        else:
+            st.warning(
+                "No custom SMTP password is saved yet. Batch sending is disabled "
+                "until you add one."
+            )
+        st.caption(
+            "Google Workspace usually requires the OAuth option above or an "
+            "admin-approved SMTP relay. A normal Google password will not work."
+        )
+        with st.form("email_custom_smtp_form"):
+            smtp_from_email = st.text_input(
+                "Designated From email address",
+                value=email_config.from_email,
+                placeholder="prachi@yourdomain.com",
+                help="The address that will appear in the From header.",
+            )
+            host_col, port_col = st.columns([3, 1])
+            default_host = email_config.smtp_host or ""
+            if (
+                default_host == email_sender.SMTP_HOST
+                and not email_config.smtp_password
+            ):
+                default_host = ""
+            smtp_host = host_col.text_input(
+                "SMTP host",
+                value=default_host,
+                placeholder="smtp.yourprovider.com",
+            )
+            smtp_port = port_col.number_input(
+                "SMTP port",
+                min_value=1,
+                max_value=65535,
+                value=int(email_config.smtp_port or 587),
+                step=1,
+            )
+            security_labels = [
+                "STARTTLS (usually port 587)",
+                "SSL/TLS (usually port 465)",
+            ]
+            security_label = st.selectbox(
+                "Connection security",
+                security_labels,
+                index=1 if email_config.smtp_security == "ssl" else 0,
+            )
+            smtp_username = st.text_input(
+                "SMTP username",
+                value=email_config.smtp_username or email_config.from_email,
+                placeholder="Usually the full email address",
+            )
+            smtp_password = st.text_input(
+                "SMTP password",
+                value="",
+                type="password",
+                help=(
+                    "The SMTP password or API key from your provider. Leave blank "
+                    "to keep the saved password."
+                ),
+            )
+            clear_smtp_password = st.checkbox(
+                "Delete the saved SMTP password",
+                value=False,
+                help="Check this only when you want to remove the saved credential.",
+            )
+            delay_col, cap_col = st.columns(2)
+            delay_seconds = delay_col.number_input(
+                "Delay between sends (seconds)",
+                min_value=email_sender.MIN_DELAY_SECONDS,
+                max_value=email_sender.MAX_DELAY_SECONDS,
+                value=email_config.delay_seconds,
+                step=5,
+            )
+            daily_cap = cap_col.number_input(
+                "Daily send cap",
+                min_value=1,
+                max_value=email_sender.MAX_DAILY_CAP,
+                value=email_config.daily_cap,
+                step=1,
+                help="Successful sends per local day. Keep this below your provider's limit.",
+            )
+            postal_address = st.text_area(
+                "Mailing address (optional, recommended)",
+                value=email_config.postal_address,
+                height=70,
+                placeholder="Company name, street address, city, country",
+                help=(
+                    "Appended to every outgoing email. Commercial email rules often "
+                    "require a physical postal address."
+                ),
+            )
+            save_smtp = st.form_submit_button(
+                "Save custom SMTP settings", type="primary", width="stretch"
+            )
+            test_smtp = st.form_submit_button(
+                "Test custom SMTP connection", width="stretch"
+            )
+
+            if save_smtp or test_smtp:
+                password = (smtp_password or "").strip()
+                if not password and not clear_smtp_password:
+                    password = email_config.smtp_password
+                if clear_smtp_password:
+                    password = ""
+                security = "ssl" if security_label.startswith("SSL") else "starttls"
+                candidate = email_sender.EmailConfig(
+                    from_email=(smtp_from_email or "").strip(),
+                    app_password=email_config.app_password,
+                    auth_method="smtp",
+                    smtp_host=(smtp_host or "").strip(),
+                    smtp_port=int(smtp_port),
+                    smtp_username=(smtp_username or "").strip()
+                    or (smtp_from_email or "").strip(),
+                    smtp_password=password,
+                    smtp_security=security,
+                    oauth_client_id=email_config.oauth_client_id,
+                    oauth_client_secret=email_config.oauth_client_secret,
+                    oauth_refresh_token=email_config.oauth_refresh_token,
+                    oauth_email=email_config.oauth_email,
+                    oauth_redirect_uri=email_config.oauth_redirect_uri,
+                    delay_seconds=int(delay_seconds),
+                    daily_cap=int(daily_cap),
+                    postal_address=(postal_address or "").strip(),
+                )
+                if save_smtp:
+                    email_sender.save_email_config(candidate)
+                    missing = email_sender.missing_config_fields(candidate)
+                    if missing:
+                        st.session_state["_email_settings_notice"] = (
+                            "warning",
+                            "Settings saved, but sending is not ready. Add "
+                            + " and ".join(missing)
+                            + ".",
+                        )
+                    else:
+                        st.session_state["_email_settings_notice"] = (
+                            "success",
+                            "Custom SMTP settings saved locally. Batch sending is ready.",
+                        )
+                    st.rerun()
+                if test_smtp:
+                    connected, message = email_sender.test_connection(candidate)
+                    if connected:
+                        st.success(message)
+                    else:
+                        st.error(message)
+
+    else:
+        if email_config.app_password:
+            st.caption(
+                "A Google app password is saved locally. Leave the password field "
+                "blank to keep it."
+            )
+        else:
+            st.warning(
+                "No Google app password is saved yet. Batch sending is disabled "
+                "until you add one."
+            )
+        st.markdown(
+            "Create an app password at "
+            "[myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). "
+            "Use `smtp.gmail.com` on port `587` with STARTTLS."
+        )
+        with st.form("email_settings_form"):
+            from_email = st.text_input(
+                "Gmail / Google Workspace address",
+                value=email_config.from_email,
+                placeholder="you@yourdomain.com",
+                help="The full address that will appear in the From header.",
+            )
+            app_password = st.text_input(
+                "Google app password",
+                value="",
+                type="password",
+                help=(
+                    "The 16-character app password. Spaces are ignored. Leave blank "
+                    "to keep the saved password."
+                ),
+            )
+            clear_password = st.checkbox(
+                "Delete the saved app password",
+                value=False,
+                help="Check this only when you want to remove the saved credential.",
+            )
+            delay_col, cap_col = st.columns(2)
+            delay_seconds = delay_col.number_input(
+                "Delay between sends (seconds)",
+                min_value=email_sender.MIN_DELAY_SECONDS,
+                max_value=email_sender.MAX_DELAY_SECONDS,
+                value=email_config.delay_seconds,
+                step=5,
+            )
+            daily_cap = cap_col.number_input(
+                "Daily send cap",
+                min_value=1,
+                max_value=email_sender.MAX_DAILY_CAP,
+                value=email_config.daily_cap,
+                step=1,
+                help="Successful sends per local day. Keep this well below your Gmail limit.",
+            )
+            postal_address = st.text_area(
+                "Mailing address (optional, recommended)",
+                value=email_config.postal_address,
+                height=70,
+                placeholder="Company name, street address, city, country",
+                help=(
+                    "Appended to every outgoing email. Commercial email rules often "
+                    "require a physical postal address."
+                ),
+            )
+            save_email = st.form_submit_button(
+                "Save email settings", type="primary", width="stretch"
+            )
+            test_email = st.form_submit_button(
+                "Test SMTP connection", width="stretch"
+            )
+
+            if save_email or test_email:
+                password = (app_password or "").strip().replace(" ", "")
+                if not password and not clear_password:
+                    password = email_config.app_password
+                if clear_password:
+                    password = ""
+                candidate = email_sender.EmailConfig(
+                    from_email=(from_email or "").strip(),
+                    app_password=password,
+                    auth_method="app_password",
+                    smtp_host=email_config.smtp_host,
+                    smtp_port=email_config.smtp_port,
+                    smtp_username=email_config.smtp_username,
+                    smtp_password=email_config.smtp_password,
+                    smtp_security=email_config.smtp_security,
+                    oauth_client_id=email_config.oauth_client_id,
+                    oauth_client_secret=email_config.oauth_client_secret,
+                    oauth_refresh_token=email_config.oauth_refresh_token,
+                    oauth_email=email_config.oauth_email,
+                    oauth_redirect_uri=email_config.oauth_redirect_uri,
+                    delay_seconds=int(delay_seconds),
+                    daily_cap=int(daily_cap),
+                    postal_address=(postal_address or "").strip(),
+                )
+                if save_email:
+                    email_sender.save_email_config(candidate)
+                    missing = email_sender.missing_config_fields(candidate)
+                    if missing:
+                        st.session_state["_email_settings_notice"] = (
+                            "warning",
+                            "Settings saved, but sending is not ready. Add "
+                            + " and ".join(missing)
+                            + ".",
+                        )
+                    else:
+                        st.session_state["_email_settings_notice"] = (
+                            "success",
+                            "Email settings saved locally. Batch sending is ready.",
+                        )
+                    st.rerun()
+                if test_email:
+                    connected, message = email_sender.test_connection(candidate)
+                    if connected:
+                        st.success(message)
+                    else:
+                        st.error(message)
+
+    st.caption(
+        f"From name: {email_sender.DEFAULT_FROM_NAME} (fixed). Every email also gets "
+        "an automatic opt-out line."
+    )
     st.caption(
         "The app sends only approved drafts, one recipient at a time, with the configured "
         "delay and daily cap. It never sends on a schedule or without a confirmation."

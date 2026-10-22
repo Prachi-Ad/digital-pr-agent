@@ -1,6 +1,6 @@
 # Digital PR Agent - Project State
 
-Last updated: Thu Oct 22 2026
+Last updated: Fri Oct 23 2026
 
 ## Objective
 
@@ -8,9 +8,10 @@ A local Streamlit research assistant for Digital PR and listicle prospecting.
 It turns published articles into PR angles, finds editorial and listicle
 opportunities, researches publisher contacts and policies, prepares outreach
 drafts for human review, and stores everything locally. From the local app, it
-can send explicitly approved drafts through Gmail / Google Workspace SMTP in a
-confirmed batch with a delay, a daily cap, a do-not-send list, and an audit log.
-It never submits publisher forms.
+can send explicitly approved drafts through the configured Gmail account
+(currently the personal Gmail app-password connection) in a confirmed batch with
+a delay, a daily cap, a do-not-send list, and an audit log. It never submits
+publisher forms.
 
 ## Current UI
 
@@ -21,8 +22,8 @@ Three pages only:
    - Listicles: Search -> Prospects (contacts/policy) -> Outreach.
 2. **Research Library** - listicles, PR opportunities, journalists, outreach
    drafts, email send history, CSV exports, backups.
-3. **Settings** - brand, sender details, Gmail SMTP, do-not-send list,
-   model/cost, storage, safety.
+3. **Settings** - brand, sender details, email sending (OAuth, app password, or
+   custom SMTP), do-not-send list, model/cost, storage, safety.
 
 The old separate pages (Dashboard, PR Home, Asset Analysis, PR Action Plans,
 Outreach, etc.) were merged into the guided Workspace. Saved work is restored
@@ -70,12 +71,20 @@ non-sending demo.
   send", then a separate batch confirmation is required.
 - No form submission, ever.
 
-### Local Gmail batch sending
+### Local email batch sending
 - Gmail / Google Workspace SMTP through `smtp.gmail.com` on port 587 with
-  STARTTLS. Requires a Google app password and 2-Step Verification.
-- Settings stores the Gmail address, app password, delay, daily cap, and optional
-  mailing address in `data/email_config.json`, which is gitignored. The From name
-  stays fixed as Prachi, SEO Specialist.
+  STARTTLS. Three authentication methods are supported:
+  - **Google app password** (requires 2-Step Verification and an admin who
+    allows app passwords).
+  - **Google Workspace sign-in (OAuth 2.0)** with SMTP XOAUTH2 for work/school
+    accounts where app passwords are blocked.
+  - **Custom SMTP / designated email** for any provider that supplies a
+    designated From address plus SMTP host, port, username, and password/API
+    key. Supports STARTTLS (usually 587) and SSL/TLS (usually 465).
+- Settings stores the Gmail address, app password, OAuth client ID/secret,
+  refresh token, custom SMTP host/port/username/password/security, delay, daily
+  cap, and optional mailing address in `data/email_config.json`, which is
+  gitignored. The From name stays fixed as Prachi, SEO Specialist.
 - Default delay is 30 seconds between sends (configurable 5-300). Default daily
   cap is 20 successful sends per local day (configurable 1-200).
 - The batch panel is on both Outreach pages. It lists only approved drafts, shows
@@ -96,6 +105,72 @@ non-sending demo.
 - The local launchers bind Streamlit to `127.0.0.1` so the unauthenticated
   sending UI is not exposed to other devices on the network.
 - Vercel remains a non-sending demo.
+
+### Active local sender
+- Active method: **Google app password**.
+- Active account: **personal Gmail** (configured only in the local, gitignored
+  `data/email_config.json`).
+- SMTP login test: **passed**; no email was sent.
+- No work Google account, Google OAuth client, refresh token, or custom SMTP
+  mailbox is connected.
+- The OAuth and Custom SMTP options remain available in Settings for optional
+  future use, but they are unconfigured. The app is not using a work account.
+
+### Optional Google Workspace OAuth connection
+- **Not configured in the current personal-Gmail setup.** This exists for a
+  future, explicitly approved Workspace connection.
+- Settings has a **Sending method** choice: **Google app password**, **Google
+  Workspace sign-in (OAuth)**, or **Custom SMTP / designated email**. Changing
+  the radio saves `auth_method` immediately.
+- The OAuth flow is a local Web application flow:
+  - Google Cloud OAuth client type: **Web application**.
+  - Authorized redirect URI: `http://localhost:8501/`.
+  - Scopes: `openid`, `email`, `https://mail.google.com/`.
+  - `access_type=offline` and `prompt=consent select_account` so Google returns
+    a refresh token and lets the user choose the Google account.
+- OAuth state is a random token stored briefly in
+  `data/oauth_state.json`, validated once, and deleted. The callback is handled
+  at the top of `app.py` before normal navigation and routes back to Settings.
+- Token exchange, userinfo verification, token refresh/cache, config
+  persistence, and SMTP XOAUTH2 login are implemented in `email_sender.py` using
+  the standard library (`urllib`, `smtplib`); no new Python dependency was
+  added.
+- Settings shows the exact redirect URI, a **Connect/Reconnect Google Workspace
+  account** link, connection status, **Test Google sign-in**, and **Disconnect
+  Google account**. The app password form remains available as a fallback.
+- **Internal** OAuth consent screen is recommended for a Workspace org. External
+  testing works but Google expires refresh tokens after 7 days and an unverified
+  app warning appears.
+- A custom local app must use its own Google Cloud OAuth client; it cannot reuse
+  Instantly's or ContactOut's client. A Workspace admin may need to allow the
+  OAuth app/client ID and the Gmail scope. This is not a bypass of admin policy.
+- Gmail SMTP over OAuth requires the broad `https://mail.google.com/` scope. The
+  app only logs in and sends; it does not read mail.
+- Mocked tests cover URL construction, state validation/expiry, token exchange,
+  userinfo, refresh/cache, XOAUTH2 auth string, fake SMTP send/test, disconnect,
+  config persistence, all three Settings modes, and the callback
+  routing/notice. Real Google OAuth has not been exercised because no client
+  ID/secret or Google account has been connected.
+
+### Optional Custom SMTP / designated sender
+- **Not configured in the current personal-Gmail setup.** This exists for a
+  future mailbox that supplies its own SMTP credentials.
+- The third Settings mode lets the user enter any designated From address and
+  the provider's SMTP host, port, username, password/API key, and connection
+  security (STARTTLS or SSL/TLS).
+- Custom SMTP credentials are stored separately from the Google app password, so
+  switching modes does not overwrite the other provider's secret. OAuth client
+  details and refresh tokens are also preserved.
+- Gmail/Workspace modes force `smtp.gmail.com:587` STARTTLS internally, so a
+  saved custom host cannot accidentally change Google sending. Custom SMTP uses
+  its own host/port/security.
+- Custom SMTP requires a valid From address, host, username, and password in the
+  local config. The provider must permit the From address/domain.
+- Google Workspace still normally requires OAuth, an admin-enabled app password,
+  or an admin-approved SMTP relay. A normal Google password is not accepted.
+- No new Python dependency; custom SMTP uses `smtplib` and the existing send
+  pipeline. Mocked tests cover config persistence, missing-field checks, login
+  arguments, STARTTLS/SSL, send, test, and the Settings UI.
 
 ### Batch article analysis
 - The Article step starts with one URL field. "+ Add URL" adds up to five
@@ -208,7 +283,7 @@ non-sending demo.
   listicles, contact, and policy research actions. Its UI now mirrors the local
   workspace, but it does not have persistence, accounts, review-library storage,
   draft generation, usage quotas, billing, or email sending.
-- The Gmail SMTP batch sender is local-only and intentionally not part of the
+- The email batch sender is local-only and intentionally not part of the
   Vercel build. Pushes that only change local sending code should use
   `[skip vercel]` so the non-sending demo is not redeployed needlessly.
 - The full tool remains the local Streamlit app. No custom domain is connected
@@ -225,11 +300,17 @@ non-sending demo.
 - A saved PR opportunity queue can be reviewed after a restart without the
   original full asset analysis. Re-analyzing the article restores journalist
   research for new candidates.
-- Sending requires a real Gmail / Google Workspace address and Google app
-  password. Credentials are configured locally and the SMTP login test passed;
-  no real email has been sent yet.
-- The app password is stored locally in plaintext in `data/email_config.json`
-  (gitignored). Protect the machine and rotate the app password if exposed.
+- Sending is currently configured with the **personal Gmail app password**; the
+  SMTP login test passed. No work Google account, OAuth client, refresh token, or
+  custom SMTP mailbox is connected. No real email has been sent.
+- `data/email_config.json` (gitignored) may contain an app password, custom SMTP
+  password, OAuth client secret, and refresh token in plaintext. Protect the
+  machine and revoke/rotate credentials if the file is exposed.
+- The optional Gmail SMTP OAuth path uses the broad `https://mail.google.com/`
+  scope. A Workspace admin may block the custom OAuth client or this scope. The
+  app surfaces the failure; it does not bypass admin policy.
+- Optional External OAuth testing clients get 7-day refresh tokens. Use an
+  Internal client for a durable Workspace connection.
 - The app does not read replies. If someone opts out, add their address to the
   do-not-send list manually.
 - The daily cap counts successful sends. A dropped connection can be ambiguous;
@@ -239,9 +320,8 @@ non-sending demo.
 ## Recommended next steps
 
 1. Add a physical mailing address in Settings if not already set; it is appended
-   to every outgoing email. The Gmail credentials are configured and the SMTP
-   login test passed.
-2. Add verified recipient emails to one draft, mark it "Approved for automated
+   to every outgoing email.
+2. Add a verified recipient email to one draft, mark it "Approved for automated
    send", and run a one-recipient batch as a live test. Review the send log.
 3. Run one real Digital PR workflow end-to-end with the nano model and review output quality.
 4. Run one real listicle workflow end-to-end, including contact and policy research.
@@ -249,3 +329,7 @@ non-sending demo.
 6. Decide whether to keep the Vercel demo public, put it behind login, or retire
    it. Before a public launch, add accounts, per-user data isolation, spend
    caps, and a custom domain.
+
+The OAuth and Custom SMTP modes remain available but unconfigured. The active
+sender is the personal Gmail app password. Connect a work or custom mailbox only
+if you intend to use it and have the required approval.
