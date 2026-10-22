@@ -1,8 +1,8 @@
 import asyncio
 import os
 import sys
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 from openai import AsyncOpenAI
 from agents import Agent, Runner, WebSearchTool, ModelSettings, set_default_openai_client
@@ -32,9 +32,9 @@ MODEL_SETTINGS = ModelSettings(
 
 MAX_TURNS = int(os.environ.get("MAX_TURNS", "3"))
 
-# Fail fast (120s) on stalled OpenAI calls instead of hanging until Vercel kills
-# the function; retry connection errors at the SDK level.
-set_default_openai_client(AsyncOpenAI(timeout=120.0, max_retries=2))
+# The OpenAI client is created lazily inside the persistent agent event loop.
+# Creating it at import time can bind its HTTP connections to a loop that later
+# gets closed between calls. See _ensure_openai_client() below.
 
 # Brand configuration (override to reuse this tool for any product/company)
 BRAND_NAME = (os.environ.get("BRAND_NAME") or os.environ.get("VISTA_BRAND_NAME") or "Your Brand").strip() or "Your Brand"
@@ -604,19 +604,57 @@ Return only the requested structured fields.
 
 
 # =========================================================
-# RUNNER HELPER: USE A SEPARATE THREAD AND EVENT LOOP
+# RUNNER HELPER: ONE PERSISTENT EVENT LOOP
 # =========================================================
+# The OpenAI Agents SDK keeps an AsyncOpenAI client whose HTTP connections are
+# bound to the event loop that first uses it. Creating and closing a fresh loop
+# for every research call makes the next call fail with "Event loop is closed".
+# Keep one loop alive for the life of the process and submit every agent run to
+# it instead.
+
+_AGENT_LOOP = asyncio.new_event_loop()
+_OPENAI_CLIENT_READY = False
+_OPENAI_CLIENT_LOCK = threading.Lock()
+
+
+def _start_agent_loop():
+    asyncio.set_event_loop(_AGENT_LOOP)
+    _AGENT_LOOP.run_forever()
+
+
+_AGENT_LOOP_THREAD = threading.Thread(
+    target=_start_agent_loop,
+    name="pr-agent-event-loop",
+    daemon=True,
+)
+_AGENT_LOOP_THREAD.start()
+
+
+def _ensure_openai_client():
+    """Create the shared OpenAI client on the agent loop thread, once."""
+    global _OPENAI_CLIENT_READY
+    if _OPENAI_CLIENT_READY:
+        return
+    with _OPENAI_CLIENT_LOCK:
+        if not _OPENAI_CLIENT_READY:
+            # Fail fast (120s) on stalled calls; retry connection errors at the
+            # SDK level.
+            set_default_openai_client(AsyncOpenAI(timeout=120.0, max_retries=2))
+            _OPENAI_CLIENT_READY = True
+
+
+async def _run_agent_async(agent_to_run, prompt: str):
+    _ensure_openai_client()
+    return await Runner.run(agent_to_run, prompt, max_turns=MAX_TURNS)
+
 
 def _run_agent_in_worker(agent_to_run, prompt: str):
-    """Run an async agent in a separate worker thread to avoid event-loop conflicts."""
-
-    def execute_with_own_loop():
-        return asyncio.run(Runner.run(agent_to_run, prompt, max_turns=MAX_TURNS))
-
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        result = executor.submit(execute_with_own_loop).result()
-
-    return result.final_output
+    """Run an async agent on the shared event loop."""
+    future = asyncio.run_coroutine_threadsafe(
+        _run_agent_async(agent_to_run, prompt),
+        _AGENT_LOOP,
+    )
+    return future.result().final_output
 
 
 # =========================================================

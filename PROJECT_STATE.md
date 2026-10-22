@@ -1,6 +1,6 @@
 # Digital PR Agent - Project State
 
-Last updated: Wed Oct 21 2026
+Last updated: Thu Oct 22 2026
 
 ## Objective
 
@@ -77,15 +77,47 @@ after a restart, and the start screen offers both "Continue saved..." and
 - Tighter 12px vertical rhythm and compact metric tiles.
 - CORS configuration corrected for local Streamlit.
 
+### Reliability
+- Journalist research could fail on a later run with
+  `RuntimeError: Event loop is closed`. Each call created a fresh thread and
+  `asyncio.run` loop, then closed it while the shared `AsyncOpenAI` client still
+  referenced it.
+- `agent.py` and `vercel-app/agent.py` now keep one event loop alive per process
+  and create the shared OpenAI client lazily on that loop. Sequential and
+  concurrent agent calls reuse the same open loop.
+- Verified with a fake `Runner.run` across repeated and concurrent calls, a
+  Streamlit UI smoke test, and the full local storage check.
+
 ### Hosting and repo
-- Render blueprint, Railway Procfile, and Vercel analyze demo remain optional.
+- GitHub repository: `https://github.com/Prachi-Ad/digital-pr-agent` (private).
+  Branch `main`; old versions remain recoverable in history.
+- Render blueprint and Railway Procfile remain optional.
+- Vercel demo is deployed (see Deployment below).
 - `.gitignore` excludes `.venv/`, `data/`, `backups/`, and secrets.
 - Local brand file and database stay out of git.
+
+### Deployment (live)
+- Vercel project: `vercel-app` under team `prachi-8a13`.
+- Production URL: `https://vercel-app-gules-three.vercel.app`
+- Deployment ID: `dpl_FNzs5QLrGffAWwXADfW65TDGdqWv`
+- Status: READY; production alias live as of 2026-10-22. This deployment
+  includes the persistent event-loop fix.
+- Vercel environment: `OPENAI_API_KEY` is configured for Production,
+  Preview, and Development (value not stored in the repo).
+- Build verified: Next.js 14.2.15 production build and Python dependencies
+  complete successfully; `/api/analyze` health returns
+  `{"status":"ok","service":"digital-pr-agent"}`.
+- Demo scope: the Vercel app can call analyze, PR opportunities, journalists,
+  listicles, contact, and policy research actions. It does not yet have
+  persistence, accounts, review-library storage, usage quotas, or billing.
+- The full tool remains the local Streamlit app. No custom domain is connected
+  to Vercel yet.
 
 ## Known caveats
 
 - Web search dominates cost (~$10 per 1,000 calls). Research runs only on click.
-- The Vercel demo covers article analysis only; the local app is the full tool.
+- The Vercel demo covers the research actions but has no persistence, accounts,
+  quotas, or review library. The local Streamlit app is the full tool.
 - A saved PR opportunity queue can be reviewed after a restart without the
   original full asset analysis. Re-analyzing the article restores journalist
   research for new candidates.
@@ -96,4 +128,6 @@ after a restart, and the start screen offers both "Continue saved..." and
 1. Run one real Digital PR workflow end-to-end with the nano model and review output quality.
 2. Run one real listicle workflow end-to-end, including contact and policy research.
 3. Test one generated pitch and one inclusion request, then edit and track status.
-4. Decide whether to retire or keep the optional Vercel analyze-only demo.
+4. Decide whether to keep the Vercel demo public, put it behind login, or retire
+   it. Before a public launch, add accounts, per-user data isolation, spend
+   caps, and a custom domain.
