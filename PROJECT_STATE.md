@@ -226,8 +226,8 @@ non-sending demo.
   original full asset analysis. Re-analyzing the article restores journalist
   research for new candidates.
 - Sending requires a real Gmail / Google Workspace address and Google app
-  password. No live SMTP login or real send has been run yet because no
-  credentials were supplied.
+  password. Credentials are configured locally and the SMTP login test passed;
+  no real email has been sent yet.
 - The app password is stored locally in plaintext in `data/email_config.json`
   (gitignored). Protect the machine and rotate the app password if exposed.
 - The app does not read replies. If someone opts out, add their address to the
@@ -238,8 +238,9 @@ non-sending demo.
 
 ## Recommended next steps
 
-1. In Settings, save the real Gmail / Google Workspace address, a Google app
-   password, delay, daily cap, and mailing address; run "Test SMTP connection".
+1. Add a physical mailing address in Settings if not already set; it is appended
+   to every outgoing email. The Gmail credentials are configured and the SMTP
+   login test passed.
 2. Add verified recipient emails to one draft, mark it "Approved for automated
    send", and run a one-recipient batch as a live test. Review the send log.
 3. Run one real Digital PR workflow end-to-end with the nano model and review output quality.
