@@ -93,6 +93,8 @@ non-sending demo.
   batch. Add opted-out recipients there as soon as they ask.
 - Sending is available only from the local Streamlit app. There is no scheduler,
   background worker, or unattended sending.
+- The local launchers bind Streamlit to `127.0.0.1` so the unauthenticated
+  sending UI is not exposed to other devices on the network.
 - Vercel remains a non-sending demo.
 
 ### Batch article analysis

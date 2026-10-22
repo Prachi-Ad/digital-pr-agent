@@ -39,7 +39,8 @@ EMAIL SENDING (LOCAL ONLY)
 5. Every email gets an opt-out line. All attempts are in Research Library > Email send log.
 6. If someone opts out, add their address to Settings > Do-not-send list before any further batch.
 - Credentials are stored in data\email_config.json (gitignored, plaintext app password). Protect the computer.
-- Sending is sequential, with a delay and daily cap. There is no scheduler or unattended sending.
+- Sending is sequential, with a delay and daily cap. There is no scheduler or unattended sending. Keep the tab open while a batch runs.
+- The local launchers bind the app to 127.0.0.1 so other devices on your network cannot reach the sending UI.
 
 SAVING AND BACKUPS
 - Database: project folder\data\pr_agent.sqlite3

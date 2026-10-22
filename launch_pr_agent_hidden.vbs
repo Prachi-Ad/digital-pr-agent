@@ -30,7 +30,7 @@ If IsServerReady() Then
 End If
 
 ' Launch Streamlit in a hidden process using this project's Python.
-command = Chr(34) & pythonExe & Chr(34) & " -m streamlit run " & Chr(34) & appPath & Chr(34) & " --server.headless true --server.port 8501 --browser.gatherUsageStats false"
+command = Chr(34) & pythonExe & Chr(34) & " -m streamlit run " & Chr(34) & appPath & Chr(34) & " --server.headless true --server.address 127.0.0.1 --server.port 8501 --browser.gatherUsageStats false"
 shell.Run command, 0, False
 
 ' Wait up to 45 seconds for the app to be ready.

@@ -92,6 +92,9 @@ Credentials live in `data/email_config.json`, which is gitignored and never
 committed. The file contains the app password in plaintext, so protect the
 computer and rotate the password if it is exposed.
 
+The local launchers bind Streamlit to `127.0.0.1` so other devices on your
+network cannot reach the sending UI. Keep the tab open while a batch runs.
+
 ## Requirements
 
 - Windows (the one-click launchers are `.vbs` / `.bat`)

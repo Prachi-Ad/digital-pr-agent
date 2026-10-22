@@ -19,5 +19,5 @@ if not defined OPENAI_API_KEY (
 )
 
 call ".venv\Scripts\activate.bat"
-streamlit run app.py
+streamlit run app.py --server.address 127.0.0.1
 pause
