@@ -2,10 +2,13 @@ import hashlib
 import html
 import json
 import os
+import time
 from collections import Counter
 from pathlib import Path
 
 import streamlit as st
+
+import email_sender
 
 # Hosting platforms inject configuration through secrets. Mirror the values into
 # the environment before importing agent.py, which reads them at import time.
@@ -51,21 +54,31 @@ from agent import (
 )
 from database import (
     DB_PATH,
+    add_email_suppression,
+    count_emails_sent_today,
     create_database_backup,
+    email_sends_csv_bytes,
     get_journalist_record,
     get_listicle_prospect,
     get_outreach_draft,
     get_pr_opportunity,
     init_db,
+    is_email_suppressed,
     journalist_csv_bytes,
+    list_email_sends,
+    list_email_suppressions,
     list_journalists,
     list_listicle_prospects,
     list_outreach_drafts,
     list_pr_opportunities,
     listicle_csv_bytes,
     load_app_snapshot,
+    log_email_send,
+    mark_outreach_draft_send_failed,
+    mark_outreach_draft_sent,
     opportunity_csv_bytes,
     outreach_csv_bytes,
+    remove_email_suppression,
     save_app_snapshot,
     update_outreach_draft,
     upsert_journalist,
@@ -73,6 +86,10 @@ from database import (
     upsert_outreach_draft,
     upsert_pr_opportunity,
 )
+
+# Keep the SMTP config in the same local data directory as the database.
+email_sender.DATA_DIR = Path(DB_PATH).parent
+email_sender.CONFIG_PATH = email_sender.DATA_DIR / "email_config.json"
 
 
 # =========================================================
@@ -127,7 +144,10 @@ JOURNALIST_STATUS_OPTIONS = [
 
 DRAFT_STATUS_OPTIONS = [
     "Draft",
+    "Approved for automated send",
     "Approved for manual send",
+    "Sent",
+    "Send failed",
     "Sent manually",
     "Replied",
     "Placement confirmed",
@@ -993,11 +1013,40 @@ def _render_draft_editor(record, key_prefix):
         _safe_choice(DRAFT_STATUS_OPTIONS, record.get("draft_status", "Draft"))
     )
 
+    if st.session_state.pop(f"{key_prefix}_saved", False):
+        st.success(
+            "Draft saved locally. It is sent only from the batch panel after you confirm."
+        )
+    if record.get("sent_at"):
+        st.caption(
+            f"Sent: {record['sent_at']} · Message ID: "
+            f"{record.get('message_id') or 'Not recorded'}"
+        )
+        if record.get("draft_status") != "Sent":
+            st.warning(
+                "This draft has a sent record. Do not approve it for sending again "
+                "unless you intend to email the recipient twice."
+            )
+    elif record.get("send_error"):
+        st.warning(f"Last send failed: {record['send_error']}")
+    if record.get("send_attempts"):
+        st.caption(f"Send attempts recorded: {record['send_attempts']}")
+
     with st.form(form_key):
         subject = st.text_input(
             "Subject line",
             value=record.get("subject", ""),
             key=f"{key_prefix}_subject_{suffix}",
+        )
+        recipient_email = st.text_input(
+            "Recipient email",
+            value=record.get("recipient_email", ""),
+            placeholder="name@publication.com",
+            help=(
+                "Use a verified public editorial or author email. Leave blank until you "
+                "have checked the address. This is required before batch sending."
+            ),
+            key=f"{key_prefix}_email_{suffix}",
         )
         body = st.text_area(
             "Message",
@@ -1009,11 +1058,29 @@ def _render_draft_editor(record, key_prefix):
             "Draft status",
             DRAFT_STATUS_OPTIONS,
             index=status_index,
+            help=(
+                "Only 'Approved for automated send' drafts appear in the batch sender. "
+                "Approval is not sending."
+            ),
             key=f"{key_prefix}_status_{suffix}",
         )
         if st.form_submit_button("Save draft", type="primary", width="stretch"):
-            update_outreach_draft(record["draft_key"], subject, body, status)
-            st.success("Draft saved locally. Nothing was sent.")
+            email_value = (recipient_email or "").strip()
+            if email_value and not email_sender.is_valid_email(email_value):
+                st.error("Enter a valid recipient email address, or leave it blank.")
+            else:
+                try:
+                    update_outreach_draft(
+                        record["draft_key"],
+                        subject,
+                        body,
+                        status,
+                        recipient_email=email_value,
+                    )
+                    st.session_state[f"{key_prefix}_saved"] = True
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Draft could not be saved: {exc}")
 
     with st.expander("Why this draft is personalized"):
         st.write(f"**Personalization evidence:** {payload.get('personalization_evidence', 'Not saved')}")
@@ -1028,7 +1095,10 @@ def _render_draft_editor(record, key_prefix):
             st.write("- None listed. Still verify names, links, and claims.")
         st.write(f"**Compliance notes:** {payload.get('compliance_notes', 'None')}")
 
-    download_text = f"Subject: {record.get('subject', '')}\n\n{record.get('body', '')}\n"
+    download_text = (
+        f"To: {record.get('recipient_email', '')}\n"
+        f"Subject: {record.get('subject', '')}\n\n{record.get('body', '')}\n"
+    )
     st.download_button(
         "Download draft as text",
         data=download_text.encode("utf-8"),
@@ -1037,8 +1107,8 @@ def _render_draft_editor(record, key_prefix):
         key=f"{key_prefix}_download_{suffix}",
     )
     st.caption(
-        "This app never sends email or submits forms. Copy the approved draft into your "
-        "email client or the publisher's official form yourself."
+        "Email is sent only from the batch send panel on this page, after you confirm. "
+        "Every email includes an opt-out line. The app never submits publisher forms."
     )
 
 
@@ -1054,6 +1124,354 @@ def _render_no_draft(record_label, button_label, button_key, on_prepare, disable
             except Exception as exc:
                 st.error(f"{record_label} draft could not be prepared.")
                 st.exception(exc)
+
+
+def _format_duration(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    minutes, remainder = divmod(seconds, 60)
+    if minutes and remainder:
+        return f"{minutes}m {remainder}s"
+    if minutes:
+        return f"{minutes}m"
+    return f"{remainder}s"
+
+
+def _approved_drafts_for_types(draft_types: set[str]) -> list[dict]:
+    return [
+        row
+        for row in list_outreach_drafts()
+        if row.get("draft_type") in draft_types
+        and row.get("draft_status") == "Approved for automated send"
+    ]
+
+
+def _run_email_batch(scope_key: str, approved: list[dict], config) -> None:
+    """Send the approved queue sequentially, with a delay and a hard daily cap."""
+    result_key = f"{scope_key}_email_result"
+    fresh = {row["draft_key"]: row for row in list_outreach_drafts()}
+    queue = []
+    for row in approved:
+        current = fresh.get(row["draft_key"])
+        if (
+            current is None
+            or current.get("draft_status") != "Approved for automated send"
+            or current.get("sent_at")
+        ):
+            st.session_state[result_key] = {
+                "sent": [],
+                "failed": [],
+                "stopped": "The approved queue changed before sending. Review the drafts again.",
+            }
+            st.rerun()
+        queue.append(current)
+
+    total = len(queue)
+    sent: list[dict] = []
+    failed: list[dict] = []
+    uncertain: list[dict] = []
+    stopped = ""
+    progress = st.progress(0.0, text="Preparing the approved queue...")
+    status_area = st.empty()
+
+    for index, row in enumerate(queue, start=1):
+        if count_emails_sent_today() >= config.daily_cap:
+            stopped = (
+                f"Daily cap reached ({config.daily_cap}). "
+                "The remaining approved drafts were not sent."
+            )
+            break
+
+        recipient = (row.get("recipient_name") or "recipient").strip()
+        email = (row.get("recipient_email") or "").strip()
+        subject = row.get("subject") or ""
+        body = row.get("body") or ""
+        progress.progress(
+            (index - 1) / total,
+            text=f"Sending {index} of {total}: {recipient}",
+        )
+
+        send_result = email_sender.send_email(
+            config,
+            to_email=email,
+            subject=subject,
+            body=body,
+            to_name=recipient,
+        )
+
+        if send_result.success:
+            try:
+                mark_outreach_draft_sent(
+                    row["draft_key"], email, send_result.message_id
+                )
+                log_email_send(
+                    draft_key=row["draft_key"],
+                    draft_type=row.get("draft_type", ""),
+                    recipient_name=recipient,
+                    recipient_email=email,
+                    publication=row.get("publication", ""),
+                    subject=subject,
+                    body=body,
+                    status="sent",
+                    message_id=send_result.message_id,
+                )
+            except Exception as exc:
+                uncertain.append(
+                    {
+                        "recipient": recipient,
+                        "email": email,
+                        "error": (
+                            "The email was sent, but the local record could not be "
+                            f"saved: {exc}"
+                        ),
+                    }
+                )
+                st.session_state.setdefault("uncertain_sent_draft_keys", set()).add(
+                    row["draft_key"]
+                )
+                stopped = (
+                    "An email was sent but the local record could not be updated. "
+                    "Do not resend it. Check the database and mark it manually."
+                )
+                status_area.error(stopped)
+                break
+            sent.append({"recipient": recipient, "email": email})
+            status_area.success(f"Sent to {recipient} <{email}>.")
+        else:
+            try:
+                mark_outreach_draft_send_failed(row["draft_key"], send_result.error)
+                log_email_send(
+                    draft_key=row["draft_key"],
+                    draft_type=row.get("draft_type", ""),
+                    recipient_name=recipient,
+                    recipient_email=email,
+                    publication=row.get("publication", ""),
+                    subject=subject,
+                    body=body,
+                    status="failed",
+                    error=send_result.error,
+                )
+            except Exception as exc:
+                failed.append(
+                    {
+                        "recipient": recipient,
+                        "email": email,
+                        "error": (
+                            f"{send_result.error} (The local log also failed: {exc})"
+                        ),
+                    }
+                )
+                stopped = (
+                    "A send failed and the local record could not be updated. "
+                    "Check the database and the recipient before retrying."
+                )
+                status_area.error(stopped)
+                break
+            failed.append(
+                {
+                    "recipient": recipient,
+                    "email": email,
+                    "error": send_result.error,
+                }
+            )
+            status_area.error(f"Could not send to {recipient}: {send_result.error}")
+            if send_result.fatal:
+                stopped = (
+                    "Sending stopped after a connection or authentication error. "
+                    "Fix the email settings and review the remaining drafts. If the "
+                    "connection dropped during a send, check that recipient before "
+                    "retrying; delivery may be uncertain."
+                )
+                break
+
+        progress.progress(index / total, text=f"Processed {index} of {total}")
+        if index < total:
+            for remaining in range(config.delay_seconds, 0, -1):
+                status_area.caption(
+                    f"Waiting {remaining}s before the next send. Keep this tab open."
+                )
+                time.sleep(1)
+
+    if not stopped:
+        progress.progress(1.0, text="Batch complete.")
+    st.session_state[result_key] = {
+        "sent": sent,
+        "failed": failed,
+        "uncertain": uncertain,
+        "stopped": stopped,
+    }
+    st.rerun()
+
+
+def _render_email_batch_panel(scope_key: str, draft_types: set[str]) -> None:
+    st.subheader("Batch send approved drafts")
+    st.caption(
+        "Only drafts with status 'Approved for automated send' are included. "
+        "The app sends one recipient at a time, with a delay, a daily cap, a "
+        "do-not-send list, and a permanent send log. Every email gets an opt-out line."
+    )
+
+    result_key = f"{scope_key}_email_result"
+    result = st.session_state.get(result_key)
+    if result:
+        with st.container(border=True):
+            if result.get("sent"):
+                st.success(
+                    f"Sent {len(result['sent'])} email"
+                    f"{'s' if len(result['sent']) != 1 else ''}."
+                )
+                for item in result["sent"]:
+                    st.write(f"- {item['recipient']} · {item['email']}")
+            if result.get("failed"):
+                st.error(
+                    f"{len(result['failed'])} email"
+                    f"{'s' if len(result['failed']) != 1 else ''} failed."
+                )
+                for item in result["failed"]:
+                    st.write(f"- {item['recipient']} · {item['email']}: {item['error']}")
+            if result.get("uncertain"):
+                st.warning(
+                    f"{len(result['uncertain'])} send"
+                    f"{'s' if len(result['uncertain']) != 1 else ''} have an "
+                    "uncertain local record. Do not resend without checking."
+                )
+                for item in result["uncertain"]:
+                    st.write(f"- {item['recipient']} · {item['email']}: {item['error']}")
+                if st.button(
+                    "I checked the uncertain sends; clear the session warning",
+                    key=f"{scope_key}_clear_uncertain",
+                ):
+                    st.session_state.pop("uncertain_sent_draft_keys", None)
+                    st.rerun()
+            if result.get("stopped"):
+                st.warning(result["stopped"])
+            if st.button("Dismiss send summary", key=f"{scope_key}_dismiss_result"):
+                st.session_state.pop(result_key, None)
+                st.rerun()
+        st.divider()
+
+    config = email_sender.load_email_config()
+    missing = email_sender.missing_config_fields(config)
+    if missing:
+        st.warning(
+            "Email sending is not configured yet. Add "
+            + " and ".join(missing)
+            + " in Settings."
+        )
+        if st.button("Open email settings", key=f"{scope_key}_open_settings"):
+            go(page="Settings")
+        return
+
+    approved = _approved_drafts_for_types(draft_types)
+    if not approved:
+        st.info(
+            "No drafts are approved for automated send. Open a draft below, add the "
+            "recipient's verified email, and set its status to "
+            "'Approved for automated send'."
+        )
+        return
+
+    table_rows = []
+    blockers: list[str] = []
+    for row in approved:
+        recipient = (row.get("recipient_name") or "Unknown recipient").strip()
+        email = (row.get("recipient_email") or "").strip()
+        payload = row.get("payload") or {}
+        channel = payload.get("channel", "Unknown")
+        if row.get("sent_at"):
+            blockers.append(f"{recipient} already has a sent record. Do not resend it.")
+        if row["draft_key"] in st.session_state.get("uncertain_sent_draft_keys", set()):
+            blockers.append(
+                f"{recipient} may already have been sent in this session. "
+                "Check the database before resending."
+            )
+        if not email_sender.is_valid_email(email):
+            blockers.append(f"{recipient} needs a valid recipient email.")
+        elif is_email_suppressed(email):
+            blockers.append(f"{recipient} is on the do-not-send list.")
+        if not (row.get("subject") or "").strip():
+            blockers.append(f"{recipient} needs a subject line.")
+        if not (row.get("body") or "").strip():
+            blockers.append(f"{recipient} needs a message body.")
+        table_rows.append(
+            {
+                "Recipient": recipient,
+                "Email": email or "Missing",
+                "Publication": row.get("publication", ""),
+                "Channel": channel,
+                "Subject": row.get("subject", ""),
+            }
+        )
+
+    st.dataframe(table_rows, width="stretch", hide_index=True)
+
+    channels = {
+        str((row.get("payload") or {}).get("channel", "")).lower()
+        for row in approved
+    }
+    if any("form" in channel for channel in channels):
+        st.warning(
+            "At least one draft was written for a contact form. Confirm that email "
+            "is an appropriate route for that publisher before sending."
+        )
+
+    with st.expander("Preview the exact messages that will be sent"):
+        for row in approved:
+            recipient = (row.get("recipient_name") or "Unknown recipient").strip()
+            st.markdown(f"**{recipient} · {row.get('recipient_email', '')}**")
+            st.caption(row.get("subject", ""))
+            body = row.get("body", "")
+            st.text(body[:1600] + ("\n\n[Preview truncated]" if len(body) > 1600 else ""))
+            st.caption("The opt-out footer is appended automatically at send time.")
+            st.divider()
+
+    if blockers:
+        st.error("Fix these drafts before sending:\n\n- " + "\n- ".join(blockers))
+        return
+
+    sent_today = count_emails_sent_today()
+    remaining = max(0, config.daily_cap - sent_today)
+    st.caption(
+        f"Daily cap: {sent_today}/{config.daily_cap} sent today · "
+        f"{remaining} remaining · Delay: {config.delay_seconds}s between sends · "
+        f"Estimated time: {_format_duration(max(0, len(approved) - 1) * config.delay_seconds)}."
+    )
+    if remaining == 0:
+        st.error("The daily send cap has been reached. No more emails can be sent today.")
+        return
+    if len(approved) > remaining:
+        st.error(
+            f"{len(approved)} drafts are approved, but the daily cap allows only "
+            f"{remaining} more send{'s' if remaining != 1 else ''} today. "
+            "Reduce approvals or raise the cap in Settings."
+        )
+        return
+    if not config.postal_address.strip():
+        st.warning(
+            "No mailing address is configured. Add one in Settings for commercial-email "
+            "compliance. The opt-out line is still included."
+        )
+
+    signature = hashlib.sha256(
+        "|".join(
+            f"{row['draft_key']}:{row.get('updated_at', '')}:{row.get('recipient_email', '')}"
+            for row in approved
+        ).encode("utf-8")
+    ).hexdigest()[:12]
+    confirmed = st.checkbox(
+        f"I verified the {len(approved)} recipient address"
+        f"{'es' if len(approved) != 1 else ''}, the draft text, the publisher policy, "
+        "and that email is an appropriate contact route.",
+        key=f"{scope_key}_confirm_{signature}",
+    )
+    if st.button(
+        f"Send {len(approved)} approved email"
+        f"{'s' if len(approved) != 1 else ''}",
+        type="primary",
+        width="stretch",
+        disabled=not confirmed,
+        key=f"{scope_key}_send_{signature}",
+    ):
+        _run_email_batch(scope_key, approved, config)
 
 
 # =========================================================
@@ -1615,16 +2033,24 @@ def _qualified_journalist_targets():
 
 
 def _render_pr_outreach():
-    st.caption("Write and review a personalized pitch. The app never sends it.")
+    st.caption(
+        "Write and review a personalized pitch. Approved drafts can be sent in a "
+        "batch from this page."
+    )
 
     st.info(
-        "Choose a qualified writer below, prepare a draft, edit it, and mark your own status. "
-        "Nothing leaves this computer."
+        "Choose a qualified writer, verify the draft, add the recipient's public "
+        "email, and approve it for automated send. Nothing sends until you confirm "
+        "the batch."
     )
 
     with st.expander("Your sender details (used in drafts)"):
         st.markdown(f"**{HARDCODED_SENDER_NAME}** · {HARDCODED_SENDER_ROLE}")
-        st.caption("Hardcoded for this workspace.")
+        st.caption(
+            "Hardcoded for this workspace. SMTP credentials stay in your local data folder."
+        )
+
+    _render_email_batch_panel("pr_outreach", {"journalist_pitch"})
 
     targets = _qualified_journalist_targets()
     if not targets:
@@ -1665,8 +2091,9 @@ def _render_pr_outreach():
 
     st.divider()
     st.caption(
-        "Tip: change the draft status to 'Approved for manual send' only after checking every link, "
-        "name, and claim. Use 'Sent manually' after you send it yourself."
+        "Tip: set 'Approved for automated send' only after checking every link, name, "
+        "and claim. Then use the batch sender above. Use 'Sent manually' only when you "
+        "send outside the app."
     )
 
 
@@ -2100,7 +2527,7 @@ def _render_listicle_prospects():
                         )
                     st.caption(
                         "This is a recommendation based on accessible policy evidence, not permission or a guarantee. "
-                        "The app does not contact publishers or submit forms."
+                        "The app does not submit publisher forms automatically."
                     )
 
     approved_with_contact = sum(
@@ -2145,15 +2572,24 @@ def _listicle_outreach_targets():
 
 
 def _render_listicle_outreach():
-    st.caption("Write and review a request for an approved prospect. The app never sends or submits it.")
+    st.caption(
+        "Write and review a request for an approved prospect. Approved drafts can "
+        "be sent in a batch from this page."
+    )
 
     st.info(
-        "Only approved prospects with saved contact research appear here. Nothing leaves this computer."
+        "Only approved prospects with saved contact research appear here. Verify the "
+        "route, add the recipient's public email, and confirm the batch before anything "
+        "is sent."
     )
 
     with st.expander("Your sender details (used in drafts)"):
         st.markdown(f"**{HARDCODED_SENDER_NAME}** · {HARDCODED_SENDER_ROLE}")
-        st.caption("Hardcoded for this workspace.")
+        st.caption(
+            "Hardcoded for this workspace. SMTP credentials stay in your local data folder."
+        )
+
+    _render_email_batch_panel("listicle_outreach", {"listicle_request"})
 
     targets = _listicle_outreach_targets()
     if not targets:
@@ -2205,6 +2641,11 @@ def _render_listicle_outreach():
                                 target_url=i.listicle_url,
                                 related_url=(p.policy_source_url if p else ""),
                                 draft_status="Draft",
+                                recipient_email=(
+                                    contact.professional_email
+                                    if email_sender.is_valid_email(contact.professional_email)
+                                    else ""
+                                ),
                             ),
                             disabled_reason=(
                                 f"Policy recommendation: {policy.recommended_disposition}. "
@@ -2221,8 +2662,9 @@ def _render_listicle_outreach():
 
     st.divider()
     st.caption(
-        "Tip: change the draft status to 'Approved for manual send' only after checking the page, "
-        "the policy, and every claim. Use 'Sent manually' after you send or submit it yourself."
+        "Tip: set 'Approved for automated send' only after checking the page, the "
+        "policy, and every claim. Then use the batch sender above. Use 'Sent manually' "
+        "only when you send or submit outside the app."
     )
 
 
@@ -2319,7 +2761,8 @@ def _render_library():
     _page_header(
         "Research Library",
         "Everything you've saved.",
-        "Prospects, PR opportunities, journalists, drafts, and placements — all stored locally.",
+        "Prospects, PR opportunities, journalists, drafts, send history, and "
+        "placements — all stored locally.",
     )
 
     saved_listicles = list_listicle_prospects()
@@ -2337,8 +2780,14 @@ def _render_library():
         sum(1 for row in saved_listicles if row.get("placement_progress") == "Live placement verified"),
     )
 
-    tab_listicles, tab_pr, tab_journalists, tab_drafts = st.tabs(
-        ["Listicle prospects", "PR opportunities", "Journalists", "Outreach drafts"]
+    tab_listicles, tab_pr, tab_journalists, tab_drafts, tab_sends = st.tabs(
+        [
+            "Listicle prospects",
+            "PR opportunities",
+            "Journalists",
+            "Outreach drafts",
+            "Email send log",
+        ]
     )
 
     with tab_listicles:
@@ -2461,9 +2910,11 @@ def _render_library():
                 {
                     "Type": row.get("draft_type", ""),
                     "Recipient": row.get("recipient_name", ""),
+                    "Email": row.get("recipient_email", ""),
                     "Publication": row.get("publication", ""),
                     "Subject": row.get("subject", ""),
                     "Status": row.get("draft_status", "Draft"),
+                    "Sent": row.get("sent_at", ""),
                     "Updated": row.get("updated_at", ""),
                 }
                 for row in saved_drafts
@@ -2478,10 +2929,56 @@ def _render_library():
             with st.expander("View draft text"):
                 for row in saved_drafts:
                     st.markdown(f"**{row.get('recipient_name', 'Unknown')} · {row.get('publication', '')}**")
-                    st.caption(f"{row.get('draft_type')} · {row.get('draft_status')}")
+                    st.caption(
+                        f"{row.get('draft_type')} · {row.get('draft_status')} · "
+                        f"Email: {row.get('recipient_email') or 'Not set'}"
+                    )
+                    if row.get("sent_at"):
+                        st.caption(
+                            f"Sent: {row['sent_at']} · Message ID: "
+                            f"{row.get('message_id') or 'Not recorded'}"
+                        )
+                    if row.get("send_error"):
+                        st.caption(f"Last send error: {row['send_error']}")
                     st.markdown(f"**Subject:** {row.get('subject', '')}")
                     st.text(row.get("body", ""))
                     st.divider()
+
+    with tab_sends:
+        send_rows = list_email_sends()
+        if not send_rows:
+            st.info(
+                "No emails have been sent yet. Approved batch sends will appear here "
+                "with their status, recipient, and message ID."
+            )
+        else:
+            sent_today = count_emails_sent_today()
+            st.caption(
+                f"{sent_today} successful send"
+                f"{'s' if sent_today != 1 else ''} today · "
+                f"{len(send_rows)} logged send attempt"
+                f"{'s' if len(send_rows) != 1 else ''} shown."
+            )
+            rows = [
+                {
+                    "Time": row.get("created_at", ""),
+                    "Status": row.get("status", ""),
+                    "Recipient": row.get("recipient_name", ""),
+                    "Email": row.get("recipient_email", ""),
+                    "Publication": row.get("publication", ""),
+                    "Subject": row.get("subject", ""),
+                    "Message ID": row.get("message_id", ""),
+                    "Error": row.get("error", ""),
+                }
+                for row in send_rows
+            ]
+            st.dataframe(rows, width="stretch", hide_index=True)
+            st.download_button(
+                "Export email send log as CSV",
+                data=email_sends_csv_bytes(),
+                file_name="email_send_log.csv",
+                mime="text/csv",
+            )
 
     st.divider()
     st.subheader("Backup")
@@ -2507,7 +3004,8 @@ def _render_settings():
     _page_header(
         "Settings",
         "Make it yours.",
-        f"Brand profile for {BRAND_NAME}, plus model cost, sender details, and local storage.",
+        f"Brand profile for {BRAND_NAME}, Gmail sending, model cost, sender details, "
+        "and local storage.",
     )
 
     st.subheader("Cost controls")
@@ -2582,6 +3080,185 @@ def _render_settings():
     st.caption("This sender identity is hardcoded and used in every outreach draft.")
 
     st.divider()
+    st.subheader("Email sending (Gmail / Google Workspace)")
+    st.caption(
+        "Sending is local only. Use a Google app password, not your normal Google "
+        "password. Google requires 2-Step Verification before it will create one. "
+        "Credentials are stored in data/email_config.json, which is gitignored."
+    )
+    st.markdown(
+        "Create an app password at "
+        "[myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). "
+        "Use `smtp.gmail.com` on port `587` with STARTTLS."
+    )
+    email_notice = st.session_state.pop("_email_settings_notice", None)
+    if email_notice:
+        notice_kind, notice_text = email_notice
+        if notice_kind == "success":
+            st.success(notice_text)
+        else:
+            st.warning(notice_text)
+    email_config = email_sender.load_email_config()
+    if email_config.app_password:
+        st.caption("A Google app password is saved locally. Leave the password field blank to keep it.")
+    else:
+        st.warning("No Google app password is saved yet. Batch sending is disabled until you add one.")
+    st.caption(f"Local config file: {email_sender.CONFIG_PATH}")
+
+    with st.form("email_settings_form"):
+        from_email = st.text_input(
+            "Gmail / Google Workspace address",
+            value=email_config.from_email,
+            placeholder="you@yourdomain.com",
+            help="The full address that will appear in the From header.",
+        )
+        app_password = st.text_input(
+            "Google app password",
+            value="",
+            type="password",
+            help=(
+                "The 16-character app password. Spaces are ignored. Leave blank to "
+                "keep the saved password."
+            ),
+        )
+        clear_password = st.checkbox(
+            "Delete the saved app password",
+            value=False,
+            help="Check this only when you want to remove the saved credential.",
+        )
+        delay_col, cap_col = st.columns(2)
+        delay_seconds = delay_col.number_input(
+            "Delay between sends (seconds)",
+            min_value=email_sender.MIN_DELAY_SECONDS,
+            max_value=email_sender.MAX_DELAY_SECONDS,
+            value=email_config.delay_seconds,
+            step=5,
+        )
+        daily_cap = cap_col.number_input(
+            "Daily send cap",
+            min_value=1,
+            max_value=email_sender.MAX_DAILY_CAP,
+            value=email_config.daily_cap,
+            step=1,
+            help="Successful sends per local day. Keep this well below your Gmail limit.",
+        )
+        postal_address = st.text_area(
+            "Mailing address (optional, recommended)",
+            value=email_config.postal_address,
+            height=70,
+            placeholder="Company name, street address, city, country",
+            help=(
+                "Appended to every outgoing email. Commercial email rules often require "
+                "a physical postal address."
+            ),
+        )
+        st.caption(
+            f"From name: {email_sender.DEFAULT_FROM_NAME} (fixed). Every email also gets "
+            "an automatic opt-out line."
+        )
+        save_email = st.form_submit_button(
+            "Save email settings", type="primary", width="stretch"
+        )
+        test_email = st.form_submit_button(
+            "Test SMTP connection", width="stretch"
+        )
+
+        if save_email or test_email:
+            password = (app_password or "").strip().replace(" ", "")
+            if not password and not clear_password:
+                password = email_config.app_password
+            if clear_password:
+                password = ""
+            candidate = email_sender.EmailConfig(
+                from_email=(from_email or "").strip(),
+                app_password=password,
+                delay_seconds=int(delay_seconds),
+                daily_cap=int(daily_cap),
+                postal_address=(postal_address or "").strip(),
+            )
+            if save_email:
+                email_sender.save_email_config(candidate)
+                missing = email_sender.missing_config_fields(candidate)
+                if missing:
+                    st.session_state["_email_settings_notice"] = (
+                        "warning",
+                        "Settings saved, but sending is not ready. Add "
+                        + " and ".join(missing)
+                        + ".",
+                    )
+                else:
+                    st.session_state["_email_settings_notice"] = (
+                        "success",
+                        "Email settings saved locally. Batch sending is ready.",
+                    )
+                st.rerun()
+            if test_email:
+                connected, message = email_sender.test_connection(candidate)
+                if connected:
+                    st.success(message)
+                else:
+                    st.error(message)
+
+    st.caption(
+        "The app sends only approved drafts, one recipient at a time, with the configured "
+        "delay and daily cap. It never sends on a schedule or without a confirmation."
+    )
+
+    st.divider()
+    st.subheader("Do-not-send list (opt-outs)")
+    st.caption(
+        "If someone asks not to be contacted, add their email here. Matching drafts are "
+        "blocked from batch sending. The opt-out footer asks recipients to reply "
+        "\"unsubscribe\"."
+    )
+    with st.form("suppression_form"):
+        suppress_email = st.text_input(
+            "Email to suppress",
+            placeholder="name@publication.com",
+            help="Case is ignored. This blocks every future batch send to the address.",
+        )
+        suppress_reason = st.text_input(
+            "Reason (optional)",
+            placeholder="Replied unsubscribe",
+        )
+        add_suppression = st.form_submit_button(
+            "Add to do-not-send list", width="stretch"
+        )
+        if add_suppression:
+            value = (suppress_email or "").strip().lower()
+            if not email_sender.is_valid_email(value):
+                st.error("Enter a valid email address.")
+            else:
+                add_email_suppression(value, suppress_reason)
+                st.success(f"{value} is blocked from batch sending.")
+
+    suppressions = list_email_suppressions()
+    if suppressions:
+        st.dataframe(
+            [
+                {
+                    "Email": row.get("email", ""),
+                    "Reason": row.get("reason", ""),
+                    "Added": row.get("created_at", ""),
+                }
+                for row in suppressions
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+        with st.expander("Remove an address from the do-not-send list"):
+            for row in suppressions:
+                address_col, action_col = st.columns([5, 1])
+                address_col.write(row.get("email", ""))
+                if action_col.button(
+                    "Remove", key=f"remove_suppression_{row.get('email', '')}"
+                ):
+                    remove_email_suppression(row.get("email", ""))
+                    st.rerun()
+    else:
+        st.caption("No addresses are on the do-not-send list.")
+
+    st.divider()
     st.subheader("Storage and safety")
     st.write(f"**Database:** `{DB_PATH}`")
     st.write("**Backups:** `backups/` in the project folder")
@@ -2600,10 +3277,17 @@ def _render_settings():
     st.subheader("Safety rules")
     st.markdown(
         """
-        - The app never sends email, submits publisher forms, or contacts anyone.
+        - Email sending is local only and requires a draft status of
+          'Approved for automated send' plus a separate batch confirmation.
+        - The app sends one recipient at a time, with a delay, a daily cap, and a
+          permanent send log. It never sends on a schedule.
+        - Every outgoing email gets an automatic opt-out line. Add a mailing
+          address for commercial-email compliance. If someone opts out, add their
+          address to the do-not-send list before any further batch send.
         - Research, contacts, and policy findings must be checked by a human.
-        - Approval only prepares the next step; it does not send outreach.
+          Use only publicly listed, relevant editorial contacts.
         - Publisher policy findings are recommendations, not permission or a guarantee.
+        - The app never submits publisher forms automatically.
         """
     )
 
@@ -2642,7 +3326,7 @@ with st.sidebar:
     st.divider()
     st.caption(f"Model: {MODEL}")
     st.caption(f"Search context: {SEARCH_CONTEXT_SIZE}")
-    st.caption("Local only · no automatic outreach")
+    st.caption("Local only · human-approved email")
 
 
 if page == "Workspace":

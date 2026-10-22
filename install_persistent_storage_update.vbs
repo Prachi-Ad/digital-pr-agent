@@ -1,7 +1,7 @@
 Option Explicit
 
 Dim fso, shell, sourceFolder, projectFolder, backupsRoot, backupFolder
-Dim stamp, pythonExe, agentPath, appPath, databasePath, command, result
+Dim stamp, pythonExe, agentPath, appPath, databasePath, emailSenderPath, command, result
 Dim stopCommand, content, fileHandle, errorMessage, launcherPath, stopPath
 Dim dbFile, backupDataFolder, sameFolder, smokePath
 
@@ -13,6 +13,7 @@ projectFolder = fso.GetParentFolderName(WScript.ScriptFullName)
 agentPath = fso.BuildPath(projectFolder, "agent.py")
 appPath = fso.BuildPath(projectFolder, "app.py")
 databasePath = fso.BuildPath(projectFolder, "database.py")
+emailSenderPath = fso.BuildPath(projectFolder, "email_sender.py")
 launcherPath = fso.BuildPath(projectFolder, "launch_pr_agent_hidden.vbs")
 stopPath = fso.BuildPath(projectFolder, "stop_pr_agent.bat")
 pythonExe = fso.BuildPath(projectFolder, ".venv\Scripts\python.exe")
@@ -23,8 +24,9 @@ sameFolder = (LCase(fso.GetAbsolutePathName(sourceFolder)) = _
 
 If Not fso.FileExists(fso.BuildPath(sourceFolder, "agent.py")) Or _
    Not fso.FileExists(fso.BuildPath(sourceFolder, "app.py")) Or _
-   Not fso.FileExists(fso.BuildPath(sourceFolder, "database.py")) Then
-    MsgBox "The update folder must contain agent.py, app.py, and database.py." & vbCrLf & _
+   Not fso.FileExists(fso.BuildPath(sourceFolder, "database.py")) Or _
+   Not fso.FileExists(fso.BuildPath(sourceFolder, "email_sender.py")) Then
+    MsgBox "The update folder must contain agent.py, app.py, database.py, and email_sender.py." & vbCrLf & _
            "Extract the complete ZIP package first. Your project was not changed.", vbExclamation, "Digital PR Agent"
     WScript.Quit 1
 End If
@@ -61,6 +63,7 @@ fso.CreateFolder backupFolder
 If fso.FileExists(agentPath) Then fso.CopyFile agentPath, fso.BuildPath(backupFolder, "agent.py"), True
 If fso.FileExists(appPath) Then fso.CopyFile appPath, fso.BuildPath(backupFolder, "app.py"), True
 If fso.FileExists(databasePath) Then fso.CopyFile databasePath, fso.BuildPath(backupFolder, "database.py"), True
+If fso.FileExists(emailSenderPath) Then fso.CopyFile emailSenderPath, fso.BuildPath(backupFolder, "email_sender.py"), True
 
 If fso.FileExists(dbFile) Then
     backupDataFolder = fso.BuildPath(backupFolder, "data")
@@ -104,6 +107,16 @@ If Not sameFolder Then
         WScript.Quit 1
     End If
     Err.Clear
+    fso.CopyFile fso.BuildPath(sourceFolder, "email_sender.py"), emailSenderPath, True
+    If Err.Number <> 0 Then
+        errorMessage = Err.Description
+        Err.Clear
+        RollBackFiles
+        MsgBox "Couldn't install email_sender.py." & vbCrLf & "Previous code was restored where backups existed." & vbCrLf & _
+               "Backup folder: " & backupFolder & vbCrLf & "Error: " & errorMessage, vbCritical, "Digital PR Agent"
+        WScript.Quit 1
+    End If
+    Err.Clear
     On Error GoTo 0
 End If
 
@@ -118,18 +131,22 @@ End If
 ' Check all syntax with the project's own Python, hidden from the user.
 shell.CurrentDirectory = projectFolder
 command = Chr(34) & pythonExe & Chr(34) & " -m py_compile " & _
-          Chr(34) & agentPath & Chr(34) & " " & Chr(34) & appPath & Chr(34) & " " & Chr(34) & databasePath & Chr(34)
+          Chr(34) & agentPath & Chr(34) & " " & Chr(34) & appPath & Chr(34) & " " & _
+          Chr(34) & databasePath & Chr(34) & " " & Chr(34) & emailSenderPath & Chr(34)
 result = shell.Run(command, 0, True)
 
 ' Smoke-test existing AI functions and the SQLite functions without making API calls.
 smokePath = fso.BuildPath(projectFolder, "_persistent_storage_smoke_check.py")
-content = "import agent, database" & vbCrLf & _
+content = "import agent, database, email_sender" & vbCrLf & _
           "required_agent = ['analyze_article', 'research_opportunities', 'research_journalists', 'research_listicles', 'research_listicle_contact', 'research_publisher_policy', 'draft_journalist_pitch', 'draft_listicle_inclusion_request']" & vbCrLf & _
           "missing = [name for name in required_agent if not callable(getattr(agent, name, None))]" & vbCrLf & _
           "assert not missing, 'Missing agent functions: ' + ', '.join(missing)" & vbCrLf & _
-          "required_db = ['init_db', 'load_app_snapshot', 'save_app_snapshot', 'upsert_listicle_prospect', 'upsert_pr_opportunity', 'upsert_journalist', 'upsert_outreach_draft', 'update_outreach_draft', 'list_outreach_drafts', 'create_database_backup']" & vbCrLf & _
+          "required_db = ['init_db', 'load_app_snapshot', 'save_app_snapshot', 'upsert_listicle_prospect', 'upsert_pr_opportunity', 'upsert_journalist', 'upsert_outreach_draft', 'update_outreach_draft', 'list_outreach_drafts', 'create_database_backup', 'count_emails_sent_today', 'email_sends_csv_bytes', 'is_email_suppressed']" & vbCrLf & _
           "missing_db = [name for name in required_db if not callable(getattr(database, name, None))]" & vbCrLf & _
           "assert not missing_db, 'Missing database functions: ' + ', '.join(missing_db)" & vbCrLf & _
+          "required_email = ['load_email_config', 'save_email_config', 'is_valid_email', 'send_email', 'test_connection']" & vbCrLf & _
+          "missing_email = [name for name in required_email if not callable(getattr(email_sender, name, None))]" & vbCrLf & _
+          "assert not missing_email, 'Missing email_sender functions: ' + ', '.join(missing_email)" & vbCrLf & _
           "database.init_db()" & vbCrLf & _
           "assert isinstance(database.load_app_snapshot(), dict), 'Database snapshot could not be read'" & vbCrLf
 Set fileHandle = fso.CreateTextFile(smokePath, True, False)
@@ -176,6 +193,11 @@ Sub RollBackFiles()
         fso.CopyFile fso.BuildPath(backupFolder, "database.py"), databasePath, True
     ElseIf fso.FileExists(databasePath) Then
         fso.DeleteFile databasePath, True
+    End If
+    If fso.FileExists(fso.BuildPath(backupFolder, "email_sender.py")) Then
+        fso.CopyFile fso.BuildPath(backupFolder, "email_sender.py"), emailSenderPath, True
+    ElseIf fso.FileExists(emailSenderPath) Then
+        fso.DeleteFile emailSenderPath, True
     End If
     On Error GoTo 0
 End Sub

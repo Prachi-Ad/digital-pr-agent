@@ -7,8 +7,10 @@ Last updated: Thu Oct 22 2026
 A local Streamlit research assistant for Digital PR and listicle prospecting.
 It turns published articles into PR angles, finds editorial and listicle
 opportunities, researches publisher contacts and policies, prepares outreach
-drafts for human review, and stores everything locally. It never sends email,
-submits forms, or contacts publishers.
+drafts for human review, and stores everything locally. From the local app, it
+can send explicitly approved drafts through Gmail / Google Workspace SMTP in a
+confirmed batch with a delay, a daily cap, a do-not-send list, and an audit log.
+It never submits publisher forms.
 
 ## Current UI
 
@@ -18,8 +20,9 @@ Three pages only:
    - Digital PR: Article -> PR angles -> Opportunities -> Journalists -> Outreach.
    - Listicles: Search -> Prospects (contacts/policy) -> Outreach.
 2. **Research Library** - listicles, PR opportunities, journalists, outreach
-   drafts, CSV exports, backups.
-3. **Settings** - brand, sender details, model/cost, storage, safety.
+   drafts, email send history, CSV exports, backups.
+3. **Settings** - brand, sender details, Gmail SMTP, do-not-send list,
+   model/cost, storage, safety.
 
 The old separate pages (Dashboard, PR Home, Asset Analysis, PR Action Plans,
 Outreach, etc.) were merged into the guided Workspace. Saved work is restored
@@ -34,7 +37,8 @@ compact research cards. The old dashboard/tab layout is gone. Settings shows
 the fixed sender identity, Prachi / SEO Specialist. The local Streamlit app
 remains the full tool. The Vercel Article step also accepts up to five URLs, but
 keeps results in memory only; the port does not add saved libraries, draft
-generation, accounts, quotas, or billing.
+generation, accounts, quotas, billing, or email sending. Vercel stays a
+non-sending demo.
 
 ## Completed work
 
@@ -42,7 +46,11 @@ generation, accounts, quotas, or billing.
 - Full storage check passes: listicles, contacts, policy, review decisions,
   placement progress, PR opportunities, journalists, co-authors, outreach
   drafts, restart/restore, exports, backups, and edge cases.
-- New `outreach_drafts` table with human edits and status tracking.
+- New `outreach_drafts` table with human edits and status tracking, plus
+  recipient email, send timestamp, message ID, last send error, and attempt count.
+- `email_sends` audit table stores every send attempt (sent or failed) with the
+  recipient, subject, body hash, message ID, and error. CSV export is available.
+- `email_suppressions` table stores the local do-not-send / opt-out list.
 - `storage_self_check.py` now covers outreach drafts and currently passes all checks.
 - Streamlit AppTest smoke run completes with no exceptions on Workspace, Settings,
   and Research Library.
@@ -52,11 +60,40 @@ generation, accounts, quotas, or billing.
 ### Outreach preparation
 - New `OutreachDraft` structured model and draft agent (no web search).
 - Digital PR pitch and listicle inclusion request generation.
-- Human-editable subject/body, status, verification checklist, and text download.
-- Draft status: Draft, Approved for manual send, Sent manually, Replied,
-  Placement confirmed, Declined, Do not send.
+- Human-editable subject/body, recipient email, status, verification checklist,
+  and text download.
+- Draft status: Draft, Approved for automated send, Approved for manual send,
+  Sent, Send failed, Sent manually, Replied, Placement confirmed, Declined,
+  Do not send.
 - Fixed sender identity in every draft: Prachi, SEO Specialist.
-- No sending or form submission, ever.
+- Batch sending is opt-in only: a draft must be marked "Approved for automated
+  send", then a separate batch confirmation is required.
+- No form submission, ever.
+
+### Local Gmail batch sending
+- Gmail / Google Workspace SMTP through `smtp.gmail.com` on port 587 with
+  STARTTLS. Requires a Google app password and 2-Step Verification.
+- Settings stores the Gmail address, app password, delay, daily cap, and optional
+  mailing address in `data/email_config.json`, which is gitignored. The From name
+  stays fixed as Prachi, SEO Specialist.
+- Default delay is 30 seconds between sends (configurable 5-300). Default daily
+  cap is 20 successful sends per local day (configurable 1-200).
+- The batch panel is on both Outreach pages. It lists only approved drafts, shows
+  the exact messages, and requires a confirmation checkbox before sending.
+- Sending is sequential. The UI shows progress and a delay countdown.
+- Every email gets an automatic opt-out line and `List-Unsubscribe` header; the
+  optional mailing address is appended when configured.
+- Missing/invalid recipient email, missing subject/body, an existing sent record,
+  an opt-out match, or daily-cap overflow blocks the batch.
+- Fatal SMTP authentication/connection errors stop the batch. Delivery-uncertain
+  errors are called out so the recipient can be checked before retrying.
+- Every attempt is recorded in `email_sends` and shown in the Research Library
+  "Email send log" tab with CSV export.
+- The do-not-send list in Settings blocks matching addresses from every future
+  batch. Add opted-out recipients there as soon as they ask.
+- Sending is available only from the local Streamlit app. There is no scheduler,
+  background worker, or unattended sending.
+- Vercel remains a non-sending demo.
 
 ### Batch article analysis
 - The Article step starts with one URL field. "+ Add URL" adds up to five
@@ -138,7 +175,9 @@ generation, accounts, quotas, or billing.
 - Render blueprint and Railway Procfile remain optional.
 - Vercel demo is deployed (see Deployment below).
 - `.gitignore` excludes `.venv/`, `data/`, `backups/`, and secrets.
-- Local brand file and database stay out of git.
+- Local brand file, email credentials, and database stay out of git.
+- `install_persistent_storage_update.vbs` now installs, backs up, and rolls back
+  `email_sender.py`, and its smoke check covers the email-sending functions.
 
 ### Deployment (live)
 - Vercel project: `vercel-app` under team `prachi-8a13`.
@@ -166,7 +205,10 @@ generation, accounts, quotas, or billing.
 - Demo scope: the Vercel app can call analyze, PR opportunities, journalists,
   listicles, contact, and policy research actions. Its UI now mirrors the local
   workspace, but it does not have persistence, accounts, review-library storage,
-  draft generation, usage quotas, or billing.
+  draft generation, usage quotas, billing, or email sending.
+- The Gmail SMTP batch sender is local-only and intentionally not part of the
+  Vercel build. Pushes that only change local sending code should use
+  `[skip vercel]` so the non-sending demo is not redeployed needlessly.
 - The full tool remains the local Streamlit app. No custom domain is connected
   to Vercel yet.
 
@@ -181,13 +223,26 @@ generation, accounts, quotas, or billing.
 - A saved PR opportunity queue can be reviewed after a restart without the
   original full asset analysis. Re-analyzing the article restores journalist
   research for new candidates.
-- The app never sends outreach. Every send is manual.
+- Sending requires a real Gmail / Google Workspace address and Google app
+  password. No live SMTP login or real send has been run yet because no
+  credentials were supplied.
+- The app password is stored locally in plaintext in `data/email_config.json`
+  (gitignored). Protect the machine and rotate the app password if exposed.
+- The app does not read replies. If someone opts out, add their address to the
+  do-not-send list manually.
+- The daily cap counts successful sends. A dropped connection can be ambiguous;
+  the UI warns before a retry.
+- Vercel cannot send email and remains a visual demo.
 
 ## Recommended next steps
 
-1. Run one real Digital PR workflow end-to-end with the nano model and review output quality.
-2. Run one real listicle workflow end-to-end, including contact and policy research.
-3. Test one generated pitch and one inclusion request, then edit and track status.
-4. Decide whether to keep the Vercel demo public, put it behind login, or retire
+1. In Settings, save the real Gmail / Google Workspace address, a Google app
+   password, delay, daily cap, and mailing address; run "Test SMTP connection".
+2. Add verified recipient emails to one draft, mark it "Approved for automated
+   send", and run a one-recipient batch as a live test. Review the send log.
+3. Run one real Digital PR workflow end-to-end with the nano model and review output quality.
+4. Run one real listicle workflow end-to-end, including contact and policy research.
+5. Test one generated pitch and one inclusion request, then edit and track status.
+6. Decide whether to keep the Vercel demo public, put it behind login, or retire
    it. Before a public launch, add accounts, per-user data isolation, spend
    caps, and a custom domain.

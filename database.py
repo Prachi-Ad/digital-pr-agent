@@ -11,6 +11,7 @@ import io
 import json
 import os
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -94,6 +95,17 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_column(
+    conn: sqlite3.Connection, table: str, column: str, definition: str
+) -> None:
+    """Add a column to an existing local database without losing saved rows."""
+    columns = {
+        row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
 def init_db() -> None:
     """Create tables if needed; never overwrites an existing database."""
     with _connect() as conn:
@@ -150,18 +162,52 @@ def init_db() -> None:
                 draft_key TEXT PRIMARY KEY,
                 draft_type TEXT NOT NULL,
                 recipient_name TEXT NOT NULL DEFAULT '',
+                recipient_email TEXT NOT NULL DEFAULT '',
                 publication TEXT NOT NULL DEFAULT '',
                 target_url TEXT NOT NULL DEFAULT '',
                 related_url TEXT NOT NULL DEFAULT '',
                 subject TEXT NOT NULL DEFAULT '',
                 body TEXT NOT NULL DEFAULT '',
                 draft_status TEXT NOT NULL DEFAULT 'Draft',
+                sent_at TEXT,
+                message_id TEXT,
+                send_error TEXT,
+                send_attempts INTEGER NOT NULL DEFAULT 0,
                 payload_json TEXT NOT NULL,
                 first_seen TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS email_sends (
+                send_key TEXT PRIMARY KEY,
+                draft_key TEXT NOT NULL,
+                draft_type TEXT NOT NULL DEFAULT '',
+                recipient_name TEXT NOT NULL DEFAULT '',
+                recipient_email TEXT NOT NULL,
+                publication TEXT NOT NULL DEFAULT '',
+                subject TEXT NOT NULL DEFAULT '',
+                body_sha256 TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL,
+                message_id TEXT,
+                error TEXT,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS email_suppressions (
+                email TEXT PRIMARY KEY,
+                reason TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
             """
         )
+        for column, definition in (
+            ("recipient_email", "TEXT NOT NULL DEFAULT ''"),
+            ("sent_at", "TEXT"),
+            ("message_id", "TEXT"),
+            ("send_error", "TEXT"),
+            ("send_attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            _ensure_column(conn, "outreach_drafts", column, definition)
         _migrate_journalist_keys(conn)
 
 
@@ -553,6 +599,7 @@ def upsert_outreach_draft(
     target_url: str = "",
     related_url: str = "",
     draft_status: str | None = None,
+    recipient_email: str = "",
 ) -> str:
     """Save a generated draft. Human edits are preserved unless regenerated."""
     init_db()
@@ -565,6 +612,7 @@ def upsert_outreach_draft(
     subject = getattr(draft, "subject_line", "") or ""
     body = getattr(draft, "message_body", "") or ""
     status = draft_status
+    email = (recipient_email or "").strip()
 
     with _connect() as conn:
         existing = conn.execute(
@@ -576,6 +624,7 @@ def upsert_outreach_draft(
                 publication == existing["publication"]
                 and resolved_target == existing["target_url"]
                 and (related_url == "" or related_url == existing["related_url"])
+                and (email == "" or email == existing["recipient_email"])
                 and subject == existing["subject"]
                 and body == existing["body"]
                 and (status is None or status == existing["draft_status"])
@@ -586,12 +635,16 @@ def upsert_outreach_draft(
 
         conn.execute(
             """INSERT INTO outreach_drafts(
-                   draft_key, draft_type, recipient_name, publication, target_url,
-                   related_url, subject, body, draft_status, payload_json,
-                   first_seen, updated_at
-               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   draft_key, draft_type, recipient_name, recipient_email,
+                   publication, target_url, related_url, subject, body,
+                   draft_status, payload_json, first_seen, updated_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(draft_key) DO UPDATE SET
                    recipient_name=excluded.recipient_name,
+                   recipient_email=CASE
+                       WHEN excluded.recipient_email <> '' THEN excluded.recipient_email
+                       ELSE outreach_drafts.recipient_email
+                   END,
                    publication=excluded.publication,
                    target_url=excluded.target_url,
                    related_url=CASE WHEN excluded.related_url <> '' THEN excluded.related_url ELSE outreach_drafts.related_url END,
@@ -601,7 +654,7 @@ def upsert_outreach_draft(
                    payload_json=excluded.payload_json,
                    updated_at=excluded.updated_at""",
             (
-                key, draft_type, recipient, publication, resolved_target,
+                key, draft_type, recipient, email, publication, resolved_target,
                 related_url, subject, body, status or "Draft", payload_json,
                 stamp, stamp, status, status,
             ),
@@ -614,8 +667,9 @@ def update_outreach_draft(
     subject: str,
     body: str,
     draft_status: str,
+    recipient_email: str | None = None,
 ) -> None:
-    """Save a human-edited draft and its review status."""
+    """Save a human-edited draft, recipient email, and review status."""
     init_db()
     with _connect() as conn:
         row = conn.execute(
@@ -627,11 +681,20 @@ def update_outreach_draft(
         if isinstance(payload, dict):
             payload["subject_line"] = subject
             payload["message_body"] = body
+        email = (
+            row["recipient_email"]
+            if recipient_email is None
+            else (recipient_email or "").strip()
+        )
         conn.execute(
             """UPDATE outreach_drafts SET
-                   subject=?, body=?, draft_status=?, payload_json=?, updated_at=?
+                   recipient_email=?, subject=?, body=?, draft_status=?,
+                   payload_json=?, updated_at=?
                WHERE draft_key=?""",
-            (subject, body, draft_status, _dump(payload) or "{}", _now(), draft_key),
+            (
+                email, subject, body, draft_status, _dump(payload) or "{}",
+                _now(), draft_key,
+            ),
         )
 
 
@@ -644,12 +707,161 @@ def list_outreach_drafts() -> list[dict[str, Any]]:
     return [_row_to_draft(row) for row in rows if row is not None]
 
 
+def mark_outreach_draft_sent(
+    draft_key: str,
+    recipient_email: str,
+    message_id: str,
+    sent_at: str | None = None,
+) -> None:
+    """Record a successful email send on the draft itself."""
+    init_db()
+    stamp = sent_at or _now()
+    with _connect() as conn:
+        conn.execute(
+            """UPDATE outreach_drafts SET
+                   recipient_email=?, draft_status='Sent', sent_at=?, message_id=?,
+                   send_error=NULL, send_attempts=send_attempts + 1, updated_at=?
+               WHERE draft_key=?""",
+            ((recipient_email or "").strip(), stamp, message_id or "", stamp, draft_key),
+        )
+
+
+def mark_outreach_draft_send_failed(draft_key: str, error: str) -> None:
+    """Record a failed send without losing the draft for review or retry."""
+    init_db()
+    stamp = _now()
+    with _connect() as conn:
+        conn.execute(
+            """UPDATE outreach_drafts SET
+                   draft_status='Send failed', send_error=?,
+                   send_attempts=send_attempts + 1, updated_at=?
+               WHERE draft_key=?""",
+            ((error or "Unknown send error")[:2000], stamp, draft_key),
+        )
+
+
+def log_email_send(
+    draft_key: str,
+    draft_type: str,
+    recipient_name: str,
+    recipient_email: str,
+    publication: str,
+    subject: str,
+    body: str,
+    status: str,
+    message_id: str = "",
+    error: str = "",
+) -> str:
+    """Append a permanent send-log row. Never stores SMTP credentials."""
+    init_db()
+    send_key = uuid.uuid4().hex
+    body_hash = hashlib.sha256((body or "").encode("utf-8")).hexdigest()
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO email_sends(
+                   send_key, draft_key, draft_type, recipient_name,
+                   recipient_email, publication, subject, body_sha256,
+                   status, message_id, error, created_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                send_key, draft_key, draft_type or "", recipient_name or "",
+                (recipient_email or "").strip(), publication or "", subject or "",
+                body_hash, status, message_id or "", (error or "")[:2000], _now(),
+            ),
+        )
+    return send_key
+
+
+def list_email_sends(limit: int = 500) -> list[dict[str, Any]]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT * FROM email_sends
+               ORDER BY created_at DESC, rowid DESC LIMIT ?""",
+            (max(1, int(limit)),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def count_emails_sent_today() -> int:
+    """Count successful sends whose local date matches today."""
+    init_db()
+    today = datetime.now().astimezone().date().isoformat()
+    with _connect() as conn:
+        row = conn.execute(
+            """SELECT COUNT(*) AS sent_count FROM email_sends
+               WHERE status='sent' AND substr(created_at, 1, 10)=?""",
+            (today,),
+        ).fetchone()
+    return int(row["sent_count"] or 0) if row else 0
+
+
+def add_email_suppression(email: str, reason: str = "") -> None:
+    """Add or update an address that must never be batch-sent again."""
+    init_db()
+    normalized = (email or "").strip().lower()
+    if not normalized:
+        raise ValueError("An email address is required.")
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO email_suppressions(email, reason, created_at)
+               VALUES(?, ?, ?)
+               ON CONFLICT(email) DO UPDATE SET reason=excluded.reason""",
+            (normalized, (reason or "").strip(), _now()),
+        )
+
+
+def remove_email_suppression(email: str) -> None:
+    init_db()
+    normalized = (email or "").strip().lower()
+    with _connect() as conn:
+        conn.execute("DELETE FROM email_suppressions WHERE email=?", (normalized,))
+
+
+def list_email_suppressions() -> list[dict[str, Any]]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM email_suppressions ORDER BY created_at DESC, rowid DESC"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def is_email_suppressed(email: str) -> bool:
+    init_db()
+    normalized = (email or "").strip().lower()
+    if not normalized:
+        return False
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM email_suppressions WHERE email=? LIMIT 1", (normalized,)
+        ).fetchone()
+    return row is not None
+
+
 def outreach_csv_bytes() -> bytes:
     rows = list_outreach_drafts()
     out = io.StringIO(newline="")
     columns = [
-        "draft_type", "recipient_name", "publication", "target_url", "subject",
-        "body", "draft_status", "related_url", "first_seen", "updated_at",
+        "draft_type", "recipient_name", "recipient_email", "publication",
+        "target_url", "subject", "body", "draft_status", "sent_at",
+        "message_id", "send_error", "send_attempts", "related_url",
+        "first_seen", "updated_at",
+    ]
+    writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: _csv_safe(value) for key, value in row.items() if key in columns})
+    return out.getvalue().encode("utf-8-sig")
+
+
+def email_sends_csv_bytes() -> bytes:
+    rows = list_email_sends(limit=5000)
+    out = io.StringIO(newline="")
+    columns = [
+        "created_at", "status", "recipient_name", "recipient_email",
+        "publication", "subject", "draft_type", "message_id", "error",
+        "body_sha256", "draft_key",
     ]
     writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")
     writer.writeheader()

@@ -5,8 +5,11 @@ It turns published articles into PR angles, finds editorial and listicle
 opportunities, researches contacts and publisher policies, prepares outreach
 drafts for human review, and stores every record locally.
 
-**The app never sends email, submits a publisher form, or contacts anyone.**
-You approve every decision and send every message yourself.
+From the local app, you can also send explicitly approved drafts through
+**Gmail / Google Workspace SMTP** in a confirmed batch, with a delay, a daily
+cap, a do-not-send list, and a permanent send log. **The app never submits a
+publisher form.** You approve every draft and confirm every batch before a
+message leaves your computer. Vercel remains a non-sending demo.
 
 ## The simple workflow
 
@@ -16,8 +19,9 @@ The app has three pages:
    - **Digital PR:** article → PR angles → opportunities → journalists → outreach draft.
    - **Listicle inclusion:** search → prospects, contacts, and policy → inclusion request.
 2. **Research Library** - saved prospects, PR opportunities, journalists, drafts,
-   CSV exports, and verified database backups.
-3. **Settings** - brand, sender details, model/cost information, storage, safety.
+   email send history, CSV exports, and verified database backups.
+3. **Settings** - brand, sender details, Gmail SMTP, do-not-send list,
+   model/cost information, storage, safety.
 
 Each path is a short numbered stepper. Saved work is restored when you reopen
 the app, and the Workspace shows a "Continue saved..." button on the start screen.
@@ -37,8 +41,12 @@ sidebar icons rather than emoji.
 - **Publisher policy:** checks whether a publisher accepts inclusion requests,
   uses a paid/affiliate/directory route, or should be skipped.
 - **Outreach preparation:** writes a personalized draft using only verified
-  research. Drafts are editable and tracked as Draft, Approved for manual send,
-  Sent manually, Replied, Placement confirmed, Declined, or Do not send.
+  research. Drafts are editable and tracked as Draft, Approved for automated
+  send, Approved for manual send, Sent, Send failed, Sent manually, Replied,
+  Placement confirmed, Declined, or Do not send.
+- **Batch sending:** approved drafts can be sent through Gmail SMTP from the
+  Outreach page after a separate confirmation. Every email gets an opt-out line
+  and is recorded in the send log.
 - **Tracking:** review decisions and placement progress are saved immediately
   in a local SQLite database.
 
@@ -56,11 +64,41 @@ lower, set `OPENAI_MODEL` to `gpt-5-nano-flex` before launching.
 Web search is the largest cost, not the model. The app deliberately researches
 only the prospects you choose.
 
+## Email sending (local only)
+
+Sending is optional and works only in the local Streamlit app. Vercel cannot
+send email.
+
+1. Turn on 2-Step Verification for the Google account.
+2. Create a Google **app password** at
+   `https://myaccount.google.com/apppasswords`.
+3. In **Settings -> Email sending**, enter the full Gmail / Google Workspace
+   address and the app password. Set the delay (default 30 seconds), daily cap
+   (default 20), and optional mailing address. Click **Test SMTP connection**.
+4. In a draft, add a verified recipient email and set the status to
+   **Approved for automated send**.
+5. On the Outreach page, review the batch, tick the confirmation checkbox, and
+   click **Send ... approved emails**.
+
+The app sends one recipient at a time. It never sends on a schedule or without
+the confirmation checkbox. Every email includes an opt-out line and
+`List-Unsubscribe` header. All attempts are logged in
+**Research Library -> Email send log**.
+
+If someone asks not to be contacted, add their address to the **do-not-send
+list** in Settings. Matching drafts are blocked from future batches.
+
+Credentials live in `data/email_config.json`, which is gitignored and never
+committed. The file contains the app password in plaintext, so protect the
+computer and rotate the password if it is exposed.
+
 ## Requirements
 
 - Windows (the one-click launchers are `.vbs` / `.bat`)
 - Python 3.11+ (tested on 3.14.7)
 - An OpenAI API key with access to a nano model
+- Optional for sending: a Gmail / Google Workspace account with 2-Step
+  Verification and a Google app password
 
 ## Setup
 
@@ -111,12 +149,13 @@ the tool for a specific brand without changing the shareable defaults.
 Double-click `run_storage_check.vbs`. It runs the full storage test against a
 temporary database, saves a record at every stage, restarts the session,
 exercises outreach drafts, exports data, creates a backup, and verifies it.
-It never touches the real research database and does not call the OpenAI API.
-Details are written to `backups\latest_storage_check.txt`.
+It never touches the real research database, does not call the OpenAI API, and
+does not send email. Details are written to `backups\latest_storage_check.txt`.
 
 ## Local data and backups
 
 - Database: `data/pr_agent.sqlite3`
+- Email credentials: `data/email_config.json` (gitignored; plaintext app password)
 - Backups: `backups/`
 - Data is **not synced** to other computers. Back up before updating or moving.
 - Research Library → **Create database backup** creates a dated backup and
@@ -126,9 +165,15 @@ Details are written to `backups\latest_storage_check.txt`.
 
 ## Safety rules
 
-- The app never performs outreach.
+- Sending requires a draft status of **Approved for automated send** plus a
+  separate batch confirmation. Approval alone does not send.
+- The app sends only from the local app, one recipient at a time, with a delay
+  and a daily cap. It never sends on a schedule.
+- Use only relevant, publicly listed editorial contacts. Do not send to
+  purchased lists.
+- Every email gets an opt-out line. Add anyone who opts out to the do-not-send
+  list before any further batch.
 - Contacts and policy findings are research, not permission or a guarantee.
-- Approval only prepares the next step; it does not send anything.
 - Always verify names, links, claims, and publisher rules before sending.
 - Do not treat paid or affiliate placements as independent editorial endorsements.
 
@@ -136,7 +181,8 @@ Details are written to `backups\latest_storage_check.txt`.
 
 - `app.py` - the three-page Streamlit workspace.
 - `agent.py` - OpenAI Agents SDK prompts and structured output models.
-- `database.py` - SQLite storage, migrations, CSVs, and verified backups.
+- `database.py` - SQLite storage, migrations, CSVs, send log, and verified backups.
+- `email_sender.py` - local Gmail SMTP config, message building, and sending.
 - `storage_self_check.py` - end-to-end storage test.
 - `run_storage_check.vbs` - one-click health check.
 - `launch_pr_agent_hidden.vbs` - one-click launcher.
@@ -147,6 +193,7 @@ Details are written to `backups\latest_storage_check.txt`.
 ## Updating
 
 Use `install_persistent_storage_update.vbs` only with a full update package
-containing `agent.py`, `app.py`, and `database.py`. It stops the app, backs up
-your code and database, installs the files, checks Python syntax and required
-functions, and rolls back on failure.
+containing `agent.py`, `app.py`, `database.py`, and `email_sender.py`. It stops
+the app, backs up your code and database, installs the files, checks Python
+syntax and required functions (including the email sender), and rolls back on
+failure.
