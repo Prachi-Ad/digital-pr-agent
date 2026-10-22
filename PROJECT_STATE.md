@@ -26,6 +26,14 @@ Outreach, etc.) were merged into the guided Workspace. Saved work is restored
 after a restart, and the start screen offers both "Continue saved..." and
 "Start new..." buttons for each workflow.
 
+### Vercel demo UI
+The Vercel deployment is a Next.js visual port of the same interface: fixed
+left sidebar, "Working for Vista Social" chip, Workspace / Research Library /
+Settings navigation, WORKSPACE eyebrow, workflow stepper, indigo palette, and
+compact research cards. The old dashboard/tab layout is gone. The local
+Streamlit app remains the full tool; the port does not add saved libraries,
+draft generation, accounts, quotas, or billing.
+
 ## Completed work
 
 ### Storage (validated)
@@ -75,6 +83,9 @@ after a restart, and the start screen offers both "Continue saved..." and
 - Sender name/role stored in the workspace and used in drafts.
 - Sidebar uses three small monochrome CSS-mask icons; no emoji or icon-heavy rows.
 - Tighter 12px vertical rhythm and compact metric tiles.
+- Vercel demo rebuilt to mirror the local workspace: left sidebar, workspace
+  badge, stepper, indigo cards, expandable action plans, and inline
+  contact/policy results. Red error styling was removed.
 - CORS configuration corrected for local Streamlit.
 
 ### Reliability
@@ -104,24 +115,29 @@ after a restart, and the start screen offers both "Continue saved..." and
   demo from this subfolder, not the Streamlit repository root.
 - Deployment: Vercel Git integration builds the `vercel-app` subfolder on each
   push to `main`; the production alias is verified healthy.
-- Code deployed: commit `acd5c9d` (persistent event-loop fix).
-- Status: READY; production alias live as of 2026-10-22. The Git-triggered
-  deployment builds the `vercel-app` subfolder and serves the demo correctly.
+- Code deployed: commit `f446a79` (Vercel UI parity, building on `187fa67`).
+- Status: READY; production alias live as of 2026-10-22. Latest production
+  deployment: `https://vercel-3blbjzkur-prachi-8a13.vercel.app` (deployment URL,
+  protected by Vercel Authentication). Public alias:
+  `https://vercel-app-gules-three.vercel.app`.
 - Vercel environment: `OPENAI_API_KEY` is configured for Production,
   Preview, and Development (value not stored in the repo).
-- Build verified: Git-triggered Next.js 14.2.15 production build and Python
-  dependencies complete successfully; root and `/api/analyze` both return 200.
+- Build verified: Git-triggered Next.js 14.2.15 production build succeeds;
+  the public alias root and `/api/analyze` both return 200. The production UI
+  was checked at desktop and narrow widths.
 - Demo scope: the Vercel app can call analyze, PR opportunities, journalists,
-  listicles, contact, and policy research actions. It does not yet have
-  persistence, accounts, review-library storage, usage quotas, or billing.
+  listicles, contact, and policy research actions. Its UI now mirrors the local
+  workspace, but it does not have persistence, accounts, review-library storage,
+  draft generation, usage quotas, or billing.
 - The full tool remains the local Streamlit app. No custom domain is connected
   to Vercel yet.
 
 ## Known caveats
 
 - Web search dominates cost (~$10 per 1,000 calls). Research runs only on click.
-- The Vercel demo covers the research actions but has no persistence, accounts,
-  quotas, or review library. The local Streamlit app is the full tool.
+- The Vercel demo is a Next.js visual port, not the Streamlit runtime. It covers
+  the research actions but has no persistence, accounts, quotas, review library,
+  or draft generation. The local Streamlit app is the full tool.
 - A saved PR opportunity queue can be reviewed after a restart without the
   original full asset analysis. Re-analyzing the article restores journalist
   research for new candidates.
