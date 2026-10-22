@@ -30,9 +30,10 @@ after a restart, and the start screen offers both "Continue saved..." and
 The Vercel deployment is a Next.js visual port of the same interface: fixed
 left sidebar, "Working for Vista Social" chip, Workspace / Research Library /
 Settings navigation, WORKSPACE eyebrow, workflow stepper, indigo palette, and
-compact research cards. The old dashboard/tab layout is gone. The local
-Streamlit app remains the full tool; the port does not add saved libraries,
-draft generation, accounts, quotas, or billing.
+compact research cards. The old dashboard/tab layout is gone. Settings shows
+the fixed sender identity, Prachi / SEO Specialist. The local Streamlit app
+remains the full tool; the port does not add saved libraries, draft generation,
+accounts, quotas, or billing.
 
 ## Completed work
 
@@ -53,6 +54,7 @@ draft generation, accounts, quotas, or billing.
 - Human-editable subject/body, status, verification checklist, and text download.
 - Draft status: Draft, Approved for manual send, Sent manually, Replied,
   Placement confirmed, Declined, Do not send.
+- Fixed sender identity in every draft: Prachi, SEO Specialist.
 - No sending or form submission, ever.
 
 ### Cost
@@ -80,7 +82,9 @@ draft generation, accounts, quotas, or billing.
   primary buttons use the indigo gradient.
 - Brand config in `data/brand_config.json`, editable in Settings, including an
   optional website / `BRAND_DOMAIN`.
-- Sender name/role stored in the workspace and used in drafts.
+- Sender identity is hardcoded to Prachi / SEO Specialist and used in every
+  outreach draft. The editable sender fields are now read-only. Existing drafts
+  with [Your name] / [Your role] placeholders were migrated to the fixed identity.
 - Sidebar uses three small monochrome CSS-mask icons; no emoji or icon-heavy rows.
 - Tighter 12px vertical rhythm and compact metric tiles.
 - Vercel demo rebuilt to mirror the local workspace: left sidebar, workspace
@@ -115,16 +119,18 @@ draft generation, accounts, quotas, or billing.
   demo from this subfolder, not the Streamlit repository root.
 - Deployment: Vercel Git integration builds the `vercel-app` subfolder on each
   push to `main`; the production alias is verified healthy.
-- Code deployed: commit `f446a79` (Vercel UI parity, building on `187fa67`).
+- Code deployed: commit `0b88d53` (includes the hardcoded sender Settings from
+  `dd2f9d0`, building on the Vercel UI parity commits `f446a79` and `187fa67`).
 - Status: READY; production alias live as of 2026-10-22. Latest UI deployment:
-  `https://vercel-3blbjzkur-prachi-8a13.vercel.app` (deployment URL, protected
+  `https://vercel-jga286tsy-prachi-8a13.vercel.app` (deployment URL, protected
   by Vercel Authentication). Public alias:
   `https://vercel-app-gules-three.vercel.app`.
 - Vercel environment: `OPENAI_API_KEY` is configured for Production,
   Preview, and Development (value not stored in the repo).
 - Build verified: Git-triggered Next.js 14.2.15 production build succeeds;
-  the public alias root and `/api/analyze` both return 200. The production UI
-  was checked at desktop and narrow widths.
+  the public alias root and `/api/analyze` both return 200. Settings was verified
+  on the public alias with Sender name: Prachi and Job role: SEO Specialist. The
+  production UI was checked at desktop and narrow widths.
 - Demo scope: the Vercel app can call analyze, PR opportunities, journalists,
   listicles, contact, and policy research actions. Its UI now mirrors the local
   workspace, but it does not have persistence, accounts, review-library storage,
