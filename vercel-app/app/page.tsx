@@ -1,8 +1,31 @@
 "use client";
+
 import { useState } from "react";
-import { Loader2, Search, Users, FileText, List, Mail, Shield, LayoutDashboard, BarChart3 } from "lucide-react";
+import type { FormEvent, ReactNode } from "react";
+import {
+  ArrowRight,
+  BarChart3,
+  BookOpen,
+  ExternalLink,
+  FileText,
+  LayoutGrid,
+  List,
+  Loader2,
+  Mail,
+  Search,
+  Shield,
+  SlidersHorizontal,
+  Users,
+} from "lucide-react";
 
 type AnyObj = Record<string, any>;
+
+const digitalSteps = ["Article", "PR angles", "Opportunities", "Journalists", "Outreach"] as const;
+const listicleSteps = ["Search", "Prospects", "Outreach"] as const;
+type DigitalStep = (typeof digitalSteps)[number];
+type ListicleStep = (typeof listicleSteps)[number];
+type Nav = "Workspace" | "Research Library" | "Settings";
+type Workflow = "digital" | "listicles";
 
 async function callApi(action: string, body: any = {}, onRetry?: (attempt: number) => void) {
   const maxAttempts = 3;
@@ -28,26 +51,54 @@ async function callApi(action: string, body: any = {}, onRetry?: (attempt: numbe
   throw lastErr;
 }
 
-function Spinner() {
-  return <Loader2 className="animate-spin inline-block" size={18} />;
+function Spinner({ size = 16 }: { size?: number }) {
+  return <Loader2 className="animate-spin" size={size} />;
 }
 
-function Card({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
+function MetricCard({ label, value, icon }: { label: string; value: number; icon: ReactNode }) {
   return (
-    <div className="rounded border bg-white p-4 flex items-center gap-3">
-      <div className="text-blue-600">{icon}</div>
+    <div className="metric-card">
+      <div className="metric-icon">{icon}</div>
       <div>
-        <div className="text-2xl font-bold">{value}</div>
-        <div className="text-sm text-gray-500">{label}</div>
+        <div className="metric-value">{value}</div>
+        <div className="metric-label">{label}</div>
       </div>
     </div>
   );
 }
 
+function Note({ children, tone = "info" }: { children: ReactNode; tone?: "info" | "warn" }) {
+  return <div className={`note ${tone === "warn" ? "note-warn" : "note-info"}`}>{children}</div>;
+}
+
+function PageHeading({
+  badge,
+  title,
+  subtitle,
+  action,
+}: {
+  badge: string;
+  title: string;
+  subtitle: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="page-header">
+      <div>
+        <div className="page-badge">{badge}</div>
+        <h1 className="page-title">{title}</h1>
+        <p className="page-subtitle">{subtitle}</p>
+      </div>
+      {action}
+    </div>
+  );
+}
+
 export default function Home() {
-  const tabs = ["Dashboard", "Analyze", "Opportunities", "Journalists", "Listicles", "Contact", "Policy"] as const;
-  type Tab = (typeof tabs)[number];
-  const [tab, setTab] = useState<Tab>("Dashboard");
+  const [nav, setNav] = useState<Nav>("Workspace");
+  const [workflow, setWorkflow] = useState<Workflow>("digital");
+  const [digitalStep, setDigitalStep] = useState<DigitalStep>("Article");
+  const [listicleStep, setListicleStep] = useState<ListicleStep>("Search");
   const [retryMsg, setRetryMsg] = useState<string | null>(null);
 
   // Analyze state
@@ -89,27 +140,71 @@ export default function Home() {
   const [policy, setPolicy] = useState<AnyObj | null>(null);
   const [errPolicy, setErrPolicy] = useState<string | null>(null);
 
-  // Derived counts
   const angleCount = analysis?.pr_angles?.length || 0;
   const oppCount = opportunities?.opportunities?.length || 0;
   const journCount = journalists?.journalists?.length || 0;
   const listCount = listicles?.opportunities?.length || 0;
   const contactCount = contact?.contacts?.length || 0;
 
-  async function analyze(e: React.FormEvent) {
+  const steps: readonly string[] = workflow === "digital" ? digitalSteps : listicleSteps;
+  const activeStep = workflow === "digital" ? digitalStep : listicleStep;
+
+  function goStep(step: string) {
+    if (workflow === "digital") {
+      setDigitalStep(step as DigitalStep);
+    } else {
+      setListicleStep(step as ListicleStep);
+    }
+  }
+
+  function switchWorkflow() {
+    setWorkflow(workflow === "digital" ? "listicles" : "digital");
+    setNav("Workspace");
+  }
+
+  async function analyze(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!url.trim()) return;
     setLoadingAnalyze(true);
     setErrAnalyze(null);
     setAnalysis(null);
+    setSelectedAngle(null);
+    setOpportunities(null);
+    setSelectedOpp(null);
+    setJournalists(null);
     setRetryMsg(null);
     try {
-      const data = await callApi("analyze", { article_url: url.trim() }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
+      const data = await callApi("analyze", { article_url: url.trim() }, (a) =>
+        setRetryMsg(`Retrying (attempt ${a}/3)...`)
+      );
       setAnalysis(data);
+      setDigitalStep("PR angles");
     } catch (err: any) {
       setErrAnalyze(err?.message || "Something went wrong");
     } finally {
       setLoadingAnalyze(false);
+      setRetryMsg(null);
+    }
+  }
+
+  async function researchAngle(angle: AnyObj) {
+    setSelectedAngle(angle);
+    setLoadingOpp(true);
+    setErrOpp(null);
+    setOpportunities(null);
+    setSelectedOpp(null);
+    setJournalists(null);
+    setRetryMsg(null);
+    try {
+      const data = await callApi("opportunities", { angle }, (a) =>
+        setRetryMsg(`Retrying (attempt ${a}/3)...`)
+      );
+      setOpportunities(data);
+      setDigitalStep("Opportunities");
+    } catch (err: any) {
+      setErrOpp(err?.message || "Something went wrong");
+    } finally {
+      setLoadingOpp(false);
       setRetryMsg(null);
     }
   }
@@ -121,12 +216,37 @@ export default function Home() {
     setOpportunities(null);
     setRetryMsg(null);
     try {
-      const data = await callApi("opportunities", { angle: selectedAngle }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
+      const data = await callApi("opportunities", { angle: selectedAngle }, (a) =>
+        setRetryMsg(`Retrying (attempt ${a}/3)...`)
+      );
       setOpportunities(data);
     } catch (err: any) {
       setErrOpp(err?.message || "Something went wrong");
     } finally {
       setLoadingOpp(false);
+      setRetryMsg(null);
+    }
+  }
+
+  async function researchJournalistsFor(opportunity: AnyObj) {
+    if (!selectedAngle) return;
+    setSelectedOpp(opportunity);
+    setJournalists(null);
+    setDigitalStep("Journalists");
+    setLoadingJourn(true);
+    setErrJourn(null);
+    setRetryMsg(null);
+    try {
+      const data = await callApi(
+        "journalists",
+        { angle: selectedAngle, opportunity },
+        (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
+      );
+      setJournalists(data);
+    } catch (err: any) {
+      setErrJourn(err?.message || "Something went wrong");
+    } finally {
+      setLoadingJourn(false);
       setRetryMsg(null);
     }
   }
@@ -138,7 +258,11 @@ export default function Home() {
     setJournalists(null);
     setRetryMsg(null);
     try {
-      const data = await callApi("journalists", { angle: selectedAngle, opportunity: selectedOpp }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
+      const data = await callApi(
+        "journalists",
+        { angle: selectedAngle, opportunity: selectedOpp },
+        (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
+      );
       setJournalists(data);
     } catch (err: any) {
       setErrJourn(err?.message || "Something went wrong");
@@ -148,23 +272,34 @@ export default function Home() {
     }
   }
 
-  async function runListicles(e: React.FormEvent) {
+  async function runListicles(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!listForm.search_theme.trim()) return;
     setLoadingList(true);
     setErrList(null);
     setListicles(null);
+    setSelectedItem(null);
+    setContact(null);
+    setPolicy(null);
     setRetryMsg(null);
     try {
-      const data = await callApi("listicles", {
-        search_theme: listForm.search_theme.trim(),
-        related_queries: listForm.related_queries,
-        target_audience: listForm.target_audience,
-        target_market: listForm.target_market,
-        competitors: listForm.competitors.split(",").map((s) => s.trim()).filter(Boolean),
-        max_results: Number(listForm.max_results) || 8,
-      }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
+      const data = await callApi(
+        "listicles",
+        {
+          search_theme: listForm.search_theme.trim(),
+          related_queries: listForm.related_queries,
+          target_audience: listForm.target_audience,
+          target_market: listForm.target_market,
+          competitors: listForm.competitors
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+          max_results: Number(listForm.max_results) || 8,
+        },
+        (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
+      );
       setListicles(data);
+      setListicleStep("Prospects");
     } catch (err: any) {
       setErrList(err?.message || "Something went wrong");
     } finally {
@@ -175,13 +310,14 @@ export default function Home() {
 
   async function runContact(item: AnyObj) {
     setSelectedItem(item);
-    setTab("Contact");
     setLoadingContact(true);
     setErrContact(null);
     setContact(null);
     setRetryMsg(null);
     try {
-      const data = await callApi("listicle-contact", { item }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
+      const data = await callApi("listicle-contact", { item }, (a) =>
+        setRetryMsg(`Retrying (attempt ${a}/3)...`)
+      );
       setContact(data);
     } catch (err: any) {
       setErrContact(err?.message || "Something went wrong");
@@ -193,13 +329,14 @@ export default function Home() {
 
   async function runPolicy(item: AnyObj) {
     setSelectedItem(item);
-    setTab("Policy");
     setLoadingPolicy(true);
     setErrPolicy(null);
     setPolicy(null);
     setRetryMsg(null);
     try {
-      const data = await callApi("publisher-policy", { item }, (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`));
+      const data = await callApi("publisher-policy", { item }, (a) =>
+        setRetryMsg(`Retrying (attempt ${a}/3)...`)
+      );
       setPolicy(data);
     } catch (err: any) {
       setErrPolicy(err?.message || "Something went wrong");
@@ -209,382 +346,853 @@ export default function Home() {
     }
   }
 
-  return (
-    <main className="mx-auto max-w-5xl px-6 py-8">
-      <h1 className="text-3xl font-bold">Digital PR Agent</h1>
-      <p className="mt-1 text-gray-600">AI research for Digital PR and listicle prospecting (Vercel build).</p>
+  const sidebar = (
+    <aside className="sidebar">
+      <div className="sidebar-brand">
+        <div className="brand-mark">PR</div>
+        <div>
+          <div className="brand-name">PR Research Agent</div>
+          <div className="brand-tagline">Digital PR · Listicles · Drafts</div>
+        </div>
+      </div>
 
-      <nav className="mt-6 flex flex-wrap gap-2 border-b pb-2">
-        {tabs.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`rounded px-3 py-1.5 text-sm ${tab === t ? "bg-blue-600 text-white" : "bg-gray-100 hover:bg-gray-200"}`}
-          >
-            {t}
-          </button>
-        ))}
+      <div className="brand-chip">
+        <span className="dot" />
+        <span>
+          Working for <strong>Vista Social</strong>
+        </span>
+      </div>
+
+      <nav className="sidebar-nav" aria-label="Primary navigation">
+        <button className={`nav-item ${nav === "Workspace" ? "active" : ""}`} onClick={() => setNav("Workspace")}>
+          <LayoutGrid className="nav-icon" size={17} />
+          Workspace
+        </button>
+        <button
+          className={`nav-item ${nav === "Research Library" ? "active" : ""}`}
+          onClick={() => setNav("Research Library")}
+        >
+          <BookOpen className="nav-icon" size={17} />
+          Research Library
+        </button>
+        <button className={`nav-item ${nav === "Settings" ? "active" : ""}`} onClick={() => setNav("Settings")}>
+          <SlidersHorizontal className="nav-icon" size={17} />
+          Settings
+        </button>
       </nav>
 
-      {retryMsg && (
-        <div className="mt-4 rounded bg-blue-50 p-3 text-blue-700 text-sm">{retryMsg}</div>
-      )}
+      <div className="sidebar-divider" />
 
-      {tab === "Dashboard" && (
-        <>
-          <div className="mt-6 grid grid-cols-2 md:grid-cols-3 gap-4">
-            <Card label="PR Angles Found" value={angleCount} icon={<BarChart3 size={24} />} />
-            <Card label="PR Opportunities" value={oppCount} icon={<FileText size={24} />} />
-            <Card label="Journalists Found" value={journCount} icon={<Users size={24} />} />
-            <Card label="Listicle Candidates" value={listCount} icon={<List size={24} />} />
-            <Card label="Contacts Found" value={contactCount} icon={<Mail size={24} />} />
-            <Card label="Policies Checked" value={policy ? 1 : 0} icon={<Shield size={24} />} />
-          </div>
+      <div className="sidebar-meta">
+        <div>
+          Model: <strong>gpt-5-nano</strong>
+        </div>
+        <div>
+          Search context: <strong>low</strong>
+        </div>
+        <div className="sidebar-note">Vercel demo · no automatic outreach</div>
+      </div>
+    </aside>
+  );
 
-          <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-            <button onClick={() => setTab("Analyze")} className="rounded bg-gray-800 px-3 py-2 text-sm text-white">Analyze Article</button>
-            <button onClick={() => setTab("Listicles")} className="rounded bg-gray-800 px-3 py-2 text-sm text-white">Search Listicles</button>
-            <button onClick={() => setTab("Opportunities")} className="rounded bg-gray-800 px-3 py-2 text-sm text-white">PR Opportunities</button>
-            <button onClick={() => setTab("Journalists")} className="rounded bg-gray-800 px-3 py-2 text-sm text-white">Journalists</button>
-          </div>
+  return (
+    <div className="app-shell">
+      {sidebar}
+      <main className="main">
+        <div className="content">
+          {nav === "Workspace" && (
+            <>
+              <PageHeading
+                badge="Workspace"
+                title={workflow === "digital" ? "Digital PR" : "Listicles"}
+                subtitle="You approve every decision and every send."
+                action={
+                  <button className="btn-secondary" onClick={switchWorkflow}>
+                    Switch workflow
+                  </button>
+                }
+              />
 
-          {analysis && (
-            <div className="mt-6 rounded border bg-white p-4">
-              <h3 className="font-semibold">Last Analyzed Article</h3>
-              <p className="text-sm text-gray-600">{analysis.article_title}</p>
-              <p className="text-sm">{analysis.assessment}</p>
-            </div>
-          )}
-
-          {opportunities && (
-            <div className="mt-4 rounded border bg-white p-4">
-              <h3 className="font-semibold">Last Opportunities Research</h3>
-              <p className="text-sm text-gray-600">{opportunities.research_summary}</p>
-              <p className="text-sm">{opportunities.opportunities?.length || 0} opportunities found</p>
-            </div>
-          )}
-
-          {listicles && (
-            <div className="mt-4 rounded border bg-white p-4">
-              <h3 className="font-semibold">Last Listicle Search</h3>
-              <p className="text-sm text-gray-600">{listicles.research_summary}</p>
-              <p className="text-sm">{listicles.opportunities?.length || 0} candidates found</p>
-            </div>
-          )}
-
-          {!analysis && !opportunities && !listicles && (
-            <div className="mt-6 rounded border bg-gray-50 p-6 text-center text-gray-500">
-              No research yet. Start by analyzing an article or searching listicles.
-            </div>
-          )}
-        </>
-      )}
-
-      {tab === "Analyze" && (
-        <>
-          <form onSubmit={analyze} className="mt-6 flex gap-2">
-            <input
-              type="url"
-              required
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://example.com/article"
-              className="flex-1 rounded border px-3 py-2"
-            />
-            <button type="submit" disabled={loadingAnalyze} className="flex items-center gap-2 rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-50">
-              {loadingAnalyze ? <Spinner /> : <Search size={18} />}
-              Analyze
-            </button>
-          </form>
-          {errAnalyze && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errAnalyze}</div>}
-          {analysis && (
-            <div className="mt-6 space-y-4">
-              <div>
-                <h2 className="text-2xl font-semibold">{analysis.article_title}</h2>
-                <p className="text-gray-600">{analysis.main_topic}</p>
-                <p className="mt-2 text-sm">{analysis.assessment}</p>
+              <div className="stepper" role="tablist" aria-label="Workflow steps">
+                {steps.map((step) => (
+                  <button
+                    key={step}
+                    role="tab"
+                    aria-selected={activeStep === step}
+                    className={activeStep === step ? "active" : ""}
+                    onClick={() => goStep(step)}
+                  >
+                    {step}
+                  </button>
+                ))}
               </div>
-              <div>
-                <h3 className="text-xl font-semibold">PR angles ({analysis.pr_angles?.length || 0})</h3>
-                <ul className="mt-2 space-y-3">
-                  {analysis.pr_angles?.map((a: AnyObj, i: number) => (
-                    <li key={i} className="rounded border bg-white p-4">
-                      <div className="font-semibold">{a.angle}</div>
-                      <div className="text-sm text-gray-500">{a.story_type} · {a.confidence}</div>
-                      <p className="mt-2 text-sm">{a.story_hypothesis}</p>
-                      <p className="mt-2 text-sm"><span className="font-medium">Contribution:</span> {a.brand_contribution}</p>
-                      <p className="mt-2 text-sm"><span className="font-medium">Next action:</span> {a.next_action}</p>
-                      <button
-                        onClick={() => { setSelectedAngle(a); setTab("Opportunities"); }}
-                        className="mt-3 rounded bg-gray-800 px-3 py-1.5 text-sm text-white"
-                      >
-                        Research opportunities →
+
+              {retryMsg && <Note>{retryMsg}</Note>}
+
+              {workflow === "digital" && digitalStep === "Article" && (
+                <div className="stack">
+                  <section className="card">
+                    <h2 className="section-title">Analyze an article</h2>
+                    <p className="body-text">
+                      Paste a published article. The agent extracts the strongest PR angles, the evidence behind them,
+                      and the next useful action.
+                    </p>
+                    <form onSubmit={analyze} className="form-row">
+                      <input
+                        type="url"
+                        required
+                        value={url}
+                        onChange={(e) => setUrl(e.target.value)}
+                        placeholder="https://example.com/article"
+                        className="input"
+                      />
+                      <button type="submit" disabled={loadingAnalyze} className="btn-primary">
+                        {loadingAnalyze ? <Spinner /> : <Search size={17} />}
+                        Analyze article
                       </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div>
-                <h3 className="text-xl font-semibold">Statistics ({analysis.statistics?.length || 0})</h3>
-                <ul className="mt-2 space-y-2">
-                  {analysis.statistics?.map((s: AnyObj, i: number) => (
-                    <li key={i} className="text-sm">
-                      <span className="font-medium">{s.statistic}</span> — {s.source} ({s.data_provenance})
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          )}
-        </>
-      )}
+                    </form>
+                    {errAnalyze && <Note tone="warn">{errAnalyze}</Note>}
+                  </section>
 
-      {tab === "Opportunities" && (
-        <>
-          {!selectedAngle && <p className="mt-6 text-gray-600">Analyze an article and pick an angle first.</p>}
-          {selectedAngle && (
-            <>
-              <div className="mt-4 rounded border bg-white p-3 text-sm">
-                <span className="font-medium">Selected angle:</span> {selectedAngle.angle}
-              </div>
-              <button
-                onClick={runOpportunities}
-                disabled={loadingOpp}
-                className="mt-4 flex items-center gap-2 rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-50"
-              >
-                {loadingOpp ? <Spinner /> : <Search size={18} />} Run research
-              </button>
-              {errOpp && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errOpp} <span className="block mt-1 text-sm">Tip: research can be flaky on Vercel; click "Run research" to retry.</span></div>}
-              {opportunities && (
-                <div className="mt-6 space-y-3">
-                  <p className="text-sm text-gray-600">{opportunities.research_summary}</p>
-                  <ul className="space-y-3">
-                    {opportunities.opportunities?.map((o: AnyObj, i: number) => (
-                      <li key={i} className="rounded border bg-white p-4">
-                        <div className="font-semibold">{o.article_title}</div>
-                        <div className="text-sm text-gray-500">{o.publication} · {o.opportunity_type}</div>
-                        <p className="mt-2 text-sm">{o.why_relevant}</p>
-                        <p className="mt-1 text-sm"><span className="font-medium">Action:</span> {o.recommended_action}</p>
-                        <a href={o.article_url} target="_blank" rel="noreferrer" className="mt-1 block text-sm text-blue-600 underline truncate">{o.article_url}</a>
-                        <button
-                          onClick={() => { setSelectedOpp(o); setTab("Journalists"); }}
-                          className="mt-3 rounded bg-gray-800 px-3 py-1.5 text-sm text-white"
-                        >
-                          Research journalists →
+                  {analysis && (
+                    <section className="card">
+                      <h2 className="section-title">{analysis.article_title}</h2>
+                      <p className="meta">{analysis.main_topic}</p>
+                      <p className="body-text">{analysis.assessment}</p>
+                      {analysis.statistics?.length > 0 && (
+                        <>
+                          <div className="divider" />
+                          <div className="stack-sm">
+                            <div className="context-label">Statistics found</div>
+                            {analysis.statistics.map((s: AnyObj, i: number) => (
+                              <p key={i} className="result-copy">
+                                <strong>{s.statistic}</strong> — {s.source} ({s.data_provenance})
+                              </p>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                      <div className="actions">
+                        <button className="btn-primary" onClick={() => setDigitalStep("PR angles")}>
+                          View PR angles <ArrowRight size={16} />
                         </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </>
-          )}
-        </>
-      )}
-
-      {tab === "Journalists" && (
-        <>
-          {!selectedAngle || !selectedOpp && <p className="mt-6 text-gray-600">Pick an opportunity first.</p>}
-          {selectedAngle && selectedOpp && (
-            <>
-              <div className="mt-4 rounded border bg-white p-3 text-sm space-y-1">
-                <div><span className="font-medium">Angle:</span> {selectedAngle.angle}</div>
-                <div><span className="font-medium">Opportunity:</span> {selectedOpp.article_title} ({selectedOpp.publication})</div>
-              </div>
-              <button
-                onClick={runJournalists}
-                disabled={loadingJourn}
-                className="mt-4 flex items-center gap-2 rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-50"
-              >
-                {loadingJourn ? <Spinner /> : <Users size={18} />} Run research
-              </button>
-              {errJourn && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errJourn} <span className="block mt-1 text-sm">Tip: research can be flaky on Vercel; click "Run research" to retry.</span></div>}
-              {journalists && (
-                <div className="mt-6 space-y-3">
-                  <p className="text-sm text-gray-600">{journalists.research_summary}</p>
-                  <ul className="space-y-3">
-                    {journalists.journalists?.map((j: AnyObj, i: number) => (
-                      <li key={i} className="rounded border bg-white p-4">
-                        <div className="font-semibold">{j.name}</div>
-                        <div className="text-sm text-gray-500">{j.current_role} · {j.publication}</div>
-                        <p className="mt-2 text-sm"><span className="font-medium">Relevant article:</span> {j.relevant_article_title}</p>
-                        <a href={j.relevant_article_url} target="_blank" rel="noreferrer" className="block text-sm text-blue-600 underline truncate">{j.relevant_article_url}</a>
-                        <p className="mt-2 text-sm">{j.why_relevant}</p>
-                        <p className="mt-2 text-sm"><span className="font-medium">Pitch angle:</span> {j.suggested_pitch_angle}</p>
-                        <p className="mt-1 text-sm text-gray-500">Confidence: {j.confidence}</p>
-                      </li>
-                    ))}
-                  </ul>
-                  {(!journalists.journalists || journalists.journalists.length === 0) && (
-                    <p className="text-sm text-gray-600">No verified journalists found.</p>
+                      </div>
+                    </section>
                   )}
                 </div>
               )}
-            </>
-          )}
-        </>
-      )}
 
-      {tab === "Listicles" && (
-        <>
-          <form onSubmit={runListicles} className="mt-6 space-y-3">
-            <div>
-              <label className="block text-sm font-medium">Search theme *</label>
-              <input
-                required
-                value={listForm.search_theme}
-                onChange={(e) => setListForm({ ...listForm, search_theme: e.target.value })}
-                placeholder="social media management tools"
-                className="mt-1 w-full rounded border px-3 py-2"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium">Related queries</label>
-              <input
-                value={listForm.related_queries}
-                onChange={(e) => setListForm({ ...listForm, related_queries: e.target.value })}
-                placeholder="best social media tools, social media schedulers"
-                className="mt-1 w-full rounded border px-3 py-2"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium">Target audience</label>
-                <input
-                  value={listForm.target_audience}
-                  onChange={(e) => setListForm({ ...listForm, target_audience: e.target.value })}
-                  className="mt-1 w-full rounded border px-3 py-2"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium">Target market</label>
-                <input
-                  value={listForm.target_market}
-                  onChange={(e) => setListForm({ ...listForm, target_market: e.target.value })}
-                  className="mt-1 w-full rounded border px-3 py-2"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium">Competitors (comma-separated)</label>
-              <input
-                value={listForm.competitors}
-                onChange={(e) => setListForm({ ...listForm, competitors: e.target.value })}
-                className="mt-1 w-full rounded border px-3 py-2"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium">Max results</label>
-              <input
-                type="number"
-                min={3}
-                max={10}
-                value={listForm.max_results}
-                onChange={(e) => setListForm({ ...listForm, max_results: Number(e.target.value) })}
-                className="mt-1 w-32 rounded border px-3 py-2"
-              />
-            </div>
-            <button type="submit" disabled={loadingList} className="flex items-center gap-2 rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-50">
-              {loadingList ? <Spinner /> : <List size={18} />} Search listicles
-            </button>
-          </form>
-          {errList && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errList} <span className="block mt-1 text-sm">Tip: research can be flaky on Vercel; submit again to retry.</span></div>}
-          {listicles && (
-            <div className="mt-6 space-y-3">
-              <p className="text-sm text-gray-600">{listicles.research_summary}</p>
-              <ul className="space-y-3">
-                {listicles.opportunities?.map((item: AnyObj, i: number) => (
-                  <li key={i} className="rounded border bg-white p-4">
-                    <div className="font-semibold">{item.listicle_title}</div>
-                    <div className="text-sm text-gray-500">{item.publication} · {item.placement_type}</div>
-                    <p className="mt-2 text-sm"><span className="font-medium">Fit:</span> {item.brand_fit}</p>
-                    <p className="mt-1 text-sm"><span className="font-medium">Currently lists brand?</span> {item.brand_currently_listed}</p>
-                    <p className="mt-1 text-sm"><span className="font-medium">Action:</span> {item.recommended_action}</p>
-                    <a href={item.listicle_url} target="_blank" rel="noreferrer" className="mt-1 block text-sm text-blue-600 underline truncate">{item.listicle_url}</a>
-                    <div className="mt-3 flex gap-2">
-                      <button onClick={() => runContact(item)} className="rounded bg-gray-800 px-3 py-1.5 text-sm text-white flex items-center gap-1">
-                        <Mail size={14} /> Find contact
-                      </button>
-                      <button onClick={() => runPolicy(item)} className="rounded bg-gray-800 px-3 py-1.5 text-sm text-white flex items-center gap-1">
-                        <Shield size={14} /> Check policy
+              {workflow === "digital" && digitalStep === "PR angles" && (
+                <>
+                  <p className="step-caption">
+                    Choose the angle with the clearest editorial value. Research is only run for the angle you pick.
+                  </p>
+                  {!analysis ? (
+                    <div className="card empty-state">
+                      <h2 className="empty-title">Analyze an article first</h2>
+                      <p className="empty-copy">
+                        PR angles are built from the article's claims, statistics, and the brand's credible contribution.
+                      </p>
+                      <button className="btn-secondary" onClick={() => setDigitalStep("Article")}>
+                        Go to Article
                       </button>
                     </div>
-                  </li>
-                ))}
-              </ul>
-              {(!listicles.opportunities || listicles.opportunities.length === 0) && (
-                <p className="text-sm text-gray-600">No candidates found.</p>
-              )}
-            </div>
-          )}
-        </>
-      )}
+                  ) : (
+                    <div className="stack">
+                      {errOpp && <Note tone="warn">{errOpp}</Note>}
+                      {(analysis.pr_angles ?? []).map((a: AnyObj, i: number) => (
+                        <article className="card" key={`${a.angle}-${i}`}>
+                          <h2 className="angle-title">
+                            {i + 1}. {a.angle}
+                          </h2>
+                          <p className="meta">
+                            {a.story_type} · {a.recommended_tactic} · Confidence: {a.confidence}
+                          </p>
+                          <p className="body-text">{a.story_hypothesis}</p>
+                          <p className="body-text">
+                            <strong>Why a publication might care:</strong> {a.why_useful}
+                          </p>
 
-      {tab === "Contact" && (
-        <>
-          {!selectedItem && <p className="mt-6 text-gray-600">Pick a listicle candidate first.</p>}
-          {selectedItem && (
-            <>
-              <div className="mt-4 rounded border bg-white p-3 text-sm">
-                <span className="font-medium">{selectedItem.listicle_title}</span> — {selectedItem.publication}
-              </div>
-              {loadingContact && <div className="mt-4"><Spinner /> Researching contact...</div>}
-              {errContact && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errContact} <span className="block mt-1 text-sm">Tip: research can be flaky on Vercel; click to retry.</span></div>}
-              {contact && (
-                <div className="mt-6 space-y-3">
-                  <p className="text-sm text-gray-600">{contact.research_summary}</p>
-                  <ul className="space-y-3">
-                    {contact.contacts?.map((c: AnyObj, i: number) => (
-                      <li key={i} className="rounded border bg-white p-4">
-                        <div className="font-semibold">{c.contact_name}</div>
-                        <div className="text-sm text-gray-500">{c.current_role}</div>
-                        <p className="mt-2 text-sm"><span className="font-medium">Email:</span> {c.professional_email}</p>
-                        <p className="mt-1 text-sm"><span className="font-medium">Method:</span> {c.contact_method}</p>
-                        <p className="mt-1 text-sm">{c.why_this_contact}</p>
-                        <p className="mt-1 text-sm text-gray-500">Confidence: {c.confidence}</p>
-                        {c.source_url && c.source_url !== "Unknown" && (
-                          <a href={c.source_url} target="_blank" rel="noreferrer" className="mt-1 block text-sm text-blue-600 underline truncate">{c.source_url}</a>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                  {(!contact.contacts || contact.contacts.length === 0) && (
-                    <p className="text-sm text-gray-600">No verified contacts found.</p>
+                          <details className="plan">
+                            <summary>Full action plan</summary>
+                            <div className="plan-body">
+                              <p>
+                                <strong>Brand contribution:</strong> {a.brand_contribution}
+                              </p>
+                              <p>
+                                <strong>Target publication types:</strong>{" "}
+                                {(a.target_publication_types ?? []).join(", ") || "Not specified"}
+                              </p>
+                              <p>
+                                <strong>Journalist beats:</strong>{" "}
+                                {(a.target_journalist_beats ?? []).join(", ") || "Not specified"}
+                              </p>
+                              <p>
+                                <strong>Relevant asset:</strong> {a.relevant_asset}
+                              </p>
+                              <p>
+                                <strong>Evidence:</strong> {a.evidence}
+                              </p>
+                              <p>
+                                <strong>Next action:</strong> {a.next_action}
+                              </p>
+                            </div>
+                          </details>
+
+                          <div className="actions">
+                            <button
+                              className="btn-primary w-full"
+                              disabled={loadingOpp}
+                              onClick={() => researchAngle(a)}
+                            >
+                              {loadingOpp && selectedAngle?.angle === a.angle ? (
+                                <>
+                                  <Spinner /> Researching angle...
+                                </>
+                              ) : (
+                                <>
+                                  Research this angle <ArrowRight size={16} />
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
                   )}
+                </>
+              )}
+
+              {workflow === "digital" && digitalStep === "Opportunities" && (
+                <>
+                  <p className="step-caption">
+                    Research finds existing articles where this angle can add evidence, a useful perspective, or a
+                    missing product category.
+                  </p>
+                  {!selectedAngle ? (
+                    <div className="card empty-state">
+                      <h2 className="empty-title">Pick a PR angle first</h2>
+                      <button className="btn-secondary" onClick={() => setDigitalStep("PR angles")}>
+                        Go to PR angles
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="stack">
+                      <section className="context-card">
+                        <span className="context-label">Selected angle</span>
+                        <span className="context-value">{selectedAngle.angle}</span>
+                      </section>
+
+                      <div className="actions-between">
+                        <button className="btn-primary" onClick={runOpportunities} disabled={loadingOpp}>
+                          {loadingOpp ? <Spinner /> : <Search size={17} />}
+                          {opportunities ? "Run research again" : "Run opportunity research"}
+                        </button>
+                      </div>
+
+                      {errOpp && <Note tone="warn">{errOpp}</Note>}
+
+                      {opportunities && (
+                        <>
+                          <p className="step-caption">{opportunities.research_summary}</p>
+                          {(opportunities.opportunities ?? []).map((o: AnyObj, i: number) => (
+                            <article className="card" key={`${o.article_url}-${i}`}>
+                              <div className="card-head">
+                                <div>
+                                  <h2 className="card-title">{o.article_title}</h2>
+                                  <p className="meta">
+                                    {o.publication} · {o.published_date} · {o.opportunity_type}
+                                  </p>
+                                </div>
+                                {o.article_url?.startsWith("https://") && (
+                                  <a className="btn-secondary" href={o.article_url} target="_blank" rel="noreferrer">
+                                    Open article <ExternalLink size={15} />
+                                  </a>
+                                )}
+                              </div>
+                              <p className="body-text">
+                                <strong>Why relevant:</strong> {o.why_relevant}
+                              </p>
+                              <p className="body-text">
+                                <strong>Brand contribution:</strong> {o.brand_contribution}
+                              </p>
+
+                              <details className="plan">
+                                <summary>Full opportunity details</summary>
+                                <div className="plan-body">
+                                  <p>
+                                    <strong>Topical relevance:</strong> {o.topical_relevance}
+                                  </p>
+                                  <p>
+                                    <strong>Editorial fit:</strong> {o.editorial_fit}
+                                  </p>
+                                  <p>
+                                    <strong>Competitor mention:</strong> {o.competitor_mention}
+                                  </p>
+                                  <p>
+                                    <strong>Evidence:</strong> {o.evidence}
+                                  </p>
+                                  <p>
+                                    <strong>Recommended action:</strong> {o.recommended_action}
+                                  </p>
+                                  <p>
+                                    <strong>Confidence:</strong> {o.confidence}
+                                  </p>
+                                </div>
+                              </details>
+
+                              <div className="actions">
+                                <button
+                                  className="btn-primary"
+                                  onClick={() => researchJournalistsFor(o)}
+                                  disabled={loadingJourn}
+                                >
+                                  {loadingJourn && selectedOpp?.article_url === o.article_url ? (
+                                    <>
+                                      <Spinner /> Researching writers...
+                                    </>
+                                  ) : (
+                                    <>
+                                      Research journalists <ArrowRight size={16} />
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            </article>
+                          ))}
+                          {(!opportunities.opportunities || opportunities.opportunities.length === 0) && (
+                            <Note tone="warn">No suitable opportunity was verified for this angle.</Note>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {workflow === "digital" && digitalStep === "Journalists" && (
+                <>
+                  <p className="step-caption">
+                    Find writers who have covered this topic and could use the brand's contribution.
+                  </p>
+                  {!selectedAngle || !selectedOpp ? (
+                    <div className="card empty-state">
+                      <h2 className="empty-title">Pick an opportunity first</h2>
+                      <button className="btn-secondary" onClick={() => setDigitalStep("Opportunities")}>
+                        Go to Opportunities
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="stack">
+                      <section className="context-card">
+                        <span className="context-label">Selected opportunity</span>
+                        <span className="context-value">
+                          {selectedOpp.article_title} · {selectedOpp.publication}
+                        </span>
+                      </section>
+
+                      <div className="actions-between">
+                        <button className="btn-primary" onClick={runJournalists} disabled={loadingJourn}>
+                          {loadingJourn ? <Spinner /> : <Users size={17} />}
+                          {journalists ? "Run research again" : "Run journalist research"}
+                        </button>
+                      </div>
+
+                      {errJourn && <Note tone="warn">{errJourn}</Note>}
+
+                      {journalists && (
+                        <>
+                          <p className="step-caption">{journalists.research_summary}</p>
+                          {(journalists.journalists ?? []).map((j: AnyObj, i: number) => (
+                            <article className="card" key={`${j.name}-${i}`}>
+                              <h2 className="card-title">
+                                {i + 1}. {j.name}
+                              </h2>
+                              <p className="meta">
+                                {j.publication} · {j.current_role} · Coverage date: {j.article_date} · Confidence:{" "}
+                                {j.confidence}
+                              </p>
+                              <p className="body-text">
+                                <strong>Why relevant:</strong> {j.why_relevant}
+                              </p>
+
+                              <details className="plan">
+                                <summary>Coverage and pitch angle</summary>
+                                <div className="plan-body">
+                                  <p>
+                                    <strong>Relevant article:</strong> {j.relevant_article_title}
+                                  </p>
+                                  {j.relevant_article_url?.startsWith("https://") && (
+                                    <p>
+                                      <a href={j.relevant_article_url} target="_blank" rel="noreferrer">
+                                        Open coverage <ExternalLink size={13} className="inline" />
+                                      </a>
+                                    </p>
+                                  )}
+                                  <p>
+                                    <strong>Topic covered:</strong> {j.topic_covered}
+                                  </p>
+                                  <p>
+                                    <strong>Suggested pitch angle:</strong> {j.suggested_pitch_angle}
+                                  </p>
+                                  <p>
+                                    <strong>Profile or contact page:</strong>{" "}
+                                    {j.author_profile_or_contact_page}
+                                  </p>
+                                  <p>
+                                    <strong>Evidence:</strong> {j.evidence}
+                                  </p>
+                                </div>
+                              </details>
+                            </article>
+                          ))}
+                          {(!journalists.journalists || journalists.journalists.length === 0) && (
+                            <Note tone="warn">
+                              No suitable journalist could be verified. Do not guess a contact.
+                            </Note>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {workflow === "digital" && digitalStep === "Outreach" && (
+                <div className="card empty-state">
+                  <div className="page-badge">Human approval</div>
+                  <h2 className="empty-title">Draft generation is in the local app</h2>
+                  <p className="empty-copy">
+                    The Vercel demo stops at verified research. The full Streamlit app prepares personalized pitches
+                    for review, with editable subject lines, message bodies, and manual status tracking. Nothing is
+                    sent automatically.
+                  </p>
+                  <button className="btn-secondary" onClick={() => setDigitalStep("Journalists")}>
+                    Back to Journalists
+                  </button>
+                </div>
+              )}
+
+              {workflow === "listicles" && listicleStep === "Search" && (
+                <div className="stack">
+                  <section className="card">
+                    <h2 className="section-title">Search listicle opportunities</h2>
+                    <p className="body-text">
+                      Find existing roundups and tools lists where the brand could be considered. Contact and policy
+                      research run only when you ask for them.
+                    </p>
+                    <form onSubmit={runListicles}>
+                      <div className="form-grid">
+                        <div className="field">
+                          <label htmlFor="search-theme">Search theme *</label>
+                          <input
+                            id="search-theme"
+                            required
+                            value={listForm.search_theme}
+                            onChange={(e) => setListForm({ ...listForm, search_theme: e.target.value })}
+                            placeholder="social media management tools"
+                            className="input"
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="related-queries">Related queries</label>
+                          <input
+                            id="related-queries"
+                            value={listForm.related_queries}
+                            onChange={(e) => setListForm({ ...listForm, related_queries: e.target.value })}
+                            placeholder="best social media tools, social media schedulers"
+                            className="input"
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="target-audience">Target audience</label>
+                          <input
+                            id="target-audience"
+                            value={listForm.target_audience}
+                            onChange={(e) => setListForm({ ...listForm, target_audience: e.target.value })}
+                            className="input"
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="target-market">Target market</label>
+                          <input
+                            id="target-market"
+                            value={listForm.target_market}
+                            onChange={(e) => setListForm({ ...listForm, target_market: e.target.value })}
+                            className="input"
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="competitors">Competitors (comma-separated)</label>
+                          <input
+                            id="competitors"
+                            value={listForm.competitors}
+                            onChange={(e) => setListForm({ ...listForm, competitors: e.target.value })}
+                            className="input"
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="max-results">Max results</label>
+                          <input
+                            id="max-results"
+                            type="number"
+                            min={3}
+                            max={10}
+                            value={listForm.max_results}
+                            onChange={(e) => setListForm({ ...listForm, max_results: Number(e.target.value) })}
+                            className="input"
+                          />
+                          <span className="field-note">Between 3 and 10 verified candidates.</span>
+                        </div>
+                      </div>
+                      <div className="actions">
+                        <button type="submit" disabled={loadingList} className="btn-primary">
+                          {loadingList ? <Spinner /> : <List size={17} />}
+                          Search listicles
+                        </button>
+                      </div>
+                    </form>
+                    {errList && <Note tone="warn">{errList}</Note>}
+                  </section>
+
+                  {listicles && (
+                    <section className="card">
+                      <h2 className="section-title">Search result</h2>
+                      <p className="body-text">{listicles.research_summary}</p>
+                      <div className="actions">
+                        <button className="btn-secondary" onClick={() => setListicleStep("Prospects")}>
+                          View prospects <ArrowRight size={16} />
+                        </button>
+                      </div>
+                    </section>
+                  )}
+                </div>
+              )}
+
+              {workflow === "listicles" && listicleStep === "Prospects" && (
+                <>
+                  <p className="step-caption">
+                    Review the listicle, its current inclusion status, and the publisher's documented route before
+                    preparing any outreach.
+                  </p>
+                  {!listicles ? (
+                    <div className="card empty-state">
+                      <h2 className="empty-title">Search for listicles first</h2>
+                      <button className="btn-secondary" onClick={() => setListicleStep("Search")}>
+                        Go to Search
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="stack">
+                      <p className="step-caption">{listicles.research_summary}</p>
+                      {(listicles.opportunities ?? []).map((item: AnyObj, i: number) => (
+                        <article className="card" key={`${item.listicle_url}-${i}`}>
+                          <div className="card-head">
+                            <div>
+                              <h2 className="card-title">{item.listicle_title}</h2>
+                              <p className="meta">
+                                {item.publication} · {item.placement_type} · {item.published_or_updated}
+                              </p>
+                            </div>
+                            {item.listicle_url?.startsWith("https://") && (
+                              <a className="btn-secondary" href={item.listicle_url} target="_blank" rel="noreferrer">
+                                Open page <ExternalLink size={15} />
+                              </a>
+                            )}
+                          </div>
+                          <p className="body-text">
+                            <strong>Fit:</strong> {item.brand_fit}
+                          </p>
+                          <p className="body-text">
+                            <strong>Currently lists brand:</strong> {item.brand_currently_listed}
+                          </p>
+
+                          <details className="plan">
+                            <summary>Full prospect details</summary>
+                            <div className="plan-body">
+                              <p>
+                                <strong>Category:</strong> {item.listicle_category}
+                              </p>
+                              <p>
+                                <strong>Audience:</strong> {item.target_audience}
+                              </p>
+                              <p>
+                                <strong>Competitors listed:</strong>{" "}
+                                {(item.competitors_listed ?? []).join(", ") || "None identified"}
+                              </p>
+                              <p>
+                                <strong>Inclusion gap:</strong> {item.inclusion_gap}
+                              </p>
+                              <p>
+                                <strong>Contact route:</strong> {item.contact_route}
+                              </p>
+                              <p>
+                                <strong>Evidence:</strong> {item.evidence}
+                              </p>
+                              <p>
+                                <strong>Recommended action:</strong> {item.recommended_action}
+                              </p>
+                              <p>
+                                <strong>Confidence:</strong> {item.confidence}
+                              </p>
+                            </div>
+                          </details>
+
+                          <div className="actions">
+                            <button
+                              className="btn-secondary"
+                              onClick={() => runContact(item)}
+                              disabled={loadingContact}
+                            >
+                              {loadingContact && selectedItem === item ? <Spinner /> : <Mail size={16} />}
+                              Find contact
+                            </button>
+                            <button
+                              className="btn-secondary"
+                              onClick={() => runPolicy(item)}
+                              disabled={loadingPolicy}
+                            >
+                              {loadingPolicy && selectedItem === item ? <Spinner /> : <Shield size={16} />}
+                              Check policy
+                            </button>
+                          </div>
+
+                          {selectedItem === item &&
+                            (loadingContact ||
+                              loadingPolicy ||
+                              contact ||
+                              policy ||
+                              errContact ||
+                              errPolicy) && (
+                              <div className="inline-panel">
+                                {errContact && <Note tone="warn">{errContact}</Note>}
+                                {loadingContact && (
+                                  <p className="result-copy">
+                                    <Spinner /> Researching contact route...
+                                  </p>
+                                )}
+                                {contact && (
+                                  <div className="result-block">
+                                    <h3 className="result-title">Contact research</h3>
+                                    <p className="result-meta">{contact.research_summary}</p>
+                                    {(contact.contacts ?? []).map((c: AnyObj, ci: number) => (
+                                      <div key={`${c.contact_name}-${ci}`} className="result-block">
+                                        <p className="result-copy">
+                                          <strong>{c.contact_name}</strong> — {c.current_role}
+                                        </p>
+                                        <p className="result-copy">
+                                          <strong>Email:</strong> {c.professional_email}
+                                        </p>
+                                        <p className="result-copy">
+                                          <strong>Method:</strong> {c.contact_method}
+                                        </p>
+                                        <p className="result-copy">{c.why_this_contact}</p>
+                                        <p className="result-meta">Confidence: {c.confidence}</p>
+                                        {c.source_url && c.source_url !== "Unknown" && (
+                                          <a href={c.source_url} target="_blank" rel="noreferrer">
+                                            Open source <ExternalLink size={13} className="inline" />
+                                          </a>
+                                        )}
+                                      </div>
+                                    ))}
+                                    {(!contact.contacts || contact.contacts.length === 0) && (
+                                      <p className="result-copy">No verified contact found.</p>
+                                    )}
+                                  </div>
+                                )}
+
+                                {errPolicy && <Note tone="warn">{errPolicy}</Note>}
+                                {loadingPolicy && (
+                                  <p className="result-copy">
+                                    <Spinner /> Checking publisher policy...
+                                  </p>
+                                )}
+                                {policy && (
+                                  <div className="result-block">
+                                    <h3 className="result-title">Publisher policy</h3>
+                                    <p className="result-copy">
+                                      <strong>Status:</strong> {policy.policy_status}
+                                    </p>
+                                    <p className="result-copy">
+                                      <strong>Disposition:</strong> {policy.recommended_disposition}
+                                    </p>
+                                    <p className="result-copy">{policy.policy_summary}</p>
+                                    <p className="result-copy">
+                                      <strong>Reason:</strong> {policy.disposition_reason}
+                                    </p>
+                                    <p className="result-copy">
+                                      <strong>Route:</strong> {policy.recommended_route}
+                                    </p>
+                                    <p className="result-meta">Confidence: {policy.confidence}</p>
+                                    {policy.policy_source_url && policy.policy_source_url !== "Unknown" && (
+                                      <a href={policy.policy_source_url} target="_blank" rel="noreferrer">
+                                        Open policy source <ExternalLink size={13} className="inline" />
+                                      </a>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                        </article>
+                      ))}
+                      {(!listicles.opportunities || listicles.opportunities.length === 0) && (
+                        <Note tone="warn">No listicle candidates were verified for this search.</Note>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {workflow === "listicles" && listicleStep === "Outreach" && (
+                <div className="card empty-state">
+                  <div className="page-badge">Human approval</div>
+                  <h2 className="empty-title">Inclusion requests are in the local app</h2>
+                  <p className="empty-copy">
+                    The Vercel demo stops at verified prospects, contacts, and publisher policies. The full Streamlit
+                    app prepares listicle inclusion requests for manual review. Nothing is sent or submitted
+                    automatically.
+                  </p>
+                  <button className="btn-secondary" onClick={() => setListicleStep("Prospects")}>
+                    Back to Prospects
+                  </button>
                 </div>
               )}
             </>
           )}
-        </>
-      )}
 
-      {tab === "Policy" && (
-        <>
-          {!selectedItem && <p className="mt-6 text-gray-600">Pick a listicle candidate first.</p>}
-          {selectedItem && (
+          {nav === "Research Library" && (
             <>
-              <div className="mt-4 rounded border bg-white p-3 text-sm">
-                <span className="font-medium">{selectedItem.listicle_title}</span> — {selectedItem.publication}
+              <PageHeading
+                badge="Research Library"
+                title="Research Library"
+                subtitle="Everything researched in this browser session."
+                action={
+                  <button className="btn-secondary" onClick={() => setNav("Workspace")}>
+                    Back to Workspace
+                  </button>
+                }
+              />
+              <div className="metric-grid">
+                <MetricCard label="PR angles" value={angleCount} icon={<BarChart3 size={20} />} />
+                <MetricCard label="PR opportunities" value={oppCount} icon={<FileText size={20} />} />
+                <MetricCard label="Journalists" value={journCount} icon={<Users size={20} />} />
+                <MetricCard label="Listicle candidates" value={listCount} icon={<List size={20} />} />
+                <MetricCard label="Contacts found" value={contactCount} icon={<Mail size={20} />} />
+                <MetricCard label="Policies checked" value={policy ? 1 : 0} icon={<Shield size={20} />} />
               </div>
-              {loadingPolicy && <div className="mt-4"><Spinner /> Checking policy...</div>}
-              {errPolicy && <div className="mt-4 rounded bg-red-50 p-3 text-red-700">{errPolicy} <span className="block mt-1 text-sm">Tip: research can be flaky on Vercel; click to retry.</span></div>}
-              {policy && (
-                <div className="mt-6 space-y-3 rounded border bg-white p-4">
-                  <div><span className="font-medium">Status:</span> {policy.policy_status}</div>
-                  <div><span className="font-medium">Disposition:</span> {policy.recommended_disposition}</div>
-                  <p className="mt-2 text-sm">{policy.policy_summary}</p>
-                  <p className="mt-2 text-sm"><span className="font-medium">Reason:</span> {policy.disposition_reason}</p>
-                  <p className="mt-2 text-sm"><span className="font-medium">Route:</span> {policy.recommended_route}</p>
-                  {policy.policy_source_url && policy.policy_source_url !== "Unknown" && (
-                    <a href={policy.policy_source_url} target="_blank" rel="noreferrer" className="mt-2 block text-sm text-blue-600 underline truncate">{policy.policy_source_url}</a>
-                  )}
-                  <p className="mt-2 text-sm text-gray-500">Confidence: {policy.confidence}</p>
-                </div>
-              )}
+
+              <div className="library-grid">
+                <section className="card">
+                  <h2 className="section-title">Digital PR</h2>
+                  <p className="body-text">
+                    {analysis ? analysis.article_title : "No article analyzed in this session yet."}
+                  </p>
+                  <p className="meta">
+                    {opportunities
+                      ? `${oppCount} opportunities · ${journCount} journalists`
+                      : "Run an article analysis to start the Digital PR workflow."}
+                  </p>
+                  <div className="actions">
+                    <button
+                      className="btn-secondary"
+                      onClick={() => {
+                        setWorkflow("digital");
+                        setDigitalStep(analysis ? "PR angles" : "Article");
+                        setNav("Workspace");
+                      }}
+                    >
+                      Open Digital PR
+                    </button>
+                  </div>
+                </section>
+
+                <section className="card">
+                  <h2 className="section-title">Listicles</h2>
+                  <p className="body-text">
+                    {listicles ? listicles.search_theme : "No listicle search in this session yet."}
+                  </p>
+                  <p className="meta">
+                    {listicles
+                      ? `${listCount} candidates · ${contactCount} contacts`
+                      : "Search for roundups and tools lists to start."}
+                  </p>
+                  <div className="actions">
+                    <button
+                      className="btn-secondary"
+                      onClick={() => {
+                        setWorkflow("listicles");
+                        setListicleStep(listicles ? "Prospects" : "Search");
+                        setNav("Workspace");
+                      }}
+                    >
+                      Open Listicles
+                    </button>
+                  </div>
+                </section>
+              </div>
+
+              <Note>
+                Saved libraries, CSV exports, backups, and draft history live in the full local Streamlit app. This
+                Vercel demo keeps research in the current browser session only.
+              </Note>
             </>
           )}
-        </>
-      )}
-    </main>
+
+          {nav === "Settings" && (
+            <>
+              <PageHeading
+                badge="Settings"
+                title="Settings"
+                subtitle="Read-only in the Vercel demo. The local app stores these settings persistently."
+                action={
+                  <button className="btn-secondary" onClick={() => setNav("Workspace")}>
+                    Back to Workspace
+                  </button>
+                }
+              />
+              <div className="stack">
+                <section className="card">
+                  <h2 className="section-title">Brand and model</h2>
+                  <div className="setting-row">
+                    <span>Brand</span>
+                    <strong>Vista Social</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Model</span>
+                    <strong>gpt-5-nano</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Search context</span>
+                    <strong>low</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Data storage</span>
+                    <strong>Browser session only</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Outreach</span>
+                    <strong>Human approval required</strong>
+                  </div>
+                </section>
+
+                <section className="card">
+                  <h2 className="section-title">Safety</h2>
+                  <p className="body-text">
+                    The app never sends email, submits forms, or contacts publishers. Research is only run when you
+                    click an action. The OpenAI API key stays on the server and is never sent to the browser.
+                  </p>
+                </section>
+
+                <Note>
+                  This Vercel build is a Next.js port of the local Streamlit tool. It calls the same research API, but
+                  accounts, saved libraries, CSV exports, backups, and draft generation are available only in the local
+                  app.
+                </Note>
+              </div>
+            </>
+          )}
+        </div>
+      </main>
+    </div>
   );
 }
