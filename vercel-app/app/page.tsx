@@ -1113,12 +1113,19 @@ export default function Home() {
                     preparing any outreach.
                   </p>
                   {!listicles ? (
-                    <div className="card empty-state">
-                      <h2 className="empty-title">Search for listicles first</h2>
-                      <button className="btn-secondary" onClick={() => setListicleStep("Search")}>
-                        Go to Search
-                      </button>
-                    </div>
+                    loadingList ? (
+                      <div className="card empty-state">
+                        <h2 className="empty-title">Generating fresh listicle prospects...</h2>
+                        <p className="meta">The new results will replace the previous search when ready.</p>
+                      </div>
+                    ) : (
+                      <div className="card empty-state">
+                        <h2 className="empty-title">Search for listicles first</h2>
+                        <button className="btn-secondary" onClick={() => setListicleStep("Search")}>
+                          Go to Search
+                        </button>
+                      </div>
+                    )
                   ) : (
                     <div className="stack">
                       <div className="actions-between">
