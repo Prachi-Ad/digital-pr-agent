@@ -14,6 +14,7 @@ import {
   Loader2,
   Mail,
   Plus,
+  RefreshCw,
   Search,
   Server,
   Shield,
@@ -320,6 +321,36 @@ export default function Home() {
     }
   }
 
+  async function regenerateAnalysis() {
+    const targetUrl = activeUrl || analyses[0]?.url;
+    if (!targetUrl) {
+      setErrAnalyze("Analyze an article first.");
+      return;
+    }
+
+    setLoadingAnalyze(true);
+    setErrAnalyze(null);
+    setRetryMsg("Generating a fresh analysis...");
+    try {
+      const data = await callApi("analyze", { article_url: targetUrl }, (attempt) =>
+        setRetryMsg(`Generating again - retry ${attempt}/3...`)
+      );
+      setAnalyses((current) =>
+        current.some((item) => item.url === targetUrl)
+          ? current.map((item) => (item.url === targetUrl ? { url: targetUrl, analysis: data } : item))
+          : [...current, { url: targetUrl, analysis: data }]
+      );
+      setAnalysis(data);
+      setActiveUrl(targetUrl);
+      resetAnalysisDownstream();
+    } catch (err: any) {
+      setErrAnalyze(err?.message || "Something went wrong");
+    } finally {
+      setLoadingAnalyze(false);
+      setRetryMsg(null);
+    }
+  }
+
   async function researchAngle(angle: AnyObj) {
     setSelectedAngle(angle);
     setLoadingOpp(true);
@@ -405,8 +436,7 @@ export default function Home() {
     }
   }
 
-  async function runListicles(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function generateListicles() {
     if (!listForm.search_theme.trim()) return;
     setLoadingList(true);
     setErrList(null);
@@ -439,6 +469,11 @@ export default function Home() {
       setLoadingList(false);
       setRetryMsg(null);
     }
+  }
+
+  async function runListicles(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    await generateListicles();
   }
 
   async function runContact(item: AnyObj) {
@@ -582,6 +617,7 @@ export default function Home() {
                               value={value}
                               onChange={(e) => updateUrlInput(index, e.target.value)}
                               placeholder={`https://example.com/article-${index + 1}`}
+                              aria-label={`Article URL ${index + 1}`}
                               className="input"
                             />
                             {urlInputs.length > 1 && (
@@ -663,6 +699,10 @@ export default function Home() {
                         </>
                       )}
                       <div className="actions">
+                        <button className="btn-secondary" onClick={regenerateAnalysis} disabled={loadingAnalyze}>
+                          {loadingAnalyze ? <Spinner /> : <RefreshCw size={16} />}
+                          {loadingAnalyze ? "Generating again..." : "Generate again"}
+                        </button>
                         <button className="btn-primary" onClick={() => setDigitalStep("PR angles")}>
                           View PR angles <ArrowRight size={16} />
                         </button>
@@ -689,6 +729,13 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="stack">
+                      <div className="actions-between">
+                        <span className="meta">Regenerate the angles from the active article.</span>
+                        <button className="btn-secondary" onClick={regenerateAnalysis} disabled={loadingAnalyze}>
+                          {loadingAnalyze ? <Spinner /> : <RefreshCw size={16} />}
+                          {loadingAnalyze ? "Generating again..." : "Generate again"}
+                        </button>
+                      </div>
                       {errOpp && <Note tone="warn">{errOpp}</Note>}
                       {(analysis.pr_angles ?? []).map((a: AnyObj, i: number) => (
                         <article className="card" key={`${a.angle}-${i}`}>
@@ -775,8 +822,8 @@ export default function Home() {
 
                       <div className="actions-between">
                         <button className="btn-primary" onClick={runOpportunities} disabled={loadingOpp}>
-                          {loadingOpp ? <Spinner /> : <Search size={17} />}
-                          {opportunities ? "Run research again" : "Run opportunity research"}
+                          {loadingOpp ? <Spinner /> : opportunities ? <RefreshCw size={17} /> : <Search size={17} />}
+                          {opportunities ? "Generate again" : "Run opportunity research"}
                         </button>
                       </div>
 
@@ -883,8 +930,8 @@ export default function Home() {
 
                       <div className="actions-between">
                         <button className="btn-primary" onClick={runJournalists} disabled={loadingJourn}>
-                          {loadingJourn ? <Spinner /> : <Users size={17} />}
-                          {journalists ? "Run research again" : "Run journalist research"}
+                          {loadingJourn ? <Spinner /> : journalists ? <RefreshCw size={17} /> : <Users size={17} />}
+                          {journalists ? "Generate again" : "Run journalist research"}
                         </button>
                       </div>
 
@@ -1074,7 +1121,17 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="stack">
-                      <p className="step-caption">{listicles.research_summary}</p>
+                      <div className="actions-between">
+                        <p className="step-caption">{listicles.research_summary}</p>
+                        <button
+                          className="btn-secondary"
+                          onClick={generateListicles}
+                          disabled={loadingList || !listForm.search_theme.trim()}
+                        >
+                          {loadingList ? <Spinner /> : <RefreshCw size={16} />}
+                          {loadingList ? "Generating again..." : "Generate again"}
+                        </button>
+                      </div>
                       {(listicles.opportunities ?? []).map((item: AnyObj, i: number) => (
                         <article className="card" key={`${item.listicle_url}-${i}`}>
                           <div className="card-head">
@@ -1163,7 +1220,18 @@ export default function Home() {
                                 )}
                                 {contact && (
                                   <div className="result-block">
-                                    <h3 className="result-title">Contact research</h3>
+                                    <div className="card-head">
+                                      <h3 className="result-title">Contact research</h3>
+                                      <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={() => runContact(item)}
+                                        disabled={loadingContact}
+                                      >
+                                        {loadingContact ? <Spinner /> : <RefreshCw size={14} />}
+                                        Refresh
+                                      </button>
+                                    </div>
                                     <p className="result-meta">{contact.research_summary}</p>
                                     {(contact.contacts ?? []).map((c: AnyObj, ci: number) => (
                                       <div key={`${c.contact_name}-${ci}`} className="result-block">
@@ -1199,7 +1267,18 @@ export default function Home() {
                                 )}
                                 {policy && (
                                   <div className="result-block">
-                                    <h3 className="result-title">Publisher policy</h3>
+                                    <div className="card-head">
+                                      <h3 className="result-title">Publisher policy</h3>
+                                      <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={() => runPolicy(item)}
+                                        disabled={loadingPolicy}
+                                      >
+                                        {loadingPolicy ? <Spinner /> : <RefreshCw size={14} />}
+                                        Refresh
+                                      </button>
+                                    </div>
                                     <p className="result-copy">
                                       <strong>Status:</strong> {policy.policy_status}
                                     </p>

@@ -487,6 +487,16 @@ a {
   background: var(--accent-soft);
 }
 
+.btn-secondary:disabled,
+.btn-ghost:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.actions-between .step-caption {
+  margin: 0;
+}
+
 .w-full {
   width: 100%;
 }
