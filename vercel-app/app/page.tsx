@@ -8,12 +8,14 @@ import {
   BookOpen,
   ExternalLink,
   FileText,
+  KeyRound,
   LayoutGrid,
   List,
   Loader2,
   Mail,
   Plus,
   Search,
+  Server,
   Shield,
   SlidersHorizontal,
   Users,
@@ -29,6 +31,60 @@ type ListicleStep = (typeof listicleSteps)[number];
 type Nav = "Workspace" | "Research Library" | "Settings";
 type Workflow = "digital" | "listicles";
 type AnalyzedArticle = { url: string; analysis: AnyObj };
+type DemoEmailMethod = "app-password" | "oauth" | "smtp";
+
+const emailMethodOptions: {
+  id: DemoEmailMethod;
+  label: string;
+  status: "Active locally" | "Optional";
+  description: string;
+  facts: Array<[string, string]>;
+  note: string;
+  icon: ReactNode;
+}[] = [
+  {
+    id: "app-password",
+    label: "Google app password",
+    status: "Active locally",
+    description: "Personal Gmail app password. This is the method configured in the local sender.",
+    facts: [
+      ["From account", "Personal Gmail (configured locally)"],
+      ["SMTP", "smtp.gmail.com · port 587 · STARTTLS"],
+      ["Credentials", "Local, gitignored storage only"],
+      ["Login check", "Verified locally · no email sent"],
+    ],
+    note: "A 16-character Google app password is used. A normal Google account password will not work.",
+    icon: <KeyRound size={18} />,
+  },
+  {
+    id: "oauth",
+    label: "Google Workspace sign-in (OAuth)",
+    status: "Optional",
+    description: "For Workspace accounts where app passwords are blocked. Requires a Google Cloud client.",
+    facts: [
+      ["Connection", "Not connected"],
+      ["OAuth client", "Not configured"],
+      ["Redirect URI", "http://localhost:8501/"],
+      ["Scopes", "openid · email · mail.google.com"],
+    ],
+    note: "A Workspace admin may block the OAuth client or scope. The app reports the error rather than bypassing admin policy.",
+    icon: <Shield size={18} />,
+  },
+  {
+    id: "smtp",
+    label: "Custom SMTP / designated email",
+    status: "Optional",
+    description: "For another mailbox with provider-supplied SMTP credentials.",
+    facts: [
+      ["Connection", "Not configured"],
+      ["Security", "STARTTLS or SSL/TLS"],
+      ["From address", "Set by the designated mailbox"],
+      ["Credentials", "Local, gitignored storage only"],
+    ],
+    note: "Use this when the mailbox is not Google Workspace or the provider supplies SMTP login details.",
+    icon: <Server size={18} />,
+  },
+];
 
 async function callApi(action: string, body: any = {}, onRetry?: (attempt: number) => void) {
   const maxAttempts = 3;
@@ -103,6 +159,9 @@ export default function Home() {
   const [digitalStep, setDigitalStep] = useState<DigitalStep>("Article");
   const [listicleStep, setListicleStep] = useState<ListicleStep>("Search");
   const [retryMsg, setRetryMsg] = useState<string | null>(null);
+  const [demoEmailMethod, setDemoEmailMethod] = useState<DemoEmailMethod>("app-password");
+  const selectedEmailMethod =
+    emailMethodOptions.find((method) => method.id === demoEmailMethod) ?? emailMethodOptions[0];
 
   // Analyze state
   const [urlInputs, setUrlInputs] = useState<string[]>([""]);
@@ -1274,7 +1333,7 @@ export default function Home() {
               <PageHeading
                 badge="Settings"
                 title="Settings"
-                subtitle="Read-only in the Vercel demo. The local app stores these settings persistently."
+                subtitle="Read-only preview of the local app settings. No credentials are collected and no email can be sent from this demo."
                 action={
                   <button className="btn-secondary" onClick={() => setNav("Workspace")}>
                     Back to Workspace
@@ -1289,12 +1348,8 @@ export default function Home() {
                     <strong>Vista Social</strong>
                   </div>
                   <div className="setting-row">
-                    <span>Sender name</span>
-                    <strong>Prachi</strong>
-                  </div>
-                  <div className="setting-row">
-                    <span>Job role</span>
-                    <strong>SEO Specialist</strong>
+                    <span>Sender identity</span>
+                    <strong>Prachi, SEO Specialist (fixed)</strong>
                   </div>
                   <div className="setting-row">
                     <span>Model</span>
@@ -1303,6 +1358,10 @@ export default function Home() {
                   <div className="setting-row">
                     <span>Search context</span>
                     <strong>low</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Draft writing</span>
+                    <strong>No web search</strong>
                   </div>
                   <div className="setting-row">
                     <span>Data storage</span>
@@ -1315,11 +1374,143 @@ export default function Home() {
                 </section>
 
                 <section className="card">
-                  <h2 className="section-title">Safety</h2>
+                  <div className="card-head">
+                    <div>
+                      <h2 className="section-title">Email sending (designated sender)</h2>
+                      <p className="meta">Local-only sender. This demo is a display-only preview.</p>
+                    </div>
+                    <span className="status-pill">No sending here</span>
+                  </div>
                   <p className="body-text">
-                    The app never sends email, submits forms, or contacts publishers. Research is only run when you
-                    click an action. The OpenAI API key stays on the server and is never sent to the browser.
+                    The local Streamlit app sends explicitly approved drafts from the configured Gmail account.
+                    Credentials stay in local, gitignored storage. This demo does not collect credentials, connect to
+                    Gmail, or send email.
                   </p>
+
+                  <div className="method-grid" aria-label="Email sending methods">
+                    {emailMethodOptions.map((method) => (
+                      <button
+                        key={method.id}
+                        type="button"
+                        className={`method-card ${demoEmailMethod === method.id ? "active" : ""}`}
+                        onClick={() => setDemoEmailMethod(method.id)}
+                        aria-pressed={demoEmailMethod === method.id}
+                      >
+                        <span className="method-icon">{method.icon}</span>
+                        <span className="method-copy">
+                          <span className="method-topline">
+                            <span className="method-name">{method.label}</span>
+                            <span
+                              className={`status-pill ${method.status === "Active locally" ? "active" : ""}`}
+                            >
+                              {method.status}
+                            </span>
+                          </span>
+                          <span className="method-note">{method.description}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="method-footnote">
+                    "Active locally" reflects the local Streamlit app, not this demo. Optional methods are available
+                    but unconfigured.
+                  </p>
+
+                  <div className="method-preview" role="status" aria-live="polite">
+                    <div className="method-preview-head">
+                      <div>
+                        <h3 className="card-title">{selectedEmailMethod.label}</h3>
+                        <p className="meta">
+                          Display-only preview. No fields are editable and no credentials are stored here.
+                        </p>
+                      </div>
+                      <span
+                        className={`status-pill ${
+                          selectedEmailMethod.status === "Active locally" ? "active" : ""
+                        }`}
+                      >
+                        {selectedEmailMethod.status}
+                      </span>
+                    </div>
+                    {selectedEmailMethod.facts.map(([label, value]) => (
+                      <div className="setting-row" key={label}>
+                        <span>{label}</span>
+                        <strong>{value}</strong>
+                      </div>
+                    ))}
+                    <p className="method-footnote">{selectedEmailMethod.note}</p>
+                  </div>
+
+                  <div className="divider" />
+                  <h3 className="card-title">Batch safeguards</h3>
+                  <div className="setting-row">
+                    <span>Human approval</span>
+                    <strong>Required for every draft</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Batch confirmation</span>
+                    <strong>Required before sending</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Delay between sends</span>
+                    <strong>30 seconds</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Daily cap</span>
+                    <strong>20 successful sends</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Do-not-send list</span>
+                    <strong>Blocks matching addresses</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Opt-out footer</span>
+                    <strong>Added to every email</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Audit log</span>
+                    <strong>Permanent send history</strong>
+                  </div>
+                </section>
+
+                <section className="card">
+                  <h2 className="section-title">Do-not-send list (opt-outs)</h2>
+                  <p className="body-text">
+                    If someone asks not to be contacted, add their address in the local app. Matching drafts are
+                    blocked from every future batch, and the opt-out footer asks recipients to reply "unsubscribe".
+                  </p>
+                  <div className="setting-row">
+                    <span>List storage</span>
+                    <strong>Local app only</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Enforcement</span>
+                    <strong>Before every send</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Demo status</span>
+                    <strong>Not editable here</strong>
+                  </div>
+                </section>
+
+                <section className="card">
+                  <h2 className="section-title">Storage and safety</h2>
+                  <p className="body-text">
+                    The app never sends email from Vercel, submits forms, or contacts publishers. Research is only run
+                    when you click an action. The OpenAI API key stays on the server and is never sent to the browser.
+                  </p>
+                  <div className="setting-row">
+                    <span>Local app storage</span>
+                    <strong>SQLite + backups</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Vercel storage</span>
+                    <strong>Browser session only</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Email credentials</span>
+                    <strong>Local, gitignored storage only</strong>
+                  </div>
                 </section>
 
                 <Note>

@@ -720,8 +720,133 @@ a {
   text-align: right;
 }
 
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #f1f2f8;
+  color: #6b6e85;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.status-pill.active {
+  background: #e8f7ee;
+  color: #1f7a45;
+}
+
+.method-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.method-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.method-card:hover {
+  border-color: #c9cbff;
+  background: #fbfbff;
+}
+
+.method-card.active {
+  border-color: #b9bbff;
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px rgba(91, 91, 214, 0.12);
+}
+
+.method-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #f1f2fb;
+  color: var(--accent);
+}
+
+.method-card.active .method-icon {
+  background: #ffffff;
+}
+
+.method-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.method-topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.method-name {
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.method-note {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.method-preview {
+  margin-top: 14px;
+  padding: 4px 16px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fbfbfe;
+}
+
+.method-preview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 0 6px;
+}
+
+.method-preview .setting-row {
+  padding: 9px 0;
+}
+
+.method-footnote {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .sidebar-toggle {
   display: none;
+}
+
+@media (max-width: 1080px) {
+  .method-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 760px) {
@@ -762,6 +887,10 @@ a {
   .form-grid,
   .library-grid {
     grid-template-columns: 1fr;
+  }
+
+  .method-preview-head {
+    flex-direction: column;
   }
 }
 
