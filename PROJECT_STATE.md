@@ -35,7 +35,10 @@ The Vercel deployment is a Next.js visual port of the same interface: fixed
 left sidebar, "Working for Vista Social" chip, Workspace / Research Library /
 Settings navigation, WORKSPACE eyebrow, workflow stepper, indigo palette, and
 compact research cards. The old dashboard/tab layout is gone. Settings shows
-the fixed sender identity, Prachi / SEO Specialist. The local Streamlit app
+the fixed sender identity, Prachi, SEO Specialist, and a read-only preview of
+the local email-sending setup: the three sending methods, the active
+personal-Gmail app-password method, batch safeguards, and the do-not-send list.
+The preview collects no credentials and cannot send. The local Streamlit app
 remains the full tool. The Vercel Article step also accepts up to five URLs, but
 keeps results in memory only; the port does not add saved libraries, draft
 generation, accounts, quotas, billing, or email sending. Vercel stays a
@@ -263,12 +266,12 @@ non-sending demo.
   demo from this subfolder, not the Streamlit repository root.
 - Deployment: Vercel Git integration builds the `vercel-app` subfolder on each
   push to `main`; the production alias is verified healthy.
-- Code deployed: latest `main` commit (batch article analysis for up to five
-  URLs, building on the hardcoded sender work in `0b88d53` / `dd2f9d0` and the
-  Vercel UI parity commits `f446a79` and `187fa67`).
-- Status: READY; production alias live as of 2026-10-22. Latest UI deployment:
-  `https://vercel-ax0my87i4-prachi-8a13.vercel.app` (deployment URL, protected
-  by Vercel Authentication). Public alias:
+- Code deployed: `4574646` (read-only email Settings preview: the three sending
+  methods, active personal-Gmail app-password status, batch safeguards, and
+  do-not-send list), building on the batch article analysis and Vercel UI parity
+  work in earlier commits.
+- Status: READY; production alias live as of 2026-10-23. Latest UI deployment:
+  `https://vercel-4ox6riu1w-prachi-8a13.vercel.app`. Public alias:
   `https://vercel-app-gules-three.vercel.app`.
 - Batch article analysis was verified on the public alias: "+ Add URL" creates
   up to five separate fields, a sixth field is prevented, and non-HTTPS URLs
@@ -276,9 +279,10 @@ non-sending demo.
 - Vercel environment: `OPENAI_API_KEY` is configured for Production,
   Preview, and Development (value not stored in the repo).
 - Build verified: Git-triggered Next.js 14.2.15 production build succeeds;
-  the public alias root and `/api/analyze` both return 200. Settings was verified
-  on the public alias with Sender name: Prachi and Job role: SEO Specialist. The
-  production UI was checked at desktop and narrow widths.
+  the public alias root and `/api/analyze` both return 200. The Settings preview
+  was verified locally and on the public alias: all three methods render, the
+  app-password preview is active, and the page clearly states that this demo
+  collects no credentials and cannot send email.
 - Demo scope: the Vercel app can call analyze, PR opportunities, journalists,
   listicles, contact, and policy research actions. Its UI now mirrors the local
   workspace, but it does not have persistence, accounts, review-library storage,
