@@ -41,8 +41,10 @@ personal-Gmail app-password method, batch safeguards, and the do-not-send list.
 The preview collects no credentials and cannot send. The local Streamlit app
 remains the full tool. The Vercel Article step also accepts up to five URLs, but
 keeps results in memory only; the port does not add saved libraries, draft
-generation, accounts, quotas, billing, or email sending. Vercel stays a
-non-sending demo.
+generation, accounts, quotas, billing, or email sending. Every generated
+result exposes a Generate again or Refresh control that re-runs the same
+research action; these controls do not add persistence or sending. Vercel stays
+a non-sending demo.
 
 ## Completed work
 
@@ -266,12 +268,12 @@ non-sending demo.
   demo from this subfolder, not the Streamlit repository root.
 - Deployment: Vercel Git integration builds the `vercel-app` subfolder on each
   push to `main`; the production alias is verified healthy.
-- Code deployed: `4574646` (read-only email Settings preview: the three sending
-  methods, active personal-Gmail app-password status, batch safeguards, and
-  do-not-send list), building on the batch article analysis and Vercel UI parity
-  work in earlier commits.
+- Code deployed: `5b3096a` (Generate again and Refresh controls for article
+  analysis, PR angles, opportunities, journalists, listicles, contact research,
+  and publisher policy), building on the read-only email Settings preview in
+  `4574646` and earlier Vercel UI parity work.
 - Status: READY; production alias live as of 2026-10-23. Latest UI deployment:
-  `https://vercel-4ox6riu1w-prachi-8a13.vercel.app`. Public alias:
+  `https://vercel-kc0pkjkzt-prachi-8a13.vercel.app`. Public alias:
   `https://vercel-app-gules-three.vercel.app`.
 - Batch article analysis was verified on the public alias: "+ Add URL" creates
   up to five separate fields, a sixth field is prevented, and non-HTTPS URLs
@@ -283,6 +285,10 @@ non-sending demo.
   was verified locally and on the public alias: all three methods render, the
   app-password preview is active, and the page clearly states that this demo
   collects no credentials and cannot send email.
+- Generate again and Refresh controls were verified locally and on the public
+  alias with stubbed research responses, so no live research calls were
+  consumed. They re-run the existing analysis, opportunities, journalists,
+  listicles, contact, and policy actions without adding persistence or sending.
 - Demo scope: the Vercel app can call analyze, PR opportunities, journalists,
   listicles, contact, and policy research actions. Its UI now mirrors the local
   workspace, but it does not have persistence, accounts, review-library storage,
