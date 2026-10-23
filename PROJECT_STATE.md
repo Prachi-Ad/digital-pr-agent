@@ -268,12 +268,13 @@ a non-sending demo.
   demo from this subfolder, not the Streamlit repository root.
 - Deployment: Vercel Git integration builds the `vercel-app` subfolder on each
   push to `main`; the production alias is verified healthy.
-- Code deployed: `5b3096a` (Generate again and Refresh controls for article
+- Code deployed: `5d4c08e` (Generate again and Refresh controls for article
   analysis, PR angles, opportunities, journalists, listicles, contact research,
-  and publisher policy), building on the read-only email Settings preview in
-  `4574646` and earlier Vercel UI parity work.
+  and publisher policy, including a listicle loading state), building on the
+  read-only email Settings preview in `4574646` and earlier Vercel UI parity
+  work.
 - Status: READY; production alias live as of 2026-10-23. Latest UI deployment:
-  `https://vercel-kc0pkjkzt-prachi-8a13.vercel.app`. Public alias:
+  `https://vercel-a9dsz7f44-prachi-8a13.vercel.app`. Public alias:
   `https://vercel-app-gules-three.vercel.app`.
 - Batch article analysis was verified on the public alias: "+ Add URL" creates
   up to five separate fields, a sixth field is prevented, and non-HTTPS URLs
