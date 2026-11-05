@@ -263,7 +263,8 @@ a non-sending demo.
 
 ### Deployment (live)
 - Vercel project: `vercel-app` under team `prachi-8a13`.
-- Production URL: `https://vercel-app-gules-three.vercel.app`
+- Production URL: `https://pr.prachiadmane.com`
+- Vercel alias: `https://vercel-app-gules-three.vercel.app`
 - Git integration root directory: `vercel-app`. Vercel must build the Next.js
   demo from this subfolder, not the Streamlit repository root.
 - Deployment: Vercel Git integration builds the `vercel-app` subfolder on each
@@ -276,6 +277,9 @@ a non-sending demo.
 - Status: READY; production alias live as of 2026-10-23. Latest UI deployment:
   `https://vercel-a9dsz7f44-prachi-8a13.vercel.app`. Public alias:
   `https://vercel-app-gules-three.vercel.app`.
+- Custom domain: `pr.prachiadmane.com` is attached to `vercel-app`. Cloudflare
+  holds a DNS-only CNAME for `pr` to Vercel, the domain is verified, and the
+  issued certificate serves HTTPS.
 - Batch article analysis was verified on the public alias: "+ Add URL" creates
   up to five separate fields, a sixth field is prevented, and non-HTTPS URLs
   show the validation message.
@@ -297,8 +301,8 @@ a non-sending demo.
 - The email batch sender is local-only and intentionally not part of the
   Vercel build. Pushes that only change local sending code should use
   `[skip vercel]` so the non-sending demo is not redeployed needlessly.
-- The full tool remains the local Streamlit app. No custom domain is connected
-  to Vercel yet.
+- The full tool remains the local Streamlit app. The public Vercel demo is
+  available at the custom domain above.
 
 ## Known caveats
 
