@@ -1,6 +1,6 @@
 # Digital PR Agent - Project State
 
-Last updated: Fri Oct 23 2026
+Last updated: Thu Nov 05 2026
 
 ## Objective
 
@@ -18,8 +18,12 @@ publisher forms.
 Three pages only:
 
 1. **Workspace** - one guided workflow with two paths:
-   - Digital PR: Article -> PR angles -> Opportunities -> Journalists -> Outreach.
-   - Listicles: Search -> Prospects (contacts/policy) -> Outreach.
+   - Digital PR: Research -> Contacts -> Outreach (3 phases). The detailed
+     steps (article, angles, opportunities) run inside the phase, so the next
+     section appears as soon as it is useful.
+   - Listicles: Find & review -> Outreach (2 phases).
+   Each phase shows a compact header ("Phase 1 of 3"), a title, one sentence of
+   guidance, and a progress bar. "Back to start" returns to the launcher.
 2. **Research Library** - listicles, PR opportunities, journalists, outreach
    drafts, email send history, CSV exports, backups.
 3. **Settings** - brand, sender details, email sending (OAuth, app password, or
@@ -41,12 +45,53 @@ personal-Gmail app-password method, batch safeguards, and the do-not-send list.
 The preview collects no credentials and cannot send. The local Streamlit app
 remains the full tool. The Vercel Article step also accepts up to five URLs, but
 keeps results in memory only; the port does not add saved libraries, draft
-generation, accounts, quotas, billing, or email sending. Every generated
-result exposes a Generate again or Refresh control that re-runs the same
-research action; these controls do not add persistence or sending. Vercel stays
-a non-sending demo.
+generation, accounts, quotas, billing, or email sending. The demo now mirrors
+the local three-phase workflow: Digital PR runs Research -> Prospects ->
+Outreach, and Listicles runs Find & review -> Outreach. Opportunity cards show a
+short "Why it matters" line plus a Good for PR / Possible / Weak / Not good for
+PR verdict, with the long evidence collapsed. If no named writer matches an
+angle, the API returns the publication's verified content/SEO/link-building
+contact instead of an empty list, so prospect research does not dead-end. Every
+generated result exposes a Generate again or Refresh control that re-runs the
+same research action; these controls do not add persistence or sending. Vercel
+stays a non-sending demo.
 
 ## Completed work
+
+### Sending loop
+- Multiple Google accounts can be connected with **Sign in with Google** (OAuth),
+  no app passwords. Settings lists every connected account, lets you pick the
+  **active sending account**, and removes one without touching the others.
+  Tokens live in `data/oauth_accounts.json`; the active account supplies the
+  From address and refresh token.
+- Google still requires a one-time OAuth client (client ID/secret) in Google
+  Cloud. Accounts are added with **Connect another Google account**. In Google
+  "Testing" mode refresh tokens expire after 7 days; publishing the consent
+  screen keeps them long-lived.
+- Settings has **Send a test email to myself** next to Test SMTP connection.
+  It exercises the full path: login, sender identity, message build, and the
+  opt-out footer. Nothing is saved or sent to anyone else.
+- Gmail "connection closed before login" errors now say plainly that the app
+  password is likely invalid and explain how to replace it.
+- Follow-ups: a sent pitch with no reply becomes due after 4 days. One click
+  creates a short "Re: ..." follow-up draft for each due pitch, copying the
+  recipient and email. Follow-ups are approved and sent from the same batch
+  panel. A reply, decline, placement, do-not-send, or an existing follow-up
+  removes it from the due queue.
+
+### Reliability and speed
+- "Back to start" now survives a browser reload. The old loader treated a
+  saved `None` as "no choice" and forced the last workflow open again.
+- "Start new" now stays cleared after a reload instead of resurrecting the
+  previous article analysis.
+- Database schema checks and migrations run once per process instead of on
+  every read (fewer repeated SQLite round trips per click).
+- The active-workspace snapshot is written only when its content changes,
+  not on every rerun.
+- `stop_pr_agent.bat` now stops the app reliably by matching this project's
+  Python process. The old version used `Get-NetTCPConnection`, which can hang
+  and report no listener on this machine.
+- `storage_self_check.py` covers the reload behavior for "Back to start".
 
 ### Storage (validated)
 - Full storage check passes: listicles, contacts, policy, review decisions,
@@ -75,6 +120,68 @@ a non-sending demo.
 - Batch sending is opt-in only: a draft must be marked "Approved for automated
   send", then a separate batch confirmation is required.
 - No form submission, ever.
+
+### Automated contact finding and pitch preparation
+- Journalist research is still available. If it finds no verified writer, the
+  app automatically falls back to the content/SEO/link-building contact agent
+  and prepares the pitch, instead of stopping with "no journalist verified".
+- The main flow does not require a separate journalist-research step. After
+  an opportunity is approved, the Contacts phase offers one-click contact
+  finding and pitch writing.
+- Email lookup order: published page first, then the local **contact book**
+  (CSV import), then **ContactOut** (paid), then **Hunter** (paid), and only
+  when the name matches. All provider results stay behind a human "Use this
+  address" action.
+- **Hunter** uses a self-serve API with a free tier. The key is stored in
+  `data/hunter_config.json`. **ContactOut** uses the People Search API and is
+  stored in `data/contactout_config.json`.
+- **Contact book**: import a CSV exported from ContactOut, Apollo, Hunter, or a
+  spreadsheet. Columns are matched loosely (`email`, `name`, `role`,
+  `publication`, `domain`, `linkedin`). Duplicate emails update in place, and
+  contacts are matched by publication domain or person name.
+- The contact agent looks for the bylined content writer, content manager, SEO
+  lead, or link-building/partnerships contact for that exact article.
+- It returns a named contact with a published email when one exists, otherwise
+  the official author profile, content/SEO team page, or contact form.
+- It never guesses an email and never uses data-broker or email-finder sites.
+- "Find contacts and prepare all" runs the whole set in one click. Each result
+  creates a qualified target and a draft; published emails are filled in
+  automatically.
+- When no email is published, the draft is still prepared and the official
+  contact page is shown for manual form outreach.
+
+### PR suitability check
+- Every opportunity card shows a plain verdict: **Good for PR**, **Possible**,
+  **Weak PR fit**, or **Not good for PR**, with one short reason.
+- New opportunity research returns the verdict and red flags automatically.
+- Saved or older pages can be checked or re-checked with **Check PR fit**. The
+  assessor verifies the blog's about/editorial/contact pages, bylines, content
+  originality, paid-placement policy, and activity.
+- Red flags name the specific signal: no bylines, content-farm or AI filler,
+  syndicated content, paid-only placement, directory/aggregator, irrelevant
+  audience, dead site, or no editorial route. Verdicts are stored with the
+  opportunity so they survive restarts.
+
+### Outreach speed and public email research
+- Opportunity review is built for speed: each card shows one short "Why it
+  matters" line, a topic/type/fit caption, and **Approve** / **Skip** buttons.
+  The long evidence fields stay behind "Full evidence and notes", so no one has
+  to read a wall of text to make the call.
+- One-click bulk drafting for every qualified or approved target, with no extra
+  web search for the draft step.
+- Bulk approve only touches complete `Draft` rows with a valid, non-suppressed
+  recipient email and real subject/body. It never sends, and it never changes
+  `Do not send`, `Sent`, or drafts from the other workflow.
+- Journalist cards include **Find public email**, which runs one targeted public
+  web search, stores candidates with their source URL and evidence, and only
+  offers addresses that are explicitly published. The app never guesses an
+  email pattern.
+- Choosing "Use for this pitch" fills the matching draft's recipient email and
+  is remembered for drafts created later. The saved research lives in
+  `journalist_records.contact_json`.
+- When no address is published, the result is an empty candidate list and the
+  best official contact route, so the user can use a contact page instead.
+
 
 ### Local email batch sending
 - Gmail / Google Workspace SMTP through `smtp.gmail.com` on port 587 with
@@ -297,7 +404,15 @@ a non-sending demo.
 - Demo scope: the Vercel app can call analyze, PR opportunities, journalists,
   listicles, contact, and policy research actions. Its UI now mirrors the local
   workspace, but it does not have persistence, accounts, review-library storage,
-  draft generation, usage quotas, billing, or email sending.
+  draft generation, billing, or email sending.
+- Public API protection (2026-11-05): `/api/analyze` requires a short-lived
+  HMAC bearer token minted by `/api/token`, and only from an allowed demo
+  origin. Requests are limited per IP (12 per 10 minutes, 60 per day) and the
+  demo keeps a best-effort per-instance daily budget of 200 research calls
+  (`DEMO_DAILY_REQUEST_CAP`). The signing secret `DEMO_SIGNING_SECRET` is set in
+  Vercel for Production, Preview, and Development; the API fails closed without
+  it. Each call writes one log line with the action and a truncated IP hash, not
+  the payload.
 - The email batch sender is local-only and intentionally not part of the
   Vercel build. Pushes that only change local sending code should use
   `[skip vercel]` so the non-sending demo is not redeployed needlessly.
@@ -308,8 +423,11 @@ a non-sending demo.
 
 - Web search dominates cost (~$10 per 1,000 calls). Research runs only on click.
 - The Vercel demo is a Next.js visual port, not the Streamlit runtime. It covers
-  the research actions but has no persistence, accounts, quotas, review library,
-  or draft generation. The local Streamlit app is the full tool.
+  the research actions but has no persistence, accounts, review library, or draft
+  generation. The local Streamlit app is the full tool.
+- The demo's rate limits and daily budget are kept in function memory, so each
+  warm instance counts separately. They deter abuse but are not a hard global
+  spend cap; move the counters to Redis/Vercel KV if that is required.
 - The Vercel demo accepts up to five article URLs per batch, but analyses are
   kept only in browser memory and are lost on reload.
 - A saved PR opportunity queue can be reviewed after a restart without the

@@ -25,10 +25,55 @@ import {
 
 type AnyObj = Record<string, any>;
 
+const digitalPhases = ["Research", "Prospects", "Outreach"] as const;
+const listiclePhases = ["Find & review", "Outreach"] as const;
+type DigitalPhase = (typeof digitalPhases)[number];
+type ListiclePhase = (typeof listiclePhases)[number];
+
 const digitalSteps = ["Article", "PR angles", "Opportunities", "Journalists", "Outreach"] as const;
 const listicleSteps = ["Search", "Prospects", "Outreach"] as const;
 type DigitalStep = (typeof digitalSteps)[number];
 type ListicleStep = (typeof listicleSteps)[number];
+
+const phaseOfDigitalStep: Record<DigitalStep, DigitalPhase> = {
+  Article: "Research",
+  "PR angles": "Research",
+  Opportunities: "Prospects",
+  Journalists: "Prospects",
+  Outreach: "Outreach",
+};
+const firstStepOfDigitalPhase: Record<DigitalPhase, DigitalStep> = {
+  Research: "Article",
+  Prospects: "Opportunities",
+  Outreach: "Outreach",
+};
+const phaseOfListicleStep: Record<ListicleStep, ListiclePhase> = {
+  Search: "Find & review",
+  Prospects: "Find & review",
+  Outreach: "Outreach",
+};
+const firstStepOfListiclePhase: Record<ListiclePhase, ListicleStep> = {
+  "Find & review": "Search",
+  Outreach: "Outreach",
+};
+const phaseCopy: Record<string, string> = {
+  Research: "Analyze the article and pick the angle. The evidence stays on screen.",
+  Prospects: "Review the editorial openings. Writers appear for each approved one.",
+  Outreach: "Draft and approve. The public demo never sends email.",
+  "Find & review": "Find pages worth pursuing, then review fit, contact route, and policy.",
+};
+
+const fitStyles: Record<string, { className: string; label: string }> = {
+  "Strong fit": { className: "fit-good", label: "Good for PR" },
+  "Possible fit": { className: "fit-possible", label: "Possible" },
+  "Weak fit": { className: "fit-warn", label: "Weak PR fit" },
+  "Not suitable": { className: "fit-bad", label: "Not good for PR" },
+};
+
+function shortText(value: any, limit = 260) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length <= limit ? text : `${text.slice(0, limit - 1).replace(/[\s,.;:]+$/, "")}…`;
+}
 type Nav = "Workspace" | "Research Library" | "Settings";
 type Workflow = "digital" | "listicles";
 type AnalyzedArticle = { url: string; analysis: AnyObj };
@@ -52,7 +97,7 @@ const emailMethodOptions: {
       ["From account", "Personal Gmail (configured locally)"],
       ["SMTP", "smtp.gmail.com · port 587 · STARTTLS"],
       ["Credentials", "Local, gitignored storage only"],
-      ["Login check", "Verified locally · no email sent"],
+      ["Login check", "Configured locally · verify in the local app"],
     ],
     note: "A 16-character Google app password is used. A normal Google account password will not work.",
     icon: <KeyRound size={18} />,
@@ -87,21 +132,58 @@ const emailMethodOptions: {
   },
 ];
 
+let demoToken: { token: string; expiresAt: number } | null = null;
+
+async function getDemoToken(force = false): Promise<string> {
+  if (!force && demoToken && demoToken.expiresAt > Date.now() + 20_000) {
+    return demoToken.token;
+  }
+  const res = await fetch("/api/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data?.token) {
+    throw new Error(data?.detail || "Could not start a demo session. Please reload the page.");
+  }
+  demoToken = {
+    token: data.token,
+    expiresAt: Date.now() + (Number(data.expiresIn) || 300) * 1000,
+  };
+  return demoToken.token;
+}
+
 async function callApi(action: string, body: any = {}, onRetry?: (attempt: number) => void) {
   const maxAttempts = 3;
   let lastErr: any = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
+      const token = await getDemoToken(attempt > 1);
       const res = await fetch("/api/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ action, ...body }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail || data?.error || "Request failed");
-      return data;
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) return data;
+
+      const message = data?.detail || data?.error || "Request failed";
+      if (res.status === 401 || res.status === 403) {
+        demoToken = null;
+      }
+      // Retry auth failures and server faults only. A 400 or 429 will not
+      // succeed on a retry, and hammering the endpoint makes rate limits worse.
+      const retryable = res.status === 401 || res.status === 403 || res.status >= 500;
+      if (!retryable) throw Object.assign(new Error(message), { fatal: true });
+      throw new Error(message);
     } catch (err: any) {
       lastErr = err;
+      if (err?.fatal) throw err;
       if (attempt < maxAttempts) {
         if (onRetry) onRetry(attempt + 1);
         await new Promise((r) => setTimeout(r, 1500 * attempt));
@@ -211,14 +293,17 @@ export default function Home() {
   const listCount = listicles?.opportunities?.length || 0;
   const contactCount = contact?.contacts?.length || 0;
 
-  const steps: readonly string[] = workflow === "digital" ? digitalSteps : listicleSteps;
-  const activeStep = workflow === "digital" ? digitalStep : listicleStep;
+  const phases: readonly string[] = workflow === "digital" ? digitalPhases : listiclePhases;
+  const activePhase =
+    workflow === "digital"
+      ? phaseOfDigitalStep[digitalStep]
+      : phaseOfListicleStep[listicleStep];
 
-  function goStep(step: string) {
+  function goStep(phase: string) {
     if (workflow === "digital") {
-      setDigitalStep(step as DigitalStep);
+      setDigitalStep(firstStepOfDigitalPhase[phase as DigitalPhase]);
     } else {
-      setListicleStep(step as ListicleStep);
+      setListicleStep(firstStepOfListiclePhase[phase as ListiclePhase]);
     }
   }
 
@@ -573,7 +658,7 @@ export default function Home() {
               <PageHeading
                 badge="Workspace"
                 title={workflow === "digital" ? "Digital PR" : "Listicles"}
-                subtitle="You approve every decision and every send."
+                subtitle={phaseCopy[activePhase] || "You approve every decision and every send."}
                 action={
                   <button className="btn-secondary" onClick={switchWorkflow}>
                     Switch workflow
@@ -581,23 +666,26 @@ export default function Home() {
                 }
               />
 
-              <div className="stepper" role="tablist" aria-label="Workflow steps">
-                {steps.map((step) => (
+              <div className="stepper" role="tablist" aria-label="Workflow phases">
+                {phases.map((phase) => (
                   <button
-                    key={step}
+                    key={phase}
                     role="tab"
-                    aria-selected={activeStep === step}
-                    className={activeStep === step ? "active" : ""}
-                    onClick={() => goStep(step)}
+                    aria-selected={activePhase === phase}
+                    className={activePhase === phase ? "active" : ""}
+                    onClick={() => goStep(phase)}
                   >
-                    {step}
+                    {phase}
                   </button>
                 ))}
               </div>
+              <p className="meta" style={{ marginTop: 8 }}>
+                Phase {phases.indexOf(activePhase) + 1} of {phases.length} · {activePhase}
+              </p>
 
               {retryMsg && <Note>{retryMsg}</Note>}
 
-              {workflow === "digital" && digitalStep === "Article" && (
+              {workflow === "digital" && activePhase === "Research" && (
                 <div className="stack">
                   <section className="card">
                     <h2 className="section-title">Analyze articles</h2>
@@ -703,16 +791,13 @@ export default function Home() {
                           {loadingAnalyze ? <Spinner /> : <RefreshCw size={16} />}
                           {loadingAnalyze ? "Generating again..." : "Generate again"}
                         </button>
-                        <button className="btn-primary" onClick={() => setDigitalStep("PR angles")}>
-                          View PR angles <ArrowRight size={16} />
-                        </button>
                       </div>
                     </section>
                   )}
                 </div>
               )}
 
-              {workflow === "digital" && digitalStep === "PR angles" && (
+              {workflow === "digital" && activePhase === "Research" && !!analysis && (
                 <>
                   <p className="step-caption">
                     Choose the angle with the clearest editorial value. Research is only run for the angle you pick.
@@ -800,7 +885,7 @@ export default function Home() {
                 </>
               )}
 
-              {workflow === "digital" && digitalStep === "Opportunities" && (
+              {workflow === "digital" && activePhase === "Prospects" && (
                 <>
                   <p className="step-caption">
                     Research finds existing articles where this angle can add evidence, a useful perspective, or a
@@ -848,15 +933,36 @@ export default function Home() {
                                 )}
                               </div>
                               <p className="body-text">
-                                <strong>Why relevant:</strong> {o.why_relevant}
+                                <strong>Why it matters:</strong> {shortText(o.why_relevant)}
                               </p>
-                              <p className="body-text">
-                                <strong>Brand contribution:</strong> {o.brand_contribution}
+                              <p className="meta">
+                                {o.topic} · {o.opportunity_type} · Confidence: {o.confidence}
                               </p>
+                              {o.pr_fit && fitStyles[o.pr_fit] && (
+                                <div className={`fit-banner ${fitStyles[o.pr_fit].className}`}>
+                                  <strong>{fitStyles[o.pr_fit].label}</strong>
+                                  <span>{o.pr_fit_reason}</span>
+                                </div>
+                              )}
+                              {Array.isArray(o.pr_red_flags) && o.pr_red_flags.length > 0 && (
+                                <p className="meta">Signals: {o.pr_red_flags.join(" · ")}</p>
+                              )}
 
                               <details className="plan">
-                                <summary>Full opportunity details</summary>
+                                <summary>Full evidence and notes</summary>
                                 <div className="plan-body">
+                                  <p>
+                                    <strong>Why relevant:</strong> {o.why_relevant}
+                                  </p>
+                                  <p>
+                                    <strong>Topic:</strong> {o.topic}
+                                  </p>
+                                  <p>
+                                    <strong>Opportunity type:</strong> {o.opportunity_type}
+                                  </p>
+                                  <p>
+                                    <strong>Brand contribution:</strong> {o.brand_contribution}
+                                  </p>
                                   <p>
                                     <strong>Topical relevance:</strong> {o.topical_relevance}
                                   </p>
@@ -890,7 +996,7 @@ export default function Home() {
                                     </>
                                   ) : (
                                     <>
-                                      Research journalists <ArrowRight size={16} />
+                                      Find writers & contacts <ArrowRight size={16} />
                                     </>
                                   )}
                                 </button>
@@ -907,10 +1013,10 @@ export default function Home() {
                 </>
               )}
 
-              {workflow === "digital" && digitalStep === "Journalists" && (
+              {workflow === "digital" && activePhase === "Prospects" && !!selectedOpp && (
                 <>
                   <p className="step-caption">
-                    Find writers who have covered this topic and could use the brand's contribution.
+                    Find writers or the best content/SEO contact for this article. If no named writer matches, the publication contact is used instead.
                   </p>
                   {!selectedAngle || !selectedOpp ? (
                     <div className="card empty-state">
@@ -931,7 +1037,7 @@ export default function Home() {
                       <div className="actions-between">
                         <button className="btn-primary" onClick={runJournalists} disabled={loadingJourn}>
                           {loadingJourn ? <Spinner /> : journalists ? <RefreshCw size={17} /> : <Users size={17} />}
-                          {journalists ? "Generate again" : "Run journalist research"}
+                          {journalists ? "Find again" : "Find writers & contacts"}
                         </button>
                       </div>
 
@@ -985,7 +1091,7 @@ export default function Home() {
                           ))}
                           {(!journalists.journalists || journalists.journalists.length === 0) && (
                             <Note tone="warn">
-                              No suitable journalist could be verified. Do not guess a contact.
+                              No writer or contact could be verified. Do not guess one.
                             </Note>
                           )}
                         </>
@@ -995,7 +1101,7 @@ export default function Home() {
                 </>
               )}
 
-              {workflow === "digital" && digitalStep === "Outreach" && (
+              {workflow === "digital" && activePhase === "Outreach" && (
                 <div className="card empty-state">
                   <div className="page-badge">Human approval</div>
                   <h2 className="empty-title">Draft generation is in the local app</h2>

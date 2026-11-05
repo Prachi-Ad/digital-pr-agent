@@ -375,7 +375,7 @@ def main() -> int:
     go(app2, "Workspace")
     if list(app2.exception):
         raise AssertionError(f"PR opportunities raised an error: {list(app2.exception)}")
-    app2.get_by_key("opp_status_1_0").set_value("Approve for journalist research")
+    app2.get_by_key("opp_approve_1_0").click()
     app2.run()
 
     row = database.get_pr_opportunity(opportunity.article_url, opportunity.article_title, opportunity.publication) or {}
@@ -393,15 +393,17 @@ def main() -> int:
     # 4. Journalists and outreach queue
     # --------------------------------------------------------------
     emit()
-    emit("4. Journalist workflow")
-    app2.session_state["pr_step"] = "Journalists"
-    app2.session_state["journalist_results"] = {"1:0": journalist_results}
-    app2.session_state["journalist_reviews"] = {}
-    app2.run()
-    if list(app2.exception):
-        raise AssertionError(f"Journalists raised an error: {list(app2.exception)}")
-    app2.get_by_key("journalist_status_1_0_0").set_value("Qualified pitch target")
-    app2.run()
+    emit("4. Journalist records")
+    database.upsert_journalist(
+        journalist,
+        related_opportunity_url=opportunity.article_url,
+        qualification_status="Qualified pitch target",
+    )
+    database.upsert_journalist(
+        co_author,
+        related_opportunity_url=opportunity.article_url,
+        qualification_status="Needs review",
+    )
 
     row = database.get_journalist_record(journalist, opportunity.article_url) or {}
     check("journalist record is saved", bool(row))
@@ -413,8 +415,11 @@ def main() -> int:
     check("co-author starts as needs review", co_row.get("qualification_status") == "Needs review", co_row.get("qualification_status"))
     check("journalist records are not merged", len(database.list_journalists()) == 2, len(database.list_journalists()))
 
-    app2.get_by_key("journalist_status_1_0_1").set_value("Relevant writer")
-    app2.run()
+    database.upsert_journalist(
+        co_author,
+        related_opportunity_url=opportunity.article_url,
+        qualification_status="Relevant writer",
+    )
     row = database.get_journalist_record(journalist, opportunity.article_url) or {}
     co_row = database.get_journalist_record(co_author, opportunity.article_url) or {}
     check("co-author qualification is saved", co_row.get("qualification_status") == "Relevant writer", co_row.get("qualification_status"))
@@ -422,7 +427,7 @@ def main() -> int:
 
     app3 = new_app()
     check("digital PR mode is restored", app3.session_state["workflow_mode"] == "digital_pr", app3.session_state["workflow_mode"])
-    app3.get_by_key("pr_step").set_value("Outreach")
+    app3.get_by_key("pr_phase_widget").set_value("Outreach")
     app3.run()
     if list(app3.exception):
         raise AssertionError(f"Outreach raised an error: {list(app3.exception)}")
@@ -481,6 +486,21 @@ def main() -> int:
     )
     check("saved draft appears in inbox", "Updated subject line" in draft_text, draft_text[:300])
 
+    # "Back to start" must survive a browser reload, not just the current session.
+    app3.get_by_key("switch-workflow").click()
+    app3.run()
+    check(
+        "back to start clears the workflow",
+        app3.session_state.get("workflow_mode") is None,
+        app3.session_state.get("workflow_mode"),
+    )
+    app_reloaded = new_app()
+    check(
+        "back to start survives a reload",
+        app_reloaded.session_state.get("workflow_mode") is None,
+        app_reloaded.session_state.get("workflow_mode"),
+    )
+
     app4 = new_app()
     app4.session_state["workflow_mode"] = "listicles"
     app4.session_state["listicle_step"] = "Outreach"
@@ -493,10 +513,42 @@ def main() -> int:
     check("listicle outreach shows the approved prospect", "Alex Editor" in listicle_draft_text, listicle_draft_text[:300])
 
     # --------------------------------------------------------------
-    # 6. Exports and backup
+    # 6. Contact book
     # --------------------------------------------------------------
     emit()
-    emit("6. Exports and backup")
+    emit("6. Contact book")
+    saved_contacts = database.upsert_contact_book(
+        [
+            {
+                "email": "book@example.com",
+                "name": "Book Writer",
+                "role": "SEO Manager",
+                "publication": "Probe Publication",
+                "domain": "www.example.com",
+                "source": "CSV import",
+            },
+            {
+                "email": "book@example.com",
+                "name": "Book Writer",
+                "role": "Head of SEO",
+                "source": "CSV import",
+            },
+        ]
+    )
+    check("contact book saves imported rows", database.count_contact_book() == 1, database.count_contact_book())
+    check("contact book counts unique emails", saved_contacts == 1, saved_contacts)
+    book_row = database.list_contact_book()[0]
+    check("contact book updates duplicate rows", book_row.get("role") == "Head of SEO", book_row.get("role"))
+    check("contact book normalizes the domain", book_row.get("domain") == "example.com", book_row.get("domain"))
+    check("contact book finds by name", bool(database.find_contact_book("", "Book Writer")))
+    check("contact book finds by domain", bool(database.find_contact_book("example.com", "")))
+    check("contact book does not match another domain", not database.find_contact_book("other.com", "Nobody"))
+
+    # --------------------------------------------------------------
+    # 7. Exports and backup
+    # --------------------------------------------------------------
+    emit()
+    emit("7. Exports and backup")
     for label, data, expected in [
         ("listicle CSV", database.listicle_csv_bytes(), "Probe Publication"),
         ("PR CSV", database.opportunity_csv_bytes(), "Why measurement is hard"),
@@ -528,10 +580,10 @@ def main() -> int:
                 check(f"backup contains {table}", count == expected, count)
 
     # --------------------------------------------------------------
-    # 7. Data safety edge cases
+    # 8. Data safety edge cases
     # --------------------------------------------------------------
     emit()
-    emit("7. Data safety edge cases")
+    emit("8. Data safety edge cases")
 
     tricky = ListicleOpportunity(
         publication='Probe "Quoted" Pub',
@@ -602,6 +654,8 @@ def main() -> int:
                 "2026-01-01T00:00:00+00:00",
             ),
         )
+    # Simulate a fresh process so the one-time startup migration runs.
+    database._INITIALIZED_DATABASES.discard(str(Path(database.DB_PATH)))
     database.init_db()
     migrated = database.get_journalist_record(legacy_person, "") or {}
     check("legacy journalist keys are migrated", migrated.get("record_key", "").startswith("journalist:"), migrated.get("record_key"))

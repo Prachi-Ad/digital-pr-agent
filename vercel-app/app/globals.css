@@ -524,6 +524,62 @@ a {
   color: #92400e;
 }
 
+.fit-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.fit-banner strong {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.fit-banner span {
+  color: #4a4d68;
+}
+
+.fit-good {
+  border: 1px solid #bbf7d0;
+  background: #ecfdf5;
+}
+.fit-good strong {
+  color: #047857;
+}
+
+.fit-possible {
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+}
+.fit-possible strong {
+  color: #4338ca;
+}
+
+.fit-warn {
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+}
+.fit-warn strong {
+  color: #b45309;
+}
+
+.fit-bad {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+}
+.fit-bad strong {
+  color: #b91c1c;
+}
+
 .form-row {
   display: flex;
   flex-wrap: wrap;

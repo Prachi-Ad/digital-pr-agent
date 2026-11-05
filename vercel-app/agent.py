@@ -102,12 +102,65 @@ class PROpportunity(BaseModel):
     recommended_action: str = Field(description="The recommended next action.")
     evidence: str = Field(description="Evidence supporting the recommendation.")
     confidence: str = Field(description="Confidence level: High, Medium, or Low.")
+    pr_fit: str = Field(
+        default="Not assessed",
+        description=(
+            "PR suitability verdict for this publication: Strong fit, Possible fit, "
+            "Weak fit, or Not suitable."
+        ),
+    )
+    pr_fit_reason: str = Field(
+        default="Not assessed yet.",
+        description="One short sentence naming the specific signal behind the verdict.",
+    )
+    pr_red_flags: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Specific reasons this page or blog is a poor PR target, such as "
+            "content-farm signals, no bylines, paid-only placement, syndicated "
+            "content, an irrelevant audience, or no editorial contact. Empty when none."
+        ),
+    )
 
 
 class PRResearchResults(BaseModel):
     selected_angle: str = Field(description="The PR angle being researched.")
     research_summary: str = Field(description="A concise summary of the research findings.")
     opportunities: list[PROpportunity] = Field(description="The strongest relevant editorial candidates.")
+
+
+class OpportunityContact(BaseModel):
+    contact_name: str = Field(
+        description=(
+            "The bylined writer or a verified content, SEO, or link-building "
+            "contact. Use 'Content team' only when no person can be verified."
+        )
+    )
+    role: str = Field(
+        description=(
+            "Verified role, such as Content Writer, Content Manager, SEO Manager, "
+            "Link Building / Outreach Manager, Editor, or Partnerships contact."
+        )
+    )
+    email: str = Field(
+        description=(
+            "A professional email only if it is explicitly published on a public "
+            "page. Otherwise use Not publicly found."
+        )
+    )
+    contact_page_url: str = Field(
+        description="Official author profile, content/SEO team page, editorial contact page, or contact form URL, or Unknown."
+    )
+    source_url: str = Field(
+        description="Exact URL of the page that supports the contact details, or Unknown."
+    )
+    evidence: str = Field(
+        description="Quote or paraphrase the published evidence tying the contact to content, SEO, or link placement."
+    )
+    confidence: str = Field(description="High, Medium, or Low.")
+    route: str = Field(
+        description="Best route: Direct email, Author profile, Content/SEO team page, Editorial contact page, or Contact form."
+    )
 
 
 
@@ -380,6 +433,22 @@ Research process:
 6. Check competitor mentions when the evidence is available.
 7. Exclude generic SEO opportunities that lack a real editorial reason.
 8. Return the strongest candidates, up to 5.
+9. Give every candidate a PR suitability verdict for its publication.
+
+PR suitability:
+- Strong fit: original editorial content, a named writer or editor, a relevant
+  audience, and a credible editorial reason to pitch.
+- Possible fit: relevant, but one signal is unclear or missing.
+- Weak fit: thin or unclear editorial value, unclear authorship, or a weak
+  audience match.
+- Not suitable: a content farm, scraped or syndicated content, paid-only
+  placement, a directory or aggregator, a dead or abandoned blog, or a page
+  with no genuine editorial route.
+
+Red flags include: no bylines, AI-spam or low-effort listicles, duplicated
+copy across sites, "write for us" link-selling, sponsored-only placement,
+irrelevant audience, and no contact route. Name the specific signal you saw.
+Do not call a publication high-quality just because it is well known.
 
 Rules:
 - Search the live web.
@@ -404,6 +473,45 @@ Return only the requested structured fields.
 )
 
 
+
+
+# =========================================================
+# CONTENT / SEO CONTACT AGENT
+# =========================================================
+
+opportunity_contact_agent = Agent(
+    name="SEO and Content Contact Researcher",
+    instructions=f"""
+You find the best outreach contact for one specific article, on behalf of
+{BRAND_NAME}. Work from the exact article URL and publication.
+
+The goal is a content or link placement, not a news pitch. Look for the people
+who own content, SEO, or link building:
+1. The bylined writer of that exact article.
+2. The content manager, content editor, or managing editor.
+3. The SEO manager or SEO lead.
+4. The link-building, outreach, or partnerships contact.
+5. The publication's official editorial or content contact page or form.
+
+Rules:
+- Only use an email that is explicitly published on a public page you visited.
+- Never guess, infer, or construct an email address.
+- Never use data-broker, scraped-email, or email-finder sites.
+- Prefer a named person with a published email. A general inbox is acceptable
+  only when it is explicitly published and no person is.
+- Use "Content team" as the contact name only when no person can be verified.
+- Use "Not publicly found" for an email that does not exist publicly, and still
+  return the best official contact page.
+- Do not contact anyone or submit anything.
+- Include the exact source URL and the published evidence.
+
+Return only the requested structured fields.
+""",
+    tools=[web_search],
+    model=MODEL,
+    model_settings=MODEL_SETTINGS,
+    output_type=OpportunityContact,
+)
 
 
 # =========================================================
@@ -742,12 +850,37 @@ Why relevant: {opportunity.why_relevant}
 Recommended action: {opportunity.recommended_action}
 Evidence: {opportunity.evidence}
 
-Find up to five real people whose verified published work is relevant to this precise topic.
-Prefer recent bylined articles and official author pages. Return no speculative email addresses.
-If you cannot verify relevant people, return an empty list rather than inventing contacts.
+Find up to five real people whose verified published work is relevant to this topic.
+Start with exact-angle matches, then widen to the publication's editor, content
+manager, SEO lead, link-building contact, or official editorial contact route.
+Never invent a person, email, or byline. Return an empty list only if neither a
+relevant person nor an official contact route can be verified.
 """
 
     return _run_agent_in_worker(journalist_agent, prompt)
+
+
+def find_opportunity_contact(opportunity: PROpportunity) -> OpportunityContact:
+    """Find a content/SEO/link-building contact for one article."""
+    prompt = f"""
+Find the best content, SEO, or link-building contact for this exact article.
+
+PUBLICATION: {opportunity.publication}
+ARTICLE TITLE: {opportunity.article_title}
+ARTICLE URL: {opportunity.article_url}
+PUBLISHED: {opportunity.published_date}
+TOPIC: {opportunity.topic}
+WHY IT MATTERS: {opportunity.why_relevant}
+
+Start with the exact article URL and identify the bylined writer. Then check the
+author profile, about/team page, contributor guidelines, and contact page. Look
+for a content manager, SEO manager, link-building/outreach manager, or
+partnerships contact. Prefer a named person with a published email; otherwise
+return the official content or editorial contact page or form. Never guess an
+email. Include the source URL and evidence.
+"""
+
+    return _run_agent_in_worker(opportunity_contact_agent, prompt)
 
 
 def research_listicles(

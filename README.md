@@ -273,6 +273,7 @@ does not send email. Details are written to `backups\latest_storage_check.txt`.
 - `launch_pr_agent_hidden.vbs` - one-click launcher.
 - `restart_pr_agent.vbs` - one-click restart after an update.
 - `install_persistent_storage_update.vbs` - update installer with rollback.
+- `vercel-app/` - public Next.js research demo; no persistence and no sending.
 - `README.txt` - short local user guide.
 
 ## Updating
@@ -282,3 +283,27 @@ containing `agent.py`, `app.py`, `database.py`, and `email_sender.py`. It stops
 the app, backs up your code and database, installs the files, checks Python
 syntax and required functions (including the email sender), and rolls back on
 failure.
+
+## Public demo (Vercel)
+
+- URL: `https://pr.prachiadmane.com/`
+- The demo is research-only. It never sends email and never collects email
+  credentials.
+- `/api/analyze` requires a short-lived HMAC bearer token minted by
+  `/api/token`. Tokens are issued only to allowed demo origins and expire after
+  five minutes.
+- Per-IP limits: 12 research calls per 10 minutes and 60 per day. A
+  per-instance daily budget of 200 calls is the last backstop.
+- Required environment variable in Vercel (Production, Preview, Development):
+  `DEMO_SIGNING_SECRET`, at least 32 characters. Generate one with
+  `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+  Without it the API returns 503 instead of running.
+- Optional overrides: `DEMO_IP_REQUESTS_PER_10_MIN`,
+  `DEMO_IP_REQUESTS_PER_DAY`, `DEMO_DAILY_REQUEST_CAP`.
+- Deploy from the repository root, because the Vercel project root directory is
+  `vercel-app`:
+
+```powershell
+vercel --prod --yes --project vercel-app --scope prachi-8a13
+```
+

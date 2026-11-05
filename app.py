@@ -1,14 +1,21 @@
 import hashlib
+import hmac
 import html
+import csv
+import io
 import json
 import os
 import time
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import streamlit as st
 
 import email_sender
+import contact_providers
 
 # Hosting platforms inject configuration through secrets. Mirror the values into
 # the environment before importing agent.py, which reads them at import time.
@@ -44,9 +51,12 @@ from agent import (
     PRResearchResults,
     PublisherPolicyAssessment,
     analyze_article,
+    assess_pr_fit,
     draft_journalist_pitch,
     draft_listicle_inclusion_request,
+    find_opportunity_contact,
     research_journalists,
+    research_journalist_email,
     research_listicle_contact,
     research_listicles,
     research_opportunities,
@@ -59,6 +69,7 @@ from database import (
     create_database_backup,
     email_sends_csv_bytes,
     get_journalist_record,
+    get_journalist_contact_data,
     get_listicle_prospect,
     get_outreach_draft,
     get_pr_opportunity,
@@ -80,16 +91,24 @@ from database import (
     outreach_csv_bytes,
     remove_email_suppression,
     save_app_snapshot,
+    save_journalist_contact_data,
     update_outreach_draft,
+    upsert_contact_book,
     upsert_journalist,
     upsert_listicle_prospect,
     upsert_outreach_draft,
     upsert_pr_opportunity,
+    count_contact_book,
+    find_contact_book,
+    list_contact_book,
 )
 
 # Keep the SMTP config in the same local data directory as the database.
 email_sender.DATA_DIR = Path(DB_PATH).parent
 email_sender.CONFIG_PATH = email_sender.DATA_DIR / "email_config.json"
+contact_providers.DATA_DIR = Path(DB_PATH).parent
+contact_providers.CONFIG_PATH = contact_providers.DATA_DIR / "contactout_config.json"
+contact_providers.HUNTER_CONFIG_PATH = contact_providers.DATA_DIR / "hunter_config.json"
 
 
 # =========================================================
@@ -153,9 +172,10 @@ def _handle_google_oauth_callback() -> None:
             False, error=f"Could not complete Google sign-in: {exc}"
         )
     if result.success:
+        email_sender.add_oauth_account(result.email, result.refresh_token)
         st.session_state["_email_settings_notice"] = (
             "success",
-            f"Connected {result.email}. Google Workspace sign-in is ready.",
+            f"Connected {result.email}. Google sign-in is ready for sending.",
         )
     else:
         st.session_state["_email_settings_notice"] = ("error", result.error)
@@ -164,6 +184,30 @@ def _handle_google_oauth_callback() -> None:
 
 
 _handle_google_oauth_callback()
+
+
+# =========================================================
+# OPTIONAL LOGIN GATE FOR A HOSTED DEPLOYMENT
+# =========================================================
+
+def _require_login() -> None:
+    password = (os.environ.get("APP_PASSWORD") or "").strip()
+    if not password or st.session_state.get("_authenticated"):
+        return
+    st.markdown("## PR Research Agent")
+    st.caption("Enter the workspace password to continue.")
+    entered = st.text_input("Password", type="password", key="_login_password")
+    if st.button("Sign in", type="primary", width="stretch"):
+        if hmac.compare_digest(entered or "", password):
+            st.session_state["_authenticated"] = True
+            st.session_state.pop("_login_password", None)
+            st.rerun()
+        else:
+            st.error("That password is not correct.")
+    st.stop()
+
+
+_require_login()
 
 
 # =========================================================
@@ -219,6 +263,48 @@ DRAFT_STATUS_OPTIONS = [
 
 PR_STEPS = ["Article", "PR angles", "Opportunities", "Journalists", "Outreach"]
 LISTICLE_STEPS = ["Search", "Prospects", "Outreach"]
+
+# The workflow shows three simple phases, while the saved step keeps the
+# detailed screen the user is on. This keeps old saved work navigable.
+PR_PHASES = {
+    "Research": ["Article", "PR angles"],
+    "Contacts": ["Opportunities", "Journalists"],
+    "Outreach": ["Outreach"],
+}
+PR_STEP_PHASE = {
+    step: phase for phase, steps in PR_PHASES.items() for step in steps
+}
+LISTICLE_PHASES = {
+    "Find & review": ["Search", "Prospects"],
+    "Outreach": ["Outreach"],
+}
+LISTICLE_STEP_PHASE = {
+    step: phase for phase, steps in LISTICLE_PHASES.items() for step in steps
+}
+PR_PHASE_COPY = {
+    "Research": (
+        "Analyze the article and pick the angle.",
+        "Paste a published article. The tool extracts credible angles and the evidence behind them.",
+    ),
+    "Contacts": (
+        "Find the content and SEO contact.",
+        "Approve the real openings, then the tool finds the writer, content manager, SEO lead, or link-building contact.",
+    ),
+    "Outreach": (
+        "Write, approve, send.",
+        "Draft the pitch, add a verified email, and send one confirmed batch.",
+    ),
+}
+LISTICLE_PHASE_COPY = {
+    "Find & review": (
+        "Find pages worth pursuing.",
+        "Search for roundups and directories, then review fit, contact route, and policy.",
+    ),
+    "Outreach": (
+        "Request inclusion.",
+        "Draft the request, add a verified email, and send one confirmed batch.",
+    ),
+}
 
 
 
@@ -319,18 +405,21 @@ if not st.session_state.get("_persistent_state_loaded", False):
     st.session_state["asset_analyses"] = _restore_map(
         "asset_analyses", AssetAnalysis
     )
-    # Older snapshots stored one active analysis. Seed the batch map from it.
+    # Older snapshots stored one active analysis. Seed the batch map from it,
+    # but never resurrect an analysis the user explicitly cleared with
+    # "Start new" (the snapshot then contains an explicit null).
+    if "analysis" not in _saved_snapshot and st.session_state.asset_analyses:
+        first_key = next(iter(st.session_state.asset_analyses))
+        st.session_state.article_url = first_key
+        st.session_state.analysis = st.session_state.asset_analyses[first_key]
     if st.session_state.analysis is not None:
         active_key = (st.session_state.article_url or "").strip()
         if active_key:
             st.session_state.asset_analyses[active_key] = st.session_state.analysis
-    elif st.session_state.asset_analyses:
-        first_key = next(iter(st.session_state.asset_analyses))
-        st.session_state.article_url = first_key
-        st.session_state.analysis = st.session_state.asset_analyses[first_key]
-    # Infer a sensible starting workflow only on the first load. This must not
-    # run on every rerun, or "Switch workflow" would immediately undo itself.
-    if st.session_state.workflow_mode is None:
+    # Infer a sensible starting workflow only for snapshots that predate the
+    # workflow_mode field. An explicit null means the user chose "Back to
+    # start", so that choice must survive a reload.
+    if "workflow_mode" not in _saved_snapshot:
         if st.session_state.analysis is not None:
             st.session_state.workflow_mode = "digital_pr"
         elif st.session_state.listicle_results is not None:
@@ -557,6 +646,58 @@ st.markdown(
     [data-testid="stSidebar"] [data-testid="stRadioOption"][data-selected="true"] [data-testid="stMarkdownContainer"] p::before {
         background-color: var(--accent);
     }
+    /* ---------- PR fit verdict ---------- */
+    .fit-banner {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 7px;
+        padding: 8px 11px;
+        border-radius: 9px;
+        font-size: 13px;
+        line-height: 1.45;
+    }
+    .fit-banner strong {
+        font-size: 10.5px;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+    .fit-banner span { color: #4a4d68; }
+    .fit-banner.good { background: #ecfdf5; border: 1px solid #bbf7d0; }
+    .fit-banner.good strong { color: #047857; }
+    .fit-banner.possible { background: #eef2ff; border: 1px solid #c7d2fe; }
+    .fit-banner.possible strong { color: #4338ca; }
+    .fit-banner.warn { background: #fffbeb; border: 1px solid #fde68a; }
+    .fit-banner.warn strong { color: #b45309; }
+    .fit-banner.bad { background: #fef2f2; border: 1px solid #fecaca; }
+    .fit-banner.bad strong { color: #b91c1c; }
+
+    /* ---------- workflow header ---------- */
+    .workflow-head { margin: 0 0 0.55rem; }
+    .workflow-eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 10.5px;
+        font-weight: 800;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        color: var(--accent);
+    }
+    .workflow-eyebrow .phase-count { color: var(--muted); font-weight: 700; letter-spacing: 0.05em; }
+    .workflow-title { font-size: 1.55rem; font-weight: 800; letter-spacing: -0.02em; color: var(--ink); margin-top: 3px; }
+    .workflow-sub { font-size: 13.5px; line-height: 1.5; color: var(--muted); margin-top: 2px; max-width: 720px; }
+    .workflow-dots { display: flex; gap: 5px; margin-top: 10px; }
+    .workflow-dots span {
+        width: 42px;
+        height: 4px;
+        border-radius: 999px;
+        background: #dfe2f2;
+    }
+    .workflow-dots span.done { background: var(--accent); }
+
     /* ---------- stepper pills ---------- */
     [data-testid="stMain"] [data-testid="stRadioGroup"][aria-orientation="horizontal"] {
         display: flex;
@@ -883,12 +1024,116 @@ def _step_control(steps, key):
     return choice
 
 
+def _phase_control(phases, key, current, on_change):
+    """Show the three workflow phases; the detailed step stays internal."""
+    st.session_state[key] = current
+    st.radio(
+        "Phase",
+        list(phases),
+        horizontal=True,
+        key=key,
+        label_visibility="collapsed",
+        on_change=on_change,
+    )
+
+
+def _pr_phase_changed():
+    phase = st.session_state.pr_phase_widget
+    st.session_state.pr_step = PR_PHASES[phase][0]
+
+
+def _listicle_phase_changed():
+    phase = st.session_state.listicle_phase_widget
+    st.session_state.listicle_step = LISTICLE_PHASES[phase][0]
+
+
+def _render_workflow_header(label, phase, phases, title, subtitle):
+    """One compact header per phase: where you are, what to do, how far along."""
+    index = list(phases).index(phase) + 1
+    total = len(phases)
+    dots = "".join(
+        f'<span class="{"done" if position <= index else ""}"></span>'
+        for position in range(1, total + 1)
+    )
+    st.markdown(
+        f"""
+        <div class="workflow-head">
+            <div class="workflow-eyebrow">
+                {html.escape(label)}
+                <span class="phase-count">· Phase {index} of {total}</span>
+            </div>
+            <div class="workflow-title">{html.escape(title)}</div>
+            <div class="workflow-sub">{html.escape(subtitle)}</div>
+            <div class="workflow-dots">{dots}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _safe_choice(options, value):
     return value if value in options else options[0]
 
 
 def _widget_suffix(value):
     return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:12]
+
+
+def _short_text(value, limit: int = 240) -> str:
+    """One scannable line instead of a paragraph."""
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip(" ,.;:") + "…"
+
+
+PR_FIT_STYLES = {
+    "Strong fit": ("good", "Good for PR"),
+    "Possible fit": ("possible", "Possible"),
+    "Weak fit": ("warn", "Weak PR fit"),
+    "Not suitable": ("bad", "Not good for PR"),
+}
+
+
+def _render_pr_fit(opportunity, key_prefix: str) -> None:
+    """Show the publication verdict, and let the human check or re-check it."""
+    fit = (getattr(opportunity, "pr_fit", "") or "").strip()
+    reason = (getattr(opportunity, "pr_fit_reason", "") or "").strip()
+    flags = [
+        str(flag).strip()
+        for flag in (getattr(opportunity, "pr_red_flags", []) or [])
+        if str(flag).strip()
+        and not str(flag).strip().lower().startswith("none")
+        and "no red flags" not in str(flag).strip().lower()
+    ]
+    style, label = PR_FIT_STYLES.get(fit, ("", "PR fit not checked"))
+    if style:
+        st.markdown(
+            f'<div class="fit-banner {style}"><strong>{label}</strong>'
+            f"<span>{html.escape(reason or 'No reason recorded.')}</span></div>",
+            unsafe_allow_html=True,
+        )
+        if flags:
+            st.caption("Signals: " + " · ".join(flags))
+    else:
+        st.caption("This blog has not been checked for PR suitability yet.")
+
+    if st.button(
+        "Re-check PR fit" if style else "Check PR fit",
+        key=f"{key_prefix}_fit_{_widget_suffix(opportunity.article_url)}",
+        width="stretch",
+    ):
+        with st.spinner("Checking the blog, its authors, and its editorial route..."):
+            try:
+                assessment = assess_pr_fit(opportunity)
+                opportunity.pr_fit = assessment.pr_fit
+                opportunity.pr_fit_reason = assessment.reason
+                opportunity.pr_red_flags = list(assessment.red_flags)
+                opportunity.recommended_action = assessment.recommended_action
+                upsert_pr_opportunity(opportunity, review_status=None)
+                st.rerun()
+            except Exception as exc:
+                st.error(f"PR fit check failed: {exc}")
 
 
 def _status_counts(statuses, options):
@@ -1025,6 +1270,25 @@ def _reset_pr_downstream():
     st.session_state.research_run_id = 0
     st.session_state.journalist_results = {}
     st.session_state.journalist_reviews = {}
+
+
+def _start_new_pr():
+    """Begin a fresh campaign without deleting saved analyses or records."""
+    _reset_pr_downstream()
+    st.session_state.analysis = None
+    st.session_state.article_url = ""
+    st.session_state.article_url_slot_count = 1
+    for index in range(5):
+        st.session_state.pop(f"article_url_{index}", None)
+    go(mode="digital_pr", pr_step="Article")
+
+
+def _start_new_listicle():
+    """Begin a fresh listicle search without deleting saved prospects."""
+    st.session_state.listicle_results = None
+    st.session_state.listicle_reviews = {}
+    st.session_state.listicle_run_id += 1
+    go(mode="listicles", listicle_step="Search")
 
 
 def _activate_asset(key: str, force_reset: bool = False):
@@ -1205,6 +1469,126 @@ def _approved_drafts_for_types(draft_types: set[str]) -> list[dict]:
         if row.get("draft_type") in draft_types
         and row.get("draft_status") == "Approved for automated send"
     ]
+
+
+def _draft_ready_for_bulk_approval(record: dict) -> bool:
+    """A draft can be bulk-approved only when it is complete and addressable."""
+    if record.get("draft_status") != "Draft" or record.get("sent_at"):
+        return False
+    email_value = (record.get("recipient_email") or "").strip()
+    return bool(
+        email_sender.is_valid_email(email_value)
+        and not is_email_suppressed(email_value)
+        and (record.get("subject") or "").strip()
+        and (record.get("body") or "").strip()
+    )
+
+
+def _bulk_approve_ready_drafts(draft_types: set[str]) -> tuple[int, int]:
+    """Approve every complete draft for these types. Approval is not sending."""
+    approved = 0
+    skipped = 0
+    for record in list_outreach_drafts():
+        if record.get("draft_type") not in draft_types:
+            continue
+        if record.get("draft_status") != "Draft" or record.get("sent_at"):
+            continue
+        if not _draft_ready_for_bulk_approval(record):
+            skipped += 1
+            continue
+        update_outreach_draft(
+            record["draft_key"],
+            record.get("subject", ""),
+            record.get("body", ""),
+            "Approved for automated send",
+            recipient_email=(record.get("recipient_email") or "").strip(),
+        )
+        approved += 1
+    return approved, skipped
+
+
+def _drafts_needing_email(draft_types: set[str]) -> int:
+    return sum(
+        1
+        for record in list_outreach_drafts()
+        if record.get("draft_type") in draft_types
+        and record.get("draft_status") == "Draft"
+        and not email_sender.is_valid_email(
+            (record.get("recipient_email") or "").strip()
+        )
+    )
+
+
+def _render_bulk_outreach_actions(
+    scope_key: str,
+    draft_types: set[str],
+    missing_count: int,
+    prepare_missing,
+) -> None:
+    """Bulk draft creation and bulk approval for one outreach workflow."""
+    notice_key = f"{scope_key}_notice"
+    notice = st.session_state.pop(notice_key, None)
+    if notice:
+        tone, message = notice
+        if tone == "success":
+            st.success(message)
+        else:
+            st.warning(message)
+
+    records = [
+        record
+        for record in list_outreach_drafts()
+        if record.get("draft_type") in draft_types
+    ]
+    ready = sum(1 for record in records if _draft_ready_for_bulk_approval(record))
+    approved = sum(
+        1
+        for record in records
+        if record.get("draft_status") == "Approved for automated send"
+        and not record.get("sent_at")
+    )
+    needs_email = _drafts_needing_email(draft_types)
+
+    st.caption(
+        f"{ready} ready to approve · {approved} approved · "
+        f"{needs_email} waiting for a recipient email."
+    )
+    if st.button(
+        "Prepare and approve all",
+        key=f"{scope_key}_prepare_approve",
+        type="primary",
+        width="stretch",
+        disabled=missing_count == 0 and ready == 0,
+    ):
+        try:
+            with st.spinner(
+                "Preparing drafts and approving the complete ones. No web search "
+                "is used for this step..."
+            ):
+                created = prepare_missing() if missing_count else 0
+                approved_count, skipped_count = _bulk_approve_ready_drafts(
+                    draft_types
+                )
+            message = (
+                f"Prepared {created} draft{'s' if created != 1 else ''} and "
+                f"approved {approved_count} for automated send. "
+                "Approval is not sending."
+            )
+            if skipped_count:
+                message += (
+                    f" Skipped {skipped_count} that still need a recipient email "
+                    "or complete content."
+                )
+            st.session_state[notice_key] = ("success", message)
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Drafts could not be prepared and approved: {exc}")
+
+    st.caption(
+        "Approve only includes drafts with a valid, non-suppressed recipient "
+        "email. The batch sender still requires a separate confirmation."
+    )
+
 
 
 def _run_email_batch(scope_key: str, approved: list[dict], config) -> None:
@@ -1659,7 +2043,7 @@ def _render_pr_article():
                 st.warning("No articles were analyzed. Check the URLs and try again.")
 
     analyses = st.session_state.get("asset_analyses") or {}
-    if len(analyses) > 1:
+    if analyses and (len(analyses) > 1 or not st.session_state.analysis):
         st.divider()
         st.markdown(f"**Analyzed articles ({len(analyses)})**")
         for key, item in analyses.items():
@@ -1685,8 +2069,6 @@ def _render_pr_article():
         st.caption(st.session_state.article_url)
         with st.expander("View the saved asset analysis"):
             _render_analysis_details(analysis)
-        if st.button("Continue to PR angles →", width="stretch"):
-            go(pr_step="PR angles")
 
 
 def _render_pr_angles():
@@ -1847,7 +2229,47 @@ def _render_pr_opportunities():
                 else:
                     st.caption("No verified link")
 
-            with st.expander("Details and evidence"):
+            st.write(
+                f"**Why it matters:** {_short_text(opportunity.why_relevant, 260)}"
+            )
+            st.caption(
+                f"{opportunity.topic} · {opportunity.opportunity_type} · "
+                f"Fit: {fit_summary}"
+            )
+            _render_pr_fit(opportunity, f"opp_{run_id}_{index}")
+
+            approve_col, skip_col = st.columns(2)
+            is_approved = current == "Approve for journalist research"
+            is_skipped = current == "Reject"
+            if approve_col.button(
+                "Approved ✓" if is_approved else "Approve",
+                key=f"opp_approve_{run_id}_{index}",
+                type="primary",
+                width="stretch",
+                disabled=is_approved,
+            ):
+                reviews[review_key] = "Approve for journalist research"
+                upsert_pr_opportunity(
+                    opportunity,
+                    selected_angle=results.selected_angle,
+                    review_status="Approve for journalist research",
+                )
+                st.rerun()
+            if skip_col.button(
+                "Skipped" if is_skipped else "Skip",
+                key=f"opp_skip_{run_id}_{index}",
+                width="stretch",
+                disabled=is_skipped,
+            ):
+                reviews[review_key] = "Reject"
+                upsert_pr_opportunity(
+                    opportunity,
+                    selected_angle=results.selected_angle,
+                    review_status="Reject",
+                )
+                st.rerun()
+
+            with st.expander("Full evidence and notes"):
                 st.markdown(f"**Why relevant:** {opportunity.why_relevant}")
                 st.markdown(f"**Topic:** {opportunity.topic}")
                 st.markdown(f"**Opportunity type:** {opportunity.opportunity_type}")
@@ -1857,29 +2279,28 @@ def _render_pr_opportunities():
                 st.markdown(f"**Editorial fit:** {opportunity.editorial_fit}")
                 st.markdown(f"**Recommended action:** {opportunity.recommended_action}")
                 st.markdown(f"**Evidence:** {opportunity.evidence}")
-
-            review_col, hint_col = st.columns(
-                [1.6, 1], gap="small", vertical_alignment="center"
-            )
-            with review_col:
-                widget_key = f"opp_status_{run_id}_{index}"
-                if widget_key not in st.session_state:
-                    st.session_state[widget_key] = current
+                status_index = (
+                    REVIEW_OPTIONS.index(current)
+                    if current in REVIEW_OPTIONS
+                    else 0
+                )
                 chosen = st.selectbox(
-                    "Review decision",
+                    "Status",
                     REVIEW_OPTIONS,
-                    key=widget_key,
+                    index=status_index,
+                    key=(
+                        f"opp_status_{run_id}_{index}_"
+                        f"{_widget_suffix(current)}"
+                    ),
                 )
-            with hint_col:
-                st.caption("Changes save automatically.")
-            if chosen != current:
-                reviews[review_key] = chosen
-                upsert_pr_opportunity(
-                    opportunity,
-                    selected_angle=results.selected_angle,
-                    review_status=chosen,
-                )
-                st.rerun()
+                if chosen != current:
+                    reviews[review_key] = chosen
+                    upsert_pr_opportunity(
+                        opportunity,
+                        selected_angle=results.selected_angle,
+                        review_status=chosen,
+                    )
+                    st.rerun()
 
     approved = sum(
         1
@@ -1887,19 +2308,18 @@ def _render_pr_opportunities():
         if reviews.get(f"{run_id}:{index}") == "Approve for journalist research"
     )
     st.divider()
-    if st.button(
-        f"Continue to journalists ({approved} approved) →",
-        type="primary",
-        width="stretch",
-        disabled=approved == 0,
-    ):
-        go(pr_step="Journalists")
     if approved == 0:
-        st.caption("Approve at least one candidate to continue.")
+        st.caption(
+            "Approve at least one candidate above. Writers appear here as soon "
+            "as one is approved."
+        )
 
 
 def _render_pr_journalists():
     st.caption("Research writers with verified published work. A qualified target is ready for pitch preparation, not for sending.")
+    fallback_notice = st.session_state.pop("journalist_fallback_notice", None)
+    if fallback_notice:
+        st.success(fallback_notice)
 
     results = st.session_state.opportunity_results
     analysis = st.session_state.analysis
@@ -1951,7 +2371,10 @@ def _render_pr_journalists():
                     key=f"research_journalists_{run_id}_{index}",
                     type="primary",
                 ):
-                    with st.spinner("Verifying writers and their published work..."):
+                    with st.spinner(
+                        "Verifying writers, then checking content and SEO "
+                        "contacts if none are found..."
+                    ):
                         try:
                             result = research_journalists(angle, opportunity)
                             st.session_state.journalist_results[review_key] = result
@@ -1960,6 +2383,16 @@ def _render_pr_journalists():
                                     person,
                                     related_opportunity_url=opportunity.article_url,
                                     qualification_status=None,
+                                )
+                            if not result.journalists:
+                                fallback_person, _contact, _email = _auto_prepare_pitch(
+                                    opportunity
+                                )
+                                st.session_state["journalist_fallback_notice"] = (
+                                    f"No journalist was verified for "
+                                    f"{opportunity.publication}. Prepared a pitch for "
+                                    f"{fallback_person.name} "
+                                    f"({fallback_person.current_role}) instead."
                                 )
                             st.rerun()
                         except Exception as exc:
@@ -1989,7 +2422,26 @@ def _render_pr_journalists():
                     )
 
                 if not existing.journalists:
-                    st.warning("No suitable journalist could be verified. Do not guess a contact.")
+                    fallback_person = _linked_contact(opportunity)
+                    fallback_draft = (
+                        get_outreach_draft(
+                            "journalist_pitch",
+                            opportunity.article_url,
+                            fallback_person.name,
+                        )
+                        if fallback_person
+                        else None
+                    )
+                    if fallback_draft:
+                        st.success(
+                            "No journalist was verified. A content/SEO contact "
+                            "pitch is ready below."
+                        )
+                    else:
+                        st.warning(
+                            "No suitable journalist was verified. Use the "
+                            "content/SEO contact option below."
+                        )
                 else:
                     for person_index, person in enumerate(existing.journalists):
                         qualification_key = f"{review_key}:{person_index}"
@@ -2054,8 +2506,9 @@ def _render_pr_journalists():
 
     qualified = sum(
         1
-        for value in st.session_state.journalist_reviews.values()
-        if value == "Qualified pitch target"
+        for row in list_journalists()
+        if row.get("qualification_status") == "Qualified pitch target"
+        and (row.get("related_opportunity_url") or "").strip()
     )
     st.divider()
     if st.button(
@@ -2094,16 +2547,756 @@ def _qualified_journalist_targets():
     return targets
 
 
-def _render_pr_outreach():
-    st.caption(
-        "Write and review a personalized pitch. Approved drafts can be sent in a "
-        "batch from this page."
+def _selected_journalist_email(person) -> str:
+    """Return the address the human chose for this journalist, if any."""
+    data = get_journalist_contact_data(person) or {}
+    value = (data.get("selected_email") or "").strip()
+    return value if email_sender.is_valid_email(value) else ""
+
+
+def _trusted_email_domains(person) -> set[str]:
+    domains = set()
+    for url in (
+        getattr(person, "relevant_article_url", ""),
+        getattr(person, "author_profile_or_contact_page", ""),
+    ):
+        host = urlsplit(url or "").netloc.lower()
+        if host:
+            domains.add(host[4:] if host.startswith("www.") else host)
+    return domains
+
+
+def _best_published_email(candidates, person) -> str:
+    """Auto-pick only a high-confidence address on the publication's own domain."""
+    trusted = _trusted_email_domains(person)
+    if not trusted:
+        return ""
+    for candidate in candidates:
+        email_value = (getattr(candidate, "email", "") or "").strip()
+        if not email_sender.is_valid_email(email_value):
+            continue
+        if (getattr(candidate, "confidence", "") or "").strip().lower() != "high":
+            continue
+        domain = email_value.split("@")[-1].lower()
+        domain = domain[4:] if domain.startswith("www.") else domain
+        if domain in trusted:
+            return email_value
+    return ""
+
+
+def _find_contacts_for_all(targets) -> dict[str, int]:
+    """Check every writer who still needs an address; select only safe matches."""
+    counts = {"selected": 0, "review": 0, "none": 0, "skipped": 0}
+    for opportunity, person, _row in targets:
+        saved = get_journalist_contact_data(person) or {}
+        if saved.get("candidates") or _selected_journalist_email(person):
+            counts["skipped"] += 1
+            continue
+        result = research_journalist_email(person, opportunity)
+        payload = result.model_dump(mode="json")
+        payload["checked_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        best = _best_published_email(result.candidates, person)
+        payload["selected_email"] = best
+        save_journalist_contact_data(person, payload)
+        valid = [
+            candidate
+            for candidate in result.candidates
+            if email_sender.is_valid_email(
+                (getattr(candidate, "email", "") or "").strip()
+            )
+        ]
+        if best:
+            counts["selected"] += 1
+        elif valid:
+            counts["review"] += 1
+        else:
+            counts["none"] += 1
+    return counts
+
+
+def _use_journalist_email(person, draft_key: str | None, email_value: str) -> None:
+    """Remember the chosen address and fill the matching draft's recipient."""
+    data = dict(get_journalist_contact_data(person) or {})
+    data["selected_email"] = email_value
+    save_journalist_contact_data(person, data)
+    if not draft_key:
+        return
+    fresh = next(
+        (row for row in list_outreach_drafts() if row["draft_key"] == draft_key), None
+    )
+    if fresh is None:
+        return
+    update_outreach_draft(
+        fresh["draft_key"],
+        fresh.get("subject", ""),
+        fresh.get("body", ""),
+        fresh.get("draft_status", "Draft"),
+        recipient_email=email_value,
     )
 
-    st.info(
-        "Choose a qualified writer, verify the draft, add the recipient's public "
-        "email, and approve it for automated send. Nothing sends until you confirm "
-        "the batch."
+
+def _render_journalist_email_finder(person, opportunity, record, key_prefix: str) -> None:
+    """Search public pages for a published address and let the human choose."""
+    saved = get_journalist_contact_data(person) or {}
+    selected = _selected_journalist_email(person)
+    candidates = [
+        candidate
+        for candidate in (saved.get("candidates") or [])
+        if email_sender.is_valid_email((candidate.get("email") or "").strip())
+    ]
+    suffix = _widget_suffix(f"{person.name}|{person.publication}")
+    title = (
+        f"Find public email ({len(candidates)} found)"
+        if candidates
+        else "Find public email"
+    )
+    with st.expander(title):
+        st.caption(
+            "Searches public pages only: author profiles, staff and contact pages, "
+            "personal sites, and public bios. It never guesses an address pattern."
+        )
+        if saved.get("checked_at"):
+            st.caption(f"Last searched {saved['checked_at']}")
+        if saved.get("research_summary"):
+            st.write(saved["research_summary"])
+        if saved.get("recommended_contact_route"):
+            st.caption(f"Best route: {saved['recommended_contact_route']}")
+
+        for candidate_index, candidate in enumerate(candidates):
+            email_value = (candidate.get("email") or "").strip()
+            is_selected = email_value.lower() == selected.lower()
+            with st.container(border=True):
+                badge = " · **selected**" if is_selected else ""
+                st.markdown(f"`{email_value}`{badge}")
+                st.caption(
+                    f"{candidate.get('source_name') or 'Public source'} · "
+                    f"Confidence: {candidate.get('confidence') or 'Unknown'}"
+                )
+                if candidate.get("evidence"):
+                    st.write(candidate["evidence"])
+                source_url = (candidate.get("source_url") or "").strip()
+                link_col, use_col = st.columns(2)
+                if source_url.startswith("https://"):
+                    link_col.link_button(
+                        "Open source",
+                        source_url,
+                        key=f"{key_prefix}_email_source_{suffix}_{candidate_index}",
+                    )
+                if use_col.button(
+                    "Use for this pitch",
+                    key=f"{key_prefix}_email_use_{suffix}_{candidate_index}",
+                    disabled=is_selected,
+                    width="stretch",
+                ):
+                    _use_journalist_email(
+                        person,
+                        record["draft_key"] if record else None,
+                        email_value,
+                    )
+                    st.rerun()
+
+        book_domain = urlsplit(person.relevant_article_url or "").netloc
+        shown_emails = {candidate["email"].lower() for candidate in candidates}
+        book_matches = [
+            match
+            for match in find_contact_book(book_domain, person.name)
+            if (match.get("email") or "").lower() not in shown_emails
+        ]
+        if book_matches:
+            st.markdown("**From your contact book**")
+            for match_index, match in enumerate(book_matches[:5]):
+                match_email = (match.get("email") or "").strip()
+                if not email_sender.is_valid_email(match_email):
+                    continue
+                with st.container(border=True):
+                    st.markdown(f"`{match_email}`")
+                    st.caption(
+                        f"{match.get('name') or 'Unknown'} · "
+                        f"{match.get('role') or 'Unknown'} · "
+                        f"{match.get('source') or 'Imported'}"
+                    )
+                    if st.button(
+                        "Use this address",
+                        key=f"{key_prefix}_book_use_{suffix}_{match_index}",
+                        width="stretch",
+                    ):
+                        _use_journalist_email(
+                            person,
+                            record["draft_key"] if record else None,
+                            match_email,
+                        )
+                        st.rerun()
+
+        hunter_config = contact_providers.load_hunter_config()
+        if hunter_config.api_key:
+            st.divider()
+            st.markdown("**Hunter (paid lookup)**")
+            st.caption(
+                "Uses Hunter credits. It searches this person and the "
+                "publication's content/SEO contacts."
+            )
+            hunter_results_key = f"{key_prefix}_hunter_{suffix}"
+            if st.button(
+                "Search Hunter",
+                key=f"{hunter_results_key}_search",
+                width="stretch",
+            ):
+                domain = urlsplit(person.relevant_article_url or "").netloc
+                try:
+                    with st.spinner("Searching Hunter..."):
+                        hunter_results = contact_providers.search_hunter(
+                            domain, name=person.name, limit=5
+                        )
+                    st.session_state[hunter_results_key] = hunter_results
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+            hunter_results = st.session_state.get(hunter_results_key) or []
+            for result_index, result in enumerate(hunter_results):
+                email_value = (result.get("email") or "").strip()
+                if not email_sender.is_valid_email(email_value):
+                    continue
+                with st.container(border=True):
+                    st.markdown(f"`{email_value}`")
+                    st.caption(
+                        f"{result.get('name') or 'Unknown'} · "
+                        f"{result.get('title') or 'Unknown'} · Hunter"
+                    )
+                    if st.button(
+                        "Use this address",
+                        key=f"{hunter_results_key}_use_{result_index}",
+                        width="stretch",
+                    ):
+                        _use_journalist_email(
+                            person,
+                            record["draft_key"] if record else None,
+                            email_value,
+                        )
+                        st.rerun()
+            if not hunter_results:
+                st.caption("No Hunter results yet.")
+
+        if saved and not candidates:
+            st.info(
+                "No published address was found. Use the publication's official "
+                "contact page instead of guessing one."
+            )
+            contact_page = (
+                getattr(person, "author_profile_or_contact_page", "") or ""
+            ).strip()
+            if contact_page.startswith("https://"):
+                st.link_button(
+                    "Open the official contact page",
+                    contact_page,
+                    key=f"{key_prefix}_contact_page_{suffix}",
+                    width="stretch",
+                )
+            st.caption(
+                "For form-based outreach, paste the draft below into the page, "
+                "then set the draft status to 'Sent manually'."
+            )
+
+        contactout_config = contact_providers.load_config()
+        if contactout_config.api_token:
+            st.divider()
+            st.markdown("**ContactOut (paid lookup)**")
+            st.caption(
+                "Looks up work emails for this person and the publication's "
+                "content/SEO contacts. Each search uses ContactOut credits."
+            )
+            results_key = f"{key_prefix}_contactout_{suffix}"
+            if st.button(
+                "Search ContactOut",
+                key=f"{results_key}_search",
+                width="stretch",
+            ):
+                domain = urlsplit(person.relevant_article_url or "").netloc
+                try:
+                    with st.spinner("Searching ContactOut..."):
+                        results = contact_providers.search_people(
+                            domain,
+                            None
+                            if (person.name or "").strip()
+                            else contact_providers.CONTENT_TITLES,
+                            name=person.name if (person.name or "").strip() else "",
+                            limit=5,
+                        )
+                    st.session_state[results_key] = results
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+            contactout_results = st.session_state.get(results_key) or []
+            for result_index, result in enumerate(contactout_results):
+                email_value = (result.get("email") or "").strip()
+                if not email_sender.is_valid_email(email_value):
+                    continue
+                with st.container(border=True):
+                    st.markdown(f"`{email_value}`")
+                    st.caption(
+                        f"{result.get('name') or 'Unknown'} · "
+                        f"{result.get('title') or 'Unknown'} · ContactOut"
+                    )
+                    linkedin_url = (result.get("linkedin_url") or "").strip()
+                    if linkedin_url.startswith("https://"):
+                        st.link_button(
+                            "Open LinkedIn profile",
+                            linkedin_url,
+                            key=f"{results_key}_li_{result_index}",
+                        )
+                    if st.button(
+                        "Use this address",
+                        key=f"{results_key}_use_{result_index}",
+                        width="stretch",
+                    ):
+                        _use_journalist_email(
+                            person,
+                            record["draft_key"] if record else None,
+                            email_value,
+                        )
+                        data = dict(get_journalist_contact_data(person) or {})
+                        contact_candidates = list(data.get("candidates") or [])
+                        contact_candidates.append(
+                            {
+                                "email": email_value,
+                                "source_url": linkedin_url,
+                                "source_name": "ContactOut",
+                                "evidence": (
+                                    f"{result.get('name') or ''} · "
+                                    f"{result.get('title') or ''}"
+                                ).strip(" ·"),
+                                "confidence": "Medium",
+                            }
+                        )
+                        data["candidates"] = contact_candidates
+                        data["selected_email"] = email_value
+                        data["recommended_contact_route"] = "ContactOut work email"
+                        save_journalist_contact_data(person, data)
+                        st.rerun()
+            if not contactout_results:
+                st.caption(
+                    "No ContactOut results yet. Search to look up a work email."
+                )
+
+        if st.button(
+            "Search again" if saved else "Find public email",
+            key=f"{key_prefix}_email_search_{suffix}",
+            width="stretch",
+        ):
+            try:
+                with st.spinner(
+                    "Checking public pages for a published address. This can take a minute..."
+                ):
+                    result = research_journalist_email(person, opportunity)
+                payload = result.model_dump(mode="json")
+                payload["checked_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                payload["selected_email"] = selected
+                save_journalist_contact_data(person, payload)
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Email research failed: {exc}")
+
+
+def _create_journalist_draft(opportunity, person, opportunity_row):
+    """Create one pitch draft and prefill any address the human already chose."""
+    draft_key = upsert_outreach_draft(
+        draft_journalist_pitch(
+            opportunity,
+            person,
+            angle_context=opportunity_row.get("selected_angle", ""),
+            sender_name=st.session_state.sender_name,
+            sender_role=st.session_state.sender_role,
+        ),
+        "journalist_pitch",
+        target_url=opportunity.article_url,
+        related_url=person.relevant_article_url,
+        draft_status="Draft",
+    )
+    chosen_email = _selected_journalist_email(person)
+    if chosen_email:
+        fresh = get_outreach_draft(
+            "journalist_pitch", opportunity.article_url, person.name
+        )
+        if fresh and not (fresh.get("recipient_email") or "").strip():
+            update_outreach_draft(
+                fresh["draft_key"],
+                fresh.get("subject", ""),
+                fresh.get("body", ""),
+                fresh.get("draft_status", "Draft"),
+                recipient_email=chosen_email,
+            )
+    return draft_key
+
+
+def _linked_contact(opportunity):
+    """Return the saved contact for this opportunity, preferring one with a draft."""
+    matches = []
+    for row in list_journalists():
+        if (row.get("related_opportunity_url") or "").strip() != (
+            opportunity.article_url or ""
+        ).strip():
+            continue
+        try:
+            person = JournalistProfile.model_validate(row.get("payload") or {})
+        except Exception:
+            continue
+        matches.append(person)
+    for person in matches:
+        if get_outreach_draft(
+            "journalist_pitch", opportunity.article_url, person.name
+        ):
+            return person
+    return matches[0] if matches else None
+
+
+def _auto_prepare_pitch(opportunity):
+    """Find a content/SEO contact and write the pitch in one step."""
+    contact = find_opportunity_contact(opportunity)
+    name = (contact.contact_name or "").strip()
+    if not name or name.lower() in {"not found", "unknown", "n/a"}:
+        name = f"{opportunity.publication} content team"
+
+    person = JournalistProfile(
+        name=name,
+        publication=opportunity.publication,
+        current_role=(contact.role or "").strip() or "Content contact",
+        relevant_article_title=opportunity.article_title,
+        relevant_article_url=opportunity.article_url,
+        article_date=opportunity.published_date,
+        topic_covered=opportunity.topic,
+        why_relevant=opportunity.why_relevant,
+        suggested_pitch_angle=contact.route or "Relevant content contribution",
+        author_profile_or_contact_page=(
+            contact.contact_page_url or contact.source_url or ""
+        ),
+        evidence=contact.evidence or "",
+        confidence=contact.confidence or "Medium",
+    )
+    upsert_journalist(
+        person,
+        related_opportunity_url=opportunity.article_url,
+        qualification_status="Qualified pitch target",
+    )
+
+    email_value = (contact.email or "").strip()
+    email_source = contact.route or "Published page"
+    email_source_url = contact.source_url or ""
+    email_evidence = contact.evidence or ""
+    email_confidence = contact.confidence or "Medium"
+    if not email_sender.is_valid_email(email_value):
+        contactout_config = contact_providers.load_config()
+        if contactout_config.api_token:
+            try:
+                domain = urlsplit(opportunity.article_url or "").netloc
+                people = contact_providers.search_people(
+                    domain,
+                    None,
+                    name=name,
+                    limit=3,
+                )
+                normalized = name.strip().lower()
+                match = next(
+                    (
+                        person_result
+                        for person_result in people
+                        if email_sender.is_valid_email(
+                            (person_result.get("email") or "").strip()
+                        )
+                        and (person_result.get("name") or "").strip().lower()
+                        == normalized
+                    ),
+                    None,
+                )
+                if match:
+                    email_value = (match.get("email") or "").strip()
+                    email_source = "ContactOut"
+                    email_source_url = (
+                        match.get("linkedin_url") or ""
+                    ).strip()
+                    email_evidence = (
+                        f"ContactOut work email for "
+                        f"{match.get('name') or name}."
+                    )
+                    email_confidence = "Medium"
+            except Exception:
+                email_value = ""
+    if not email_sender.is_valid_email(email_value):
+        domain = urlsplit(opportunity.article_url or "").netloc
+        normalized = name.strip().lower()
+        book_match = next(
+            (
+                match
+                for match in find_contact_book(domain, name)
+                if email_sender.is_valid_email(
+                    (match.get("email") or "").strip()
+                )
+                and (match.get("name") or "").strip().lower() == normalized
+            ),
+            None,
+        )
+        if book_match:
+            email_value = (book_match.get("email") or "").strip()
+            email_source = "Contact book"
+            email_source_url = ""
+            email_evidence = (
+                f"Imported contact book match for "
+                f"{book_match.get('name') or name}."
+            )
+            email_confidence = "Medium"
+    if not email_sender.is_valid_email(email_value):
+        hunter_config = contact_providers.load_hunter_config()
+        if hunter_config.api_key:
+            try:
+                domain = urlsplit(opportunity.article_url or "").netloc
+                people = contact_providers.search_hunter(
+                    domain, name=name, limit=3
+                )
+                normalized = name.strip().lower()
+                match = next(
+                    (
+                        person_result
+                        for person_result in people
+                        if email_sender.is_valid_email(
+                            (person_result.get("email") or "").strip()
+                        )
+                        and (person_result.get("name") or "").strip().lower()
+                        == normalized
+                    ),
+                    None,
+                )
+                if match:
+                    email_value = (match.get("email") or "").strip()
+                    email_source = "Hunter"
+                    email_source_url = (
+                        match.get("linkedin_url") or ""
+                    ).strip()
+                    email_evidence = (
+                        f"Hunter work email for "
+                        f"{match.get('name') or name}."
+                    )
+                    email_confidence = "Medium"
+            except Exception:
+                email_value = ""
+    if email_sender.is_valid_email(email_value):
+        save_journalist_contact_data(
+            person,
+            {
+                "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "research_summary": (
+                    email_evidence
+                    or f"Contact found via {email_source}."
+                ),
+                "recommended_contact_route": email_source,
+                "candidates": [
+                    {
+                        "email": email_value,
+                        "source_url": email_source_url,
+                        "source_name": email_source,
+                        "evidence": email_evidence,
+                        "confidence": email_confidence,
+                    }
+                ],
+                "selected_email": email_value,
+            },
+        )
+
+    opportunity_row = get_pr_opportunity(opportunity.article_url) or {}
+    _create_journalist_draft(opportunity, person, opportunity_row)
+    return person, contact, email_value
+
+
+def _render_pr_auto_outreach(approved):
+    """One-click contact finding and pitch writing for approved articles."""
+    st.markdown("### Other contacts (content, SEO, link building)")
+    st.caption(
+        "One click finds the bylined writer, content manager, SEO lead, or "
+        "link-building contact, then writes the pitch. Only published emails "
+        "are used; nothing is guessed."
+    )
+
+    def has_draft(opportunity) -> bool:
+        person = _linked_contact(opportunity)
+        return bool(
+            person
+            and get_outreach_draft(
+                "journalist_pitch", opportunity.article_url, person.name
+            )
+        )
+
+    pending = [opportunity for opportunity in approved if not has_draft(opportunity)]
+    auto_notice = st.session_state.pop("pr_auto_notice", None)
+    if auto_notice:
+        st.success(auto_notice)
+    if st.button(
+        f"Find contacts and prepare all ({len(pending)})",
+        key="auto_outreach_all",
+        type="primary",
+        width="stretch",
+        disabled=not pending,
+    ):
+        prepared = 0
+        failures = []
+        with st.spinner(
+            "Finding contacts and writing pitches. This can take a minute per "
+            "article..."
+        ):
+            for opportunity in pending:
+                try:
+                    _auto_prepare_pitch(opportunity)
+                    prepared += 1
+                except Exception as exc:
+                    failures.append(f"{opportunity.publication}: {exc}")
+        message = (
+            f"Prepared {prepared} pitch{'es' if prepared != 1 else ''}. "
+            "Review them in Outreach."
+        )
+        if failures:
+            message += (
+                f" {len(failures)} could not be prepared: "
+                + "; ".join(failures[:2])
+            )
+        st.session_state["pr_auto_notice"] = message
+        st.rerun()
+
+    for index, opportunity in enumerate(approved):
+        person = _linked_contact(opportunity)
+        record = (
+            get_outreach_draft(
+                "journalist_pitch", opportunity.article_url, person.name
+            )
+            if person
+            else None
+        )
+        with st.container(border=True):
+            st.markdown(f"#### {opportunity.publication}")
+            st.caption(opportunity.article_title)
+            if person:
+                st.write(f"**Contact:** {person.name} · {person.current_role}")
+                email_value = _selected_journalist_email(person)
+                if email_value:
+                    st.caption(f"Email: {email_value}")
+                else:
+                    st.caption("No published email yet. Open the contact page or check it in Outreach.")
+                contact_page = (
+                    person.author_profile_or_contact_page or ""
+                ).strip()
+                if contact_page.startswith("https://"):
+                    st.link_button(
+                        "Open contact page",
+                        contact_page,
+                        key=f"auto_contact_{index}",
+                    )
+            if record:
+                st.success("Pitch ready. Review it in Outreach.")
+                if st.button(
+                    "Open in Outreach",
+                    key=f"auto_open_{index}",
+                    type="primary",
+                    width="stretch",
+                ):
+                    go(pr_step="Outreach")
+            else:
+                if st.button(
+                    "Find content/SEO contact & write pitch",
+                    key=f"auto_prepare_{index}",
+                    type="primary",
+                    width="stretch",
+                ):
+                    try:
+                        with st.spinner(
+                            "Finding the contact and writing the pitch..."
+                        ):
+                            _auto_prepare_pitch(opportunity)
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Contact lookup failed: {exc}")
+
+
+FOLLOW_UP_DAYS = 4
+
+
+def _followups_due() -> list[dict]:
+    """Sent pitches old enough for one follow-up, with no reply or follow-up."""
+    drafts = list_outreach_drafts()
+    done = {
+        ((row.get("target_url") or ""), (row.get("recipient_name") or "").lower())
+        for row in drafts
+        if row.get("draft_type") == "journalist_followup"
+    }
+    closed = {
+        "Replied",
+        "Declined",
+        "Placement confirmed",
+        "Do not send",
+        "Sent manually",
+    }
+    due = []
+    for row in drafts:
+        if row.get("draft_type") != "journalist_pitch" or not row.get("sent_at"):
+            continue
+        if row.get("draft_status") in closed:
+            continue
+        key = ((row.get("target_url") or ""), (row.get("recipient_name") or "").lower())
+        if key in done:
+            continue
+        try:
+            sent = datetime.fromisoformat(row["sent_at"])
+            if sent.tzinfo is None:
+                sent = sent.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        if (datetime.now(timezone.utc) - sent).days >= FOLLOW_UP_DAYS:
+            due.append(row)
+    return due
+
+
+def _create_followups(due: list[dict]) -> int:
+    """Create one short follow-up draft for each due pitch."""
+    created = 0
+    for row in due:
+        recipient = (row.get("recipient_name") or "there").strip()
+        first_name = recipient.split()[0] if recipient else "there"
+        subject = (row.get("subject") or "Quick follow-up").strip()
+        if not subject.lower().startswith("re:"):
+            subject = f"Re: {subject}"
+        body = (
+            f"Hi {first_name},\n\n"
+            "Just following up on my note below. I can share the data and "
+            "commentary if it is useful for your coverage.\n\n"
+            "If this is not the right person, could you point me to whoever "
+            "handles content or SEO?\n\n"
+            "Best,\n"
+            f"{row.get('sender_name') or HARDCODED_SENDER_NAME}\n"
+            f"{row.get('sender_role') or HARDCODED_SENDER_ROLE}"
+        )
+        upsert_outreach_draft(
+            SimpleNamespace(
+                recipient_name=row.get("recipient_name") or "",
+                publication=row.get("publication") or "",
+                subject_line=subject,
+                message_body=body,
+                target_url=row.get("target_url") or "",
+                channel="email",
+                confidence="High",
+                personalization_evidence="Follow-up to an earlier sent pitch.",
+                asset_used="",
+                call_to_action="One low-pressure follow-up.",
+                facts_to_verify=[],
+                compliance_notes="Follow-up only; no new claims.",
+            ),
+            "journalist_followup",
+            target_url=row.get("target_url") or "",
+            related_url=row.get("related_url") or "",
+            draft_status="Draft",
+            recipient_email=row.get("recipient_email") or "",
+        )
+        created += 1
+    return created
+
+
+def _render_pr_outreach():
+    st.caption(
+        "Review each draft, add a verified public email, then approve it. "
+        "Nothing sends until you confirm a batch."
     )
 
     with st.expander("Your sender details (used in drafts)"):
@@ -2112,7 +3305,34 @@ def _render_pr_outreach():
             "Hardcoded for this workspace. SMTP credentials stay in your local data folder."
         )
 
-    _render_email_batch_panel("pr_outreach", {"journalist_pitch"})
+    _render_email_batch_panel(
+        "pr_outreach", {"journalist_pitch", "journalist_followup"}
+    )
+
+    due = _followups_due()
+    if due:
+        st.info(
+            f"{len(due)} sent pitch{'es' if len(due) != 1 else ''} "
+            f"{'are' if len(due) != 1 else 'is'} due for a follow-up "
+            f"({FOLLOW_UP_DAYS}+ days, no reply)."
+        )
+        if st.button(
+            f"Create follow-up drafts ({len(due)})",
+            key="pr_create_followups",
+            width="stretch",
+        ):
+            try:
+                created = _create_followups(due)
+                st.session_state["pr_followup_notice"] = (
+                    f"Created {created} follow-up draft"
+                    f"{'s' if created != 1 else ''}. Review and approve them below."
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Follow-ups could not be created: {exc}")
+    followup_notice = st.session_state.pop("pr_followup_notice", None)
+    if followup_notice:
+        st.success(followup_notice)
 
     targets = _qualified_journalist_targets()
     if not targets:
@@ -2120,6 +3340,70 @@ def _render_pr_outreach():
         if st.button("Go to journalists"):
             go(pr_step="Journalists")
         return
+
+    def prepare_missing() -> int:
+        created = 0
+        for opportunity, person, opportunity_row in targets:
+            if get_outreach_draft(
+                "journalist_pitch", opportunity.article_url, person.name
+            ):
+                continue
+            _create_journalist_draft(opportunity, person, opportunity_row)
+            created += 1
+        return created
+
+    missing_count = sum(
+        1
+        for opportunity, person, _ in targets
+        if get_outreach_draft("journalist_pitch", opportunity.article_url, person.name)
+        is None
+    )
+
+    unchecked = [
+        (opportunity, person, row)
+        for opportunity, person, row in targets
+        if not (get_journalist_contact_data(person) or {}).get("candidates")
+        and not _selected_journalist_email(person)
+    ]
+    st.markdown("### Contacts")
+    st.caption(
+        "Find a published email for every writer who still needs one. Only "
+        "public pages are used; addresses are never guessed."
+    )
+    contacts_notice = st.session_state.pop("pr_contacts_notice", None)
+    if contacts_notice:
+        st.success(contacts_notice)
+    if st.button(
+        f"Find contacts for all ({len(unchecked)})",
+        key="pr_find_contacts_all",
+        width="stretch",
+        disabled=not unchecked,
+    ):
+        try:
+            with st.spinner(
+                "Checking public pages for each writer. This can take a minute "
+                "per person..."
+            ):
+                counts = _find_contacts_for_all(unchecked)
+            message = (
+                f"Selected {counts['selected']} verified email"
+                f"{'s' if counts['selected'] != 1 else ''}. "
+                f"{counts['review']} need your choice. "
+                f"{counts['none']} had no published email."
+            )
+            if counts["skipped"]:
+                message += f" {counts['skipped']} already checked."
+            st.session_state["pr_contacts_notice"] = message
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Contact lookup failed: {exc}")
+
+    _render_bulk_outreach_actions(
+        "pr_outreach_bulk",
+        {"journalist_pitch", "journalist_followup"},
+        missing_count,
+        prepare_missing,
+    )
 
     for index, (opportunity, person, opportunity_row) in enumerate(targets):
         with st.container(border=True):
@@ -2129,27 +3413,28 @@ def _render_pr_outreach():
             st.markdown(f"**Why this writer:** {person.why_relevant}")
 
             record = get_outreach_draft("journalist_pitch", opportunity.article_url, person.name)
+            _render_journalist_email_finder(
+                person, opportunity, record, f"journalist_email_{index}"
+            )
+
             if record is None:
                 _render_no_draft(
                     "Pitch",
                     "Prepare personalized pitch",
                     f"prepare_pitch_{index}",
-                    lambda o=opportunity, p=person, r=opportunity_row: upsert_outreach_draft(
-                        draft_journalist_pitch(
-                            o,
-                            p,
-                            angle_context=r.get("selected_angle", ""),
-                            sender_name=st.session_state.sender_name,
-                            sender_role=st.session_state.sender_role,
-                        ),
-                        "journalist_pitch",
-                        target_url=o.article_url,
-                        related_url=p.relevant_article_url,
-                        draft_status="Draft",
+                    lambda o=opportunity, p=person, r=opportunity_row: _create_journalist_draft(
+                        o, p, r
                     ),
                 )
             else:
                 _render_draft_editor(record, f"journalist_draft_{index}")
+
+            followup = get_outreach_draft(
+                "journalist_followup", opportunity.article_url, person.name
+            )
+            if followup:
+                st.markdown("**Follow-up**")
+                _render_draft_editor(followup, f"journalist_followup_{index}")
 
     st.divider()
     st.caption(
@@ -2160,17 +3445,39 @@ def _render_pr_outreach():
 
 
 def _render_digital_pr():
-    step = _step_control(PR_STEPS, "pr_step")
-    if step == "Article":
-        _render_pr_article()
-    elif step == "PR angles":
-        _render_pr_angles()
-    elif step == "Opportunities":
+    step = st.session_state.pr_step
+    phase = PR_STEP_PHASE.get(step, "Research")
+    _phase_control(PR_PHASES, "pr_phase_widget", phase, _pr_phase_changed)
+
+    if phase == "Research":
+        if st.session_state.analysis:
+            _render_pr_angles()
+            with st.expander("Analyze another article"):
+                _render_pr_article()
+        else:
+            _render_pr_article()
+        return
+
+    if phase == "Contacts":
         _render_pr_opportunities()
-    elif step == "Journalists":
-        _render_pr_journalists()
-    else:
-        _render_pr_outreach()
+        results = st.session_state.opportunity_results
+        reviews = st.session_state.opportunity_reviews
+        run_id = st.session_state.research_run_id
+        approved_opportunities = []
+        if results:
+            approved_opportunities = [
+                opportunity
+                for index, opportunity in enumerate(results.opportunities)
+                if reviews.get(f"{run_id}:{index}")
+                == "Approve for journalist research"
+            ]
+        if approved_opportunities:
+            st.markdown("### Find writers (journalists)")
+            _render_pr_journalists()
+            _render_pr_auto_outreach(approved_opportunities)
+        return
+
+    _render_pr_outreach()
 
 
 # =========================================================
@@ -2635,14 +3942,8 @@ def _listicle_outreach_targets():
 
 def _render_listicle_outreach():
     st.caption(
-        "Write and review a request for an approved prospect. Approved drafts can "
-        "be sent in a batch from this page."
-    )
-
-    st.info(
-        "Only approved prospects with saved contact research appear here. Verify the "
-        "route, add the recipient's public email, and confirm the batch before anything "
-        "is sent."
+        "Review each request, add a verified public email, then approve it. "
+        "Nothing sends until you confirm a batch."
     )
 
     with st.expander("Your sender details (used in drafts)"):
@@ -2659,6 +3960,60 @@ def _render_listicle_outreach():
         if st.button("Go to prospects"):
             go(listicle_step="Prospects")
         return
+
+    actionable = []
+    for item, contacts, policy, _row in targets:
+        blocked = bool(
+            policy
+            and policy.recommended_disposition in {"Do not pursue", "Already listed"}
+        )
+        if blocked:
+            continue
+        for contact in contacts.contacts:
+            actionable.append((item, contact, policy))
+
+    def prepare_missing() -> int:
+        created = 0
+        for item, contact, policy in actionable:
+            if get_outreach_draft(
+                "listicle_request", item.listicle_url, contact.contact_name
+            ):
+                continue
+            upsert_outreach_draft(
+                draft_listicle_inclusion_request(
+                    item,
+                    contact,
+                    policy,
+                    sender_name=st.session_state.sender_name,
+                    sender_role=st.session_state.sender_role,
+                ),
+                "listicle_request",
+                target_url=item.listicle_url,
+                related_url=(policy.policy_source_url if policy else ""),
+                draft_status="Draft",
+                recipient_email=(
+                    contact.professional_email
+                    if email_sender.is_valid_email(contact.professional_email)
+                    else ""
+                ),
+            )
+            created += 1
+        return created
+
+    missing_count = sum(
+        1
+        for item, contact, _policy in actionable
+        if get_outreach_draft(
+            "listicle_request", item.listicle_url, contact.contact_name
+        )
+        is None
+    )
+    _render_bulk_outreach_actions(
+        "listicle_outreach_bulk",
+        {"listicle_request"},
+        missing_count,
+        prepare_missing,
+    )
 
     for target_index, (item, contacts, policy, row) in enumerate(targets):
         with st.container(border=True):
@@ -2731,13 +4086,23 @@ def _render_listicle_outreach():
 
 
 def _render_listicles():
-    step = _step_control(LISTICLE_STEPS, "listicle_step")
-    if step == "Search":
-        _render_listicle_search()
-    elif step == "Prospects":
-        _render_listicle_prospects()
-    else:
-        _render_listicle_outreach()
+    phase = LISTICLE_STEP_PHASE.get(
+        st.session_state.listicle_step, "Find & review"
+    )
+    _phase_control(
+        LISTICLE_PHASES, "listicle_phase_widget", phase, _listicle_phase_changed
+    )
+
+    if phase == "Find & review":
+        if st.session_state.listicle_results is None:
+            _render_listicle_search()
+        else:
+            _render_listicle_prospects()
+            with st.expander("Start a new search"):
+                _render_listicle_search()
+        return
+
+    _render_listicle_outreach()
 
 
 # =========================================================
@@ -2749,8 +4114,8 @@ def _render_workspace():
     if mode is None:
         _page_header(
             "Workspace",
-            "Research, review, prepare.",
-            f"Digital PR and listicle prospecting for {BRAND_NAME}. You approve every decision and every send.",
+            "Start a campaign.",
+            f"One clear path from research to send. {BRAND_NAME} research stays local, and you approve every decision and every send.",
         )
         _render_workspace_metrics()
         st.subheader("What are you working on?")
@@ -2760,8 +4125,8 @@ def _render_workspace():
 
         with st.container(border=True, key="workflow-pr"):
             st.markdown("### Digital PR")
-            st.caption("Article → PR angles → Opportunities → Journalists → Outreach")
-            st.write("Turn a published article into PR angles, editorial opportunities, and journalist research.")
+            st.caption("Article → contacts → drafts & send")
+            st.write("Turn a published article into a verified angle, editorial openings, and writer research.")
             st.caption("Best for: expert commentary, data stories, and media coverage.")
             if opportunity_count:
                 st.caption(
@@ -2774,14 +4139,14 @@ def _render_workspace():
                         go(mode="digital_pr", pr_step="Opportunities")
                 with action2:
                     if st.button("Start new Digital PR", width="stretch"):
-                        go(mode="digital_pr", pr_step="Article")
+                        _start_new_pr()
             else:
                 if st.button("Start Digital PR →", type="primary", width="stretch"):
-                    go(mode="digital_pr", pr_step="Article")
+                    _start_new_pr()
 
         with st.container(border=True, key="workflow-listicles"):
             st.markdown("### Listicle inclusion")
-            st.caption("Search → Prospects → Outreach")
+            st.caption("Search → prospects → outreach")
             st.write("Find roundups, alternatives pages, comparisons, and directories where the product may fit.")
             st.caption("Best for: software listings, roundups, and directory inclusion.")
             if listicle_count:
@@ -2792,20 +4157,33 @@ def _render_workspace():
                         go(mode="listicles", listicle_step="Prospects")
                 with action2:
                     if st.button("Start new listicle search", width="stretch"):
-                        go(mode="listicles", listicle_step="Search")
+                        _start_new_listicle()
             else:
                 if st.button("Start listicle research →", type="primary", width="stretch"):
-                    go(mode="listicles", listicle_step="Search")
+                    _start_new_listicle()
         return
 
+    if mode == "digital_pr":
+        phases = PR_PHASES
+        phase = PR_STEP_PHASE.get(st.session_state.pr_step, "Research")
+        label = "Digital PR"
+        copy = PR_PHASE_COPY
+    else:
+        phases = LISTICLE_PHASES
+        phase = LISTICLE_STEP_PHASE.get(
+            st.session_state.listicle_step, "Find & review"
+        )
+        label = "Listicle inclusion"
+        copy = LISTICLE_PHASE_COPY
+
     header_col, action_col = st.columns(
-        [5, 1.8], gap="small", vertical_alignment="center"
+        [6, 1.7], gap="small", vertical_alignment="top"
     )
     with header_col:
-        label = "Digital PR" if mode == "digital_pr" else "Listicle inclusion"
-        _page_header("Workspace", label, "You approve every decision and every send.")
+        title, subtitle = copy[phase]
+        _render_workflow_header(label, phase, phases, title, subtitle)
     with action_col:
-        if st.button("Switch workflow", key="switch-workflow", width="content"):
+        if st.button("← Back to start", key="switch-workflow", width="stretch"):
             st.session_state.workflow_mode = None
             st.rerun()
 
@@ -3059,7 +4437,11 @@ def _render_library():
 # =========================================================
 
 def _brand_config_path() -> Path:
-    return Path(__file__).resolve().parent / "data" / "brand_config.json"
+    data_dir = Path(
+        os.environ.get("PR_AGENT_DATA_DIR")
+        or Path(__file__).resolve().parent / "data"
+    )
+    return data_dir / "brand_config.json"
 
 
 def _render_settings():
@@ -3162,7 +4544,12 @@ def _render_settings():
 
     email_config = email_sender.load_email_config()
     AUTH_APP_PASSWORD_LABEL = "Google app password"
-    AUTH_OAUTH_LABEL = "Google Workspace sign-in (OAuth)"
+    AUTH_OAUTH_LABEL = "Sign in with Google (OAuth)"
+    if (
+        st.session_state.get("email_auth_mode_label")
+        == "Google Workspace sign-in (OAuth)"
+    ):
+        st.session_state["email_auth_mode_label"] = AUTH_OAUTH_LABEL
     AUTH_SMTP_LABEL = "Custom SMTP / designated email"
 
     def _save_email_auth_method() -> None:
@@ -3206,13 +4593,14 @@ def _render_settings():
     st.caption(f"Local config file: {email_sender.CONFIG_PATH}")
 
     if selected_mode == "oauth":
+        oauth_accounts = email_sender.ensure_oauth_accounts(email_config)
         if email_sender.is_oauth_connected(email_config):
             st.success(
                 f"Connected as {email_config.from_email}. Batch sending will use "
-                "this Google Workspace account."
+                "the active Google account."
             )
             st.caption(
-                "Run Test Google sign-in once to confirm that Google accepts the "
+                "Run Test active account once to confirm that Google accepts the "
                 "SMTP connection for this account."
             )
         elif email_config.oauth_refresh_token:
@@ -3232,14 +4620,15 @@ def _render_settings():
         ):
             st.markdown(
                 """
-1. Open [Google Cloud Console](https://console.cloud.google.com/) and create or select a project in your Google Workspace organization.
-2. Open **APIs & Services → OAuth consent screen**. Choose **Internal** for a Workspace account. If you cannot use Internal, choose **External** and add your work email as a test user.
+1. Open [Google Cloud Console](https://console.cloud.google.com/) and create or select a project.
+2. Open **APIs & Services → OAuth consent screen**. Choose **External** and add each Google account you want to send from as a **test user** (up to 100).
 3. Add these scopes: `openid`, `email`, `https://mail.google.com/`.
 4. Open **Credentials → Create credentials → OAuth client ID → Web application**.
-5. Add this authorized redirect URI exactly: `http://localhost:8501/`
-6. Copy the client ID and client secret below, save, then click **Connect Google Workspace account**.
+5. Add the redirect URI shown below (local: `http://localhost:8501/`, hosted: `https://pr.prachiadmane.com/`).
+6. Copy the client ID and client secret below, save, then use **Connect another Google account** once per account.
+7. Pick the **Active sending account** above. Batch sending uses that account.
 
-A Workspace admin may need to allow this OAuth app and the Gmail scope. Instantly and ContactOut use their own registered OAuth apps; this local app needs its own client.
+Testing mode works for a few personal accounts, but Google expires refresh tokens every 7 days. To avoid reconnecting weekly, publish the OAuth consent screen (unverified apps show a warning but keep tokens). A Workspace admin may also need to allow the app and the Gmail scope.
 """
             )
 
@@ -3329,10 +4718,10 @@ A Workspace admin may need to allow this OAuth app and the Gmail scope. Instantl
                 elif not refresh_token:
                     notice = (
                         "OAuth client settings saved. Now connect your Google "
-                        "Workspace account below."
+                        "accounts below."
                     )
                 else:
-                    notice = "OAuth settings saved. Google Workspace sign-in is ready."
+                    notice = "OAuth settings saved. Google sign-in is ready."
                 st.session_state["_email_settings_notice"] = ("success", notice)
                 st.rerun()
 
@@ -3348,31 +4737,52 @@ A Workspace admin may need to allow this OAuth app and the Gmail scope. Instantl
             )
             st.code(email_config.oauth_redirect_uri, language="text")
             connected = email_sender.is_oauth_connected(email_config)
-            if connected:
-                test_col, disconnect_col = st.columns(2)
+            oauth_accounts = email_sender.ensure_oauth_accounts(email_config)
+            if oauth_accounts["accounts"]:
+                names = [
+                    account["email"] for account in oauth_accounts["accounts"]
+                ]
+                active = oauth_accounts.get("active") or names[0]
+                st.markdown("**Connected Google accounts**")
+                chosen = st.radio(
+                    "Active sending account",
+                    names,
+                    index=names.index(active) if active in names else 0,
+                    key="active_oauth_account",
+                    help="Batch sending uses this account. Add more below.",
+                )
+                if chosen != active:
+                    email_sender.set_active_oauth_account(chosen)
+                    st.rerun()
+                test_col, remove_col = st.columns(2)
                 if test_col.button(
-                    "Test Google sign-in",
+                    "Test active account",
                     key="oauth_test_connection",
                     width="stretch",
                 ):
-                    connected_ok, message = email_sender.test_connection(email_config)
+                    connected_ok, message = email_sender.test_connection(
+                        email_sender.load_email_config()
+                    )
                     if connected_ok:
                         st.success(message)
                     else:
                         st.error(message)
-                if disconnect_col.button(
-                    "Disconnect Google account",
+                if remove_col.button(
+                    f"Remove {active}",
                     key="oauth_disconnect",
                     width="stretch",
                 ):
-                    email_sender.disconnect_oauth(email_config)
+                    email_sender.remove_oauth_account(
+                        active, email_sender.load_email_config()
+                    )
                     st.session_state["_email_settings_notice"] = (
                         "warning",
-                        "Disconnected the local Google Workspace sign-in. The "
-                        "OAuth client details were kept. To revoke the app at "
+                        "Removed this Google account locally. To revoke the app at "
                         "Google, remove it from your Google Account permissions.",
                     )
                     st.rerun()
+            else:
+                st.caption("No Google accounts connected yet.")
             try:
                 oauth_state = email_sender.create_oauth_state()
                 oauth_url = email_sender.build_oauth_url(email_config, oauth_state)
@@ -3380,9 +4790,9 @@ A Workspace admin may need to allow this OAuth app and the Gmail scope. Instantl
                 st.error(str(exc))
             else:
                 oauth_label = (
-                    "Reconnect Google Workspace account"
-                    if connected
-                    else "Connect Google Workspace account"
+                    "Connect another Google account"
+                    if oauth_accounts["accounts"]
+                    else "Connect Google account"
                 )
                 st.markdown(
                     f'<a href="{html.escape(oauth_url, quote=True)}" target="_self" '
@@ -3622,6 +5032,9 @@ A Workspace admin may need to allow this OAuth app and the Gmail scope. Instantl
             test_email = st.form_submit_button(
                 "Test SMTP connection", width="stretch"
             )
+            test_send = st.form_submit_button(
+                "Send a test email to myself", width="stretch"
+            )
 
             if save_email or test_email:
                 password = (app_password or "").strip().replace(" ", "")
@@ -3669,6 +5082,29 @@ A Workspace admin may need to allow this OAuth app and the Gmail scope. Instantl
                         st.success(message)
                     else:
                         st.error(message)
+                if test_send:
+                    connected, message = email_sender.test_connection(candidate)
+                    if not connected:
+                        st.error(message)
+                    else:
+                        test_result = email_sender.send_email(
+                            candidate,
+                            candidate.from_email,
+                            "Test from your Digital PR Agent",
+                            (
+                                "This is a test from your Digital PR Agent.\n\n"
+                                "If you received it, the SMTP connection, sender "
+                                "identity, and opt-out footer all work.\n\n"
+                                f"Sent at {datetime.now():%Y-%m-%d %H:%M}."
+                            ),
+                        )
+                        if test_result.success:
+                            st.success(
+                                f"Test email sent to {candidate.from_email}. "
+                                "Check that inbox."
+                            )
+                        else:
+                            st.error(f"Test email failed: {test_result.error}")
 
     st.caption(
         f"From name: {email_sender.DEFAULT_FROM_NAME} (fixed). Every email also gets "
@@ -3732,6 +5168,238 @@ A Workspace admin may need to allow this OAuth app and the Gmail scope. Instantl
                     st.rerun()
     else:
         st.caption("No addresses are on the do-not-send list.")
+
+    st.divider()
+    st.subheader("ContactOut (optional paid lookup)")
+    contactout_config = contact_providers.load_config()
+    st.caption(
+        "Add a ContactOut API token to look up work emails for content, SEO, and "
+        "link-building contacts. The token stays in your local data folder. Each "
+        "search consumes ContactOut credits. Sample keys return demo data only; "
+        "use a production key for live results."
+    )
+    if contactout_config.api_token:
+        st.success("ContactOut is configured. Lookups will use your credits.")
+    else:
+        st.caption("Not configured. The app still uses published public emails.")
+    with st.form("contactout_token_form", clear_on_submit=True):
+        contactout_token = st.text_input(
+            "ContactOut API token",
+            type="password",
+            placeholder="Paste a token to add or replace the saved one",
+        )
+        save_contactout = st.form_submit_button(
+            "Save ContactOut token", width="stretch"
+        )
+        if save_contactout:
+            value = (contactout_token or "").strip()
+            if not value:
+                st.error("Paste a ContactOut API token first.")
+            else:
+                contact_providers.save_config(
+                    contact_providers.ContactOutConfig(api_token=value)
+                )
+                st.success("ContactOut token saved locally.")
+                st.rerun()
+    if contactout_config.api_token and st.button(
+        "Remove ContactOut token", key="remove_contactout_token", width="stretch"
+    ):
+        contact_providers.save_config(contact_providers.ContactOutConfig())
+        st.success("ContactOut token removed.")
+        st.rerun()
+
+    if contactout_config.api_token:
+        st.markdown("**Test the connection**")
+        st.caption(
+            "Runs the same People Search the app uses. This consumes ContactOut credits."
+        )
+        test_domain = st.text_input(
+            "Publication domain",
+            placeholder="digiday.com",
+            key="contactout_test_domain",
+        )
+        if st.button(
+            "Test ContactOut lookup",
+            key="contactout_test_lookup",
+            width="stretch",
+        ):
+            value = (test_domain or "").strip()
+            if not value:
+                st.error("Enter a publication domain first.")
+            else:
+                try:
+                    with st.spinner("Searching ContactOut..."):
+                        test_results = contact_providers.search_people(
+                            value,
+                            contact_providers.CONTENT_TITLES,
+                            limit=5,
+                        )
+                    if not test_results:
+                        st.warning(
+                            "ContactOut returned no profiles for that domain and "
+                            "those titles. Try the bare domain or fewer titles."
+                        )
+                    else:
+                        st.success(
+                            f"ContactOut returned {len(test_results)} profile"
+                            f"{'s' if len(test_results) != 1 else ''}."
+                        )
+                        for result in test_results:
+                            st.write(
+                                f"**{result.get('name') or 'Unknown'}** · "
+                                f"{result.get('title') or 'Unknown'} · "
+                                f"{result.get('email') or 'No email returned'}"
+                            )
+                except Exception as exc:
+                    st.error(str(exc))
+
+    st.divider()
+    st.subheader("Hunter (optional)")
+    hunter_config = contact_providers.load_hunter_config()
+    st.caption(
+        "Hunter has a self-serve API with a free tier, useful as a cheaper "
+        "work-email fallback. The key stays in your local data folder."
+    )
+    if hunter_config.api_key:
+        st.success("Hunter is configured.")
+    else:
+        st.caption("Not configured. The app still uses published public emails.")
+    with st.form("hunter_key_form", clear_on_submit=True):
+        hunter_key = st.text_input(
+            "Hunter API key",
+            type="password",
+            placeholder="Paste a Hunter API key to add or replace the saved one",
+        )
+        save_hunter = st.form_submit_button("Save Hunter key", width="stretch")
+        if save_hunter:
+            value = (hunter_key or "").strip()
+            if not value:
+                st.error("Paste a Hunter API key first.")
+            else:
+                contact_providers.save_hunter_config(
+                    contact_providers.HunterConfig(api_key=value)
+                )
+                st.success("Hunter key saved locally.")
+                st.rerun()
+    if hunter_config.api_key and st.button(
+        "Remove Hunter key", key="remove_hunter_key", width="stretch"
+    ):
+        contact_providers.save_hunter_config(contact_providers.HunterConfig())
+        st.success("Hunter key removed.")
+        st.rerun()
+    if hunter_config.api_key:
+        hunter_test_domain = st.text_input(
+            "Hunter test domain",
+            placeholder="digiday.com",
+            key="hunter_test_domain",
+        )
+        if st.button(
+            "Test Hunter lookup",
+            key="hunter_test_lookup",
+            width="stretch",
+        ):
+            value = (hunter_test_domain or "").strip()
+            if not value:
+                st.error("Enter a publication domain first.")
+            else:
+                try:
+                    with st.spinner("Searching Hunter..."):
+                        hunter_results = contact_providers.search_hunter(
+                            value, limit=5
+                        )
+                    if not hunter_results:
+                        st.warning("Hunter returned no profiles for that domain.")
+                    else:
+                        st.success(
+                            f"Hunter returned {len(hunter_results)} profile"
+                            f"{'s' if len(hunter_results) != 1 else ''}."
+                        )
+                        for result in hunter_results:
+                            st.write(
+                                f"**{result.get('name') or 'Unknown'}** · "
+                                f"{result.get('title') or 'Unknown'} · "
+                                f"{result.get('email') or 'No email returned'}"
+                            )
+                except Exception as exc:
+                    st.error(str(exc))
+
+    st.divider()
+    st.subheader("Contact book (CSV import)")
+    st.caption(
+        "Import an export from ContactOut, Apollo, Hunter, or a spreadsheet. "
+        f"{count_contact_book()} contact(s) are saved locally. The app matches "
+        "them by publication domain or name."
+    )
+    uploaded_contacts = st.file_uploader(
+        "Contact CSV",
+        type=["csv"],
+        key="contact_book_csv",
+        help=(
+            "Columns: email (required), name, role, publication, domain, linkedin. "
+            "Header names are matched loosely."
+        ),
+    )
+    if uploaded_contacts is not None:
+        raw_bytes = uploaded_contacts.getvalue()
+        try:
+            csv_text = raw_bytes.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            csv_text = raw_bytes.decode("latin-1", errors="replace")
+        try:
+            reader = csv.DictReader(io.StringIO(csv_text))
+            headers = {
+                (name or "").strip().lower(): name
+                for name in (reader.fieldnames or [])
+            }
+
+            def pick(row, *aliases):
+                for alias in aliases:
+                    key = headers.get(alias)
+                    if key and (row.get(key) or "").strip():
+                        return (row.get(key) or "").strip()
+                return ""
+
+            imported_rows = []
+            for row in reader:
+                email_value = pick(
+                    row, "email", "e-mail", "mail", "work email", "work_email"
+                ).lower()
+                if not email_sender.is_valid_email(email_value):
+                    continue
+                domain_value = pick(row, "domain", "website", "company domain")
+                if not domain_value:
+                    domain_value = pick(row, "publication", "company", "site")
+                imported_rows.append(
+                    {
+                        "email": email_value,
+                        "name": pick(row, "name", "full name", "full_name", "contact"),
+                        "role": pick(row, "role", "title", "position", "job title"),
+                        "publication": pick(row, "publication", "company", "site"),
+                        "domain": domain_value,
+                        "linkedin": pick(
+                            row, "linkedin", "linkedin url", "linkedin_url"
+                        ),
+                        "source": "CSV import",
+                    }
+                )
+        except Exception as exc:
+            imported_rows = []
+            st.error(f"That CSV could not be read: {exc}")
+
+        if not imported_rows:
+            st.warning("No rows with a valid email column were found.")
+        else:
+            st.caption(f"{len(imported_rows)} valid contact row(s). Preview:")
+            st.dataframe(imported_rows[:5], width="stretch", hide_index=True)
+            if st.button(
+                "Import these contacts",
+                key="import_contact_book",
+                type="primary",
+                width="stretch",
+            ):
+                saved = upsert_contact_book(imported_rows)
+                st.success(f"Imported {saved} contact(s) into the local contact book.")
+                st.rerun()
 
     st.divider()
     st.subheader("Storage and safety")
@@ -3852,7 +5520,12 @@ def _snapshot_value(value):
     return str(value)
 
 
-save_app_snapshot({
+_snapshot = {
     key: _snapshot_value(st.session_state.get(key))
     for key in _PERSISTED_STATE_KEYS
-})
+}
+# Only write when something changed. This keeps ordinary reruns from doing a
+# full JSON write to SQLite on every click.
+if _snapshot != st.session_state.get("_last_saved_snapshot"):
+    save_app_snapshot(_snapshot)
+    st.session_state["_last_saved_snapshot"] = _snapshot

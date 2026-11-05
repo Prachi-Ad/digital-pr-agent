@@ -106,8 +106,15 @@ def _ensure_column(
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
+# Schema checks and migrations only need to run once per process and database.
+_INITIALIZED_DATABASES: set[str] = set()
+
+
 def init_db() -> None:
     """Create tables if needed; never overwrites an existing database."""
+    path = str(Path(DB_PATH))
+    if path in _INITIALIZED_DATABASES:
+        return
     with _connect() as conn:
         conn.executescript(
             """
@@ -154,7 +161,20 @@ def init_db() -> None:
                 related_opportunity_url TEXT,
                 qualification_status TEXT NOT NULL DEFAULT 'Needs review',
                 payload_json TEXT NOT NULL,
+                contact_json TEXT,
                 first_seen TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS contact_book (
+                email TEXT PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT '',
+                role TEXT NOT NULL DEFAULT '',
+                publication TEXT NOT NULL DEFAULT '',
+                domain TEXT NOT NULL DEFAULT '',
+                linkedin TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
 
@@ -208,7 +228,9 @@ def init_db() -> None:
             ("send_attempts", "INTEGER NOT NULL DEFAULT 0"),
         ):
             _ensure_column(conn, "outreach_drafts", column, definition)
+        _ensure_column(conn, "journalist_records", "contact_json", "TEXT")
         _migrate_journalist_keys(conn)
+    _INITIALIZED_DATABASES.add(path)
 
 
 def save_app_snapshot(snapshot: dict[str, Any]) -> None:
@@ -298,13 +320,14 @@ def _migrate_journalist_keys(conn: sqlite3.Connection) -> None:
                 """UPDATE journalist_records SET
                        name=?, publication=?, relevant_article_url=?,
                        related_opportunity_url=?, qualification_status=?,
-                       payload_json=?, first_seen=?, updated_at=?
+                       payload_json=?, contact_json=COALESCE(?, contact_json),
+                       first_seen=?, updated_at=?
                    WHERE record_key=?""",
                 (
                     row["name"], row["publication"], row["relevant_article_url"],
                     row["related_opportunity_url"], row["qualification_status"],
-                    row["payload_json"], row["first_seen"], row["updated_at"],
-                    new_key,
+                    row["payload_json"], row["contact_json"], row["first_seen"],
+                    row["updated_at"], new_key,
                 ),
             )
         conn.execute(
@@ -427,6 +450,7 @@ def _row_to_record(row: sqlite3.Row | None) -> dict[str, Any] | None:
         return None
     result = dict(row)
     result["payload"] = _load(result.pop("payload_json"), {})
+    result["contact_data"] = _load(result.pop("contact_json", None), None)
     return result
 
 
@@ -560,6 +584,124 @@ def list_journalists() -> list[dict[str, Any]]:
     with _connect() as conn:
         rows = conn.execute("SELECT * FROM journalist_records ORDER BY updated_at DESC, rowid DESC").fetchall()
     return [_row_to_record(row) for row in rows if row is not None]
+
+
+def _normalize_domain(value: str) -> str:
+    raw = (value or "").strip().lower()
+    if not raw:
+        return ""
+    if "://" in raw:
+        raw = urlsplit(raw).netloc
+    else:
+        raw = raw.split("/")[0]
+    return raw[4:] if raw.startswith("www.") else raw
+
+
+def upsert_contact_book(contacts: list[dict[str, Any]]) -> int:
+    """Import contacts from a CSV or provider. Duplicate emails update in place."""
+    init_db()
+    saved = 0
+    seen_emails: set[str] = set()
+    stamp = _now()
+    with _connect() as conn:
+        for row in contacts:
+            email = str(row.get("email") or "").strip().lower()
+            if "@" not in email:
+                continue
+            is_new = email not in seen_emails
+            seen_emails.add(email)
+            conn.execute(
+                """INSERT INTO contact_book(
+                       email, name, role, publication, domain, linkedin, source,
+                       created_at, updated_at
+                   ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(email) DO UPDATE SET
+                       name=CASE WHEN excluded.name <> '' THEN excluded.name ELSE contact_book.name END,
+                       role=CASE WHEN excluded.role <> '' THEN excluded.role ELSE contact_book.role END,
+                       publication=CASE WHEN excluded.publication <> '' THEN excluded.publication ELSE contact_book.publication END,
+                       domain=CASE WHEN excluded.domain <> '' THEN excluded.domain ELSE contact_book.domain END,
+                       linkedin=CASE WHEN excluded.linkedin <> '' THEN excluded.linkedin ELSE contact_book.linkedin END,
+                       source=CASE WHEN excluded.source <> '' THEN excluded.source ELSE contact_book.source END,
+                       updated_at=excluded.updated_at""",
+                (
+                    email,
+                    str(row.get("name") or "").strip(),
+                    str(row.get("role") or "").strip(),
+                    str(row.get("publication") or "").strip(),
+                    _normalize_domain(str(row.get("domain") or "")),
+                    str(row.get("linkedin") or "").strip(),
+                    str(row.get("source") or "CSV import").strip(),
+                    stamp,
+                    stamp,
+                ),
+            )
+            if is_new:
+                saved += 1
+    return saved
+
+
+def list_contact_book() -> list[dict[str, Any]]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM contact_book ORDER BY updated_at DESC, email"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def find_contact_book(domain: str = "", name: str = "") -> list[dict[str, Any]]:
+    """Return imported contacts matching a publication domain or person name."""
+    target_domain = _normalize_domain(domain)
+    target_name = (name or "").strip().lower()
+    matches = []
+    for row in list_contact_book():
+        row_domain = _normalize_domain(str(row.get("domain") or ""))
+        row_name = str(row.get("name") or "").strip().lower()
+        domain_hit = bool(target_domain and row_domain == target_domain)
+        name_hit = bool(target_name and row_name == target_name)
+        if not (domain_hit or name_hit):
+            continue
+        rank = 0 if (domain_hit and name_hit) else 1 if name_hit else 2
+        matches.append({**row, "_rank": rank})
+    matches.sort(key=lambda row: (row["_rank"], row.get("name") or ""))
+    return matches
+
+
+def count_contact_book() -> int:
+    init_db()
+    with _connect() as conn:
+        row = conn.execute("SELECT COUNT(*) AS total FROM contact_book").fetchone()
+    return int(row["total"]) if row else 0
+
+
+def get_journalist_contact_data(person: Any) -> dict[str, Any] | None:
+    """Load the saved public-contact research for one journalist."""
+    init_db()
+    name = getattr(person, "name", "") or "Unknown"
+    publication = getattr(person, "publication", "") or "Unknown"
+    article_url = getattr(person, "relevant_article_url", "") or ""
+    key = _journalist_record_key(name, publication, article_url)
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT contact_json FROM journalist_records WHERE record_key=?", (key,)
+        ).fetchone()
+    if row is None:
+        return None
+    return _load(row["contact_json"], None)
+
+
+def save_journalist_contact_data(person: Any, data: Any) -> None:
+    """Store public-contact research for one journalist without touching the rest."""
+    init_db()
+    name = getattr(person, "name", "") or "Unknown"
+    publication = getattr(person, "publication", "") or "Unknown"
+    article_url = getattr(person, "relevant_article_url", "") or ""
+    key = _journalist_record_key(name, publication, article_url)
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE journalist_records SET contact_json=?, updated_at=? WHERE record_key=?",
+            (_dump(data), _now(), key),
+        )
 
 
 def _draft_key(draft_type: str, target_url: str, recipient_name: str) -> str:

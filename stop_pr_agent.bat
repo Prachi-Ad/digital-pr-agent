@@ -1,4 +1,4 @@
 @echo off
 setlocal
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$pids = Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique; if ($pids) { foreach ($pidToStop in $pids) { Stop-Process -Id $pidToStop -Force -ErrorAction SilentlyContinue }; Write-Host 'PR Agent stopped.' } else { Write-Host 'No app was found listening on port 8501.' }"
-timeout /t 2 >nul
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0stop_app.ps1"
+ping -n 3 127.0.0.1 >nul

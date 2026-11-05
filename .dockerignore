@@ -1,0 +1,16 @@
+.venv
+data
+backups
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+vercel-app
+node_modules
+.next
+.env
+.env.*
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm

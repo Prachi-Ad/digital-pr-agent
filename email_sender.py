@@ -33,6 +33,7 @@ DATA_DIR = Path(
     or ROOT / "data"
 )
 CONFIG_PATH = DATA_DIR / "email_config.json"
+OAUTH_ACCOUNTS_PATH = DATA_DIR / "oauth_accounts.json"
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
@@ -98,6 +99,7 @@ class OAuthResult:
     success: bool
     email: str = ""
     error: str = ""
+    refresh_token: str = ""
 
 
 class OAuthError(Exception):
@@ -186,7 +188,7 @@ def load_email_config() -> EmailConfig:
         os.environ.get("SMTP_SECURITY") or raw.get("smtp_security")
     )
 
-    return EmailConfig(
+    config = EmailConfig(
         from_email=from_email,
         app_password=app_password,
         from_name=DEFAULT_FROM_NAME,
@@ -229,6 +231,157 @@ def load_email_config() -> EmailConfig:
         oauth_email=oauth_email,
         oauth_redirect_uri=oauth_redirect_uri,
     )
+
+    # When several Google accounts are connected, the selected account supplies
+    # the refresh token and From address. Other settings stay unchanged.
+    if config.auth_method == AUTH_METHOD_OAUTH:
+        accounts = load_oauth_accounts()
+        active = next(
+            (
+                account
+                for account in accounts["accounts"]
+                if account["email"] == accounts["active"]
+            ),
+            None,
+        )
+        if active:
+            config = replace(
+                config,
+                oauth_email=active["email"],
+                oauth_refresh_token=active["refresh_token"],
+                from_email=active["email"],
+                smtp_username=active["email"],
+            )
+    return config
+
+
+def load_oauth_accounts() -> dict:
+    """Load the connected Google accounts and the active sender."""
+    raw: dict = {}
+    if OAUTH_ACCOUNTS_PATH.exists():
+        try:
+            loaded = json.loads(OAUTH_ACCOUNTS_PATH.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                raw = loaded
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+    accounts = []
+    for item in raw.get("accounts") or []:
+        if not isinstance(item, dict):
+            continue
+        email = str(item.get("email") or "").strip()
+        token = str(item.get("refresh_token") or "").strip()
+        if email and token:
+            accounts.append(
+                {
+                    "email": email,
+                    "refresh_token": token,
+                    "added_at": str(item.get("added_at") or ""),
+                }
+            )
+    active = str(raw.get("active") or "").strip()
+    known = {account["email"] for account in accounts}
+    if active not in known:
+        active = accounts[0]["email"] if accounts else ""
+    return {"accounts": accounts, "active": active}
+
+
+def save_oauth_accounts(data: dict) -> Path:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "accounts": [
+            {
+                "email": account["email"],
+                "refresh_token": account["refresh_token"],
+                "added_at": account.get("added_at", ""),
+            }
+            for account in data.get("accounts") or []
+        ],
+        "active": data.get("active", ""),
+    }
+    OAUTH_ACCOUNTS_PATH.write_text(
+        json.dumps(payload, indent=2), encoding="utf-8"
+    )
+    try:
+        os.chmod(OAUTH_ACCOUNTS_PATH, 0o600)
+    except OSError:
+        pass
+    return OAUTH_ACCOUNTS_PATH
+
+
+def add_oauth_account(email: str, refresh_token: str) -> dict:
+    email = (email or "").strip()
+    refresh_token = (refresh_token or "").strip()
+    data = load_oauth_accounts()
+    if not email or not refresh_token:
+        return data
+    data["accounts"] = [
+        account
+        for account in data["accounts"]
+        if account["email"].lower() != email.lower()
+    ]
+    data["accounts"].append(
+        {
+            "email": email,
+            "refresh_token": refresh_token,
+            "added_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+    )
+    data["active"] = email
+    save_oauth_accounts(data)
+    return data
+
+
+def set_active_oauth_account(email: str) -> dict:
+    data = load_oauth_accounts()
+    if any(
+        account["email"].lower() == (email or "").strip().lower()
+        for account in data["accounts"]
+    ):
+        data["active"] = (email or "").strip()
+        save_oauth_accounts(data)
+    return data
+
+
+def remove_oauth_account(email: str, config: EmailConfig) -> EmailConfig:
+    data = load_oauth_accounts()
+    data["accounts"] = [
+        account
+        for account in data["accounts"]
+        if account["email"].lower() != (email or "").strip().lower()
+    ]
+    data["active"] = data["accounts"][0]["email"] if data["accounts"] else ""
+    save_oauth_accounts(data)
+    if data["active"]:
+        active = next(
+            account
+            for account in data["accounts"]
+            if account["email"] == data["active"]
+        )
+        updated = replace(
+            config,
+            oauth_email=active["email"],
+            oauth_refresh_token=active["refresh_token"],
+            from_email=active["email"],
+            smtp_username=active["email"],
+        )
+    else:
+        updated = replace(config, oauth_email="", oauth_refresh_token="")
+    save_email_config(updated)
+    return updated
+
+
+def ensure_oauth_accounts(config: EmailConfig) -> dict:
+    """Seed the account list from a legacy single-account OAuth config."""
+    data = load_oauth_accounts()
+    if (
+        not data["accounts"]
+        and config.auth_method == AUTH_METHOD_OAUTH
+        and config.oauth_email
+        and config.oauth_refresh_token
+    ):
+        data = add_oauth_account(config.oauth_email, config.oauth_refresh_token)
+    return data
 
 
 def save_email_config(config: EmailConfig) -> Path:
@@ -538,7 +691,7 @@ def complete_oauth(config: EmailConfig, code: str) -> OAuthResult:
         save_email_config(updated)
         expires_in = _bounded_int(payload.get("expires_in"), 3600, 60, 86400)
         _cache_oauth_token(updated, access_token, expires_in)
-        return OAuthResult(True, email=email)
+        return OAuthResult(True, email=email, refresh_token=refresh_token)
     except OAuthError as exc:
         return OAuthResult(False, error=str(exc))
 
@@ -627,6 +780,17 @@ def _friendly_error(exc: Exception, config: EmailConfig | None = None) -> str:
     if isinstance(exc, smtplib.SMTPDataError):
         return f"The mail server rejected the message. It was not sent: {exc}"
     if isinstance(exc, smtplib.SMTPServerDisconnected):
+        if (
+            config is not None
+            and _normalize_auth_method(config.auth_method) == AUTH_METHOD_APP_PASSWORD
+        ):
+            return (
+                "Gmail closed the connection before login finished. This usually "
+                "means the app password is no longer valid. Generate a new "
+                "16-character Google app password (2-Step Verification required), "
+                "save it in Settings, then run Test SMTP connection again. "
+                "No email was sent."
+            )
         return (
             "The SMTP server disconnected before the operation completed. If this "
             "happened during a send, the email may or may not have been delivered; "
