@@ -449,6 +449,14 @@ stays a non-sending demo.
   Vercel for Production, Preview, and Development; the API fails closed without
   it. Each call writes one log line with the action and a truncated IP hash, not
   the payload.
+- Shared-password gate (2026-11-07): the Vercel site is private. `/` redirects
+  to `/login` unless the `pr_auth` HttpOnly cookie (HMAC of `SITE_PASSWORD`)
+  is present; `/api/login` sets it, `/api/logout` clears it, and a Sign out
+  button is in the sidebar. `/api/token` and the Python `/api/analyze` guard
+  require the same cookie. `SITE_PASSWORD` is set in Vercel for Production,
+  Preview, and Development. Machine-readable routes stay public with no login:
+  `/llm`, `/llms.txt`, `/skills/*`, `/robots.txt`; AI crawlers and
+  `Accept: text/markdown` clients are rewritten to `/llm` as before.
 - The email batch sender is local-only and intentionally not part of the
   Vercel build. Pushes that only change local sending code should use
   `[skip vercel]` so the non-sending demo is not redeployed needlessly.
