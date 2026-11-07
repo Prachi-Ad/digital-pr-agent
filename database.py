@@ -1062,6 +1062,103 @@ def opportunity_csv_bytes() -> bytes:
     return out.getvalue().encode("utf-8-sig")
 
 
+def sites_contacts_csv_bytes() -> bytes:
+    """One row per site/contact, ready for a spreadsheet or mail merge."""
+    opportunities = list_pr_opportunities()
+    journalists = list_journalists()
+    by_opportunity: dict[str, list[dict[str, Any]]] = {}
+    for journalist in journalists:
+        linked = (journalist.get("related_opportunity_url") or "").strip()
+        if linked:
+            by_opportunity.setdefault(linked, []).append(journalist)
+
+    out = io.StringIO(newline="")
+    columns = [
+        "publication",
+        "site_domain",
+        "article_title",
+        "article_url",
+        "topic",
+        "pr_fit",
+        "pr_fit_reason",
+        "pr_review_status",
+        "contact_name",
+        "contact_role",
+        "contact_email",
+        "contact_page",
+        "contact_source",
+        "contact_confidence",
+        "selected_angle",
+    ]
+    writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+
+    for row in opportunities:
+        payload = row.get("payload") or {}
+        article_url = (row.get("url") or payload.get("article_url") or "").strip()
+        publication = (
+            row.get("publication") or payload.get("publication") or ""
+        ).strip()
+        domain = urlsplit(article_url).netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        base = {
+            "publication": _csv_safe(publication),
+            "site_domain": _csv_safe(domain),
+            "article_title": _csv_safe(
+                row.get("title") or payload.get("article_title") or ""
+            ),
+            "article_url": _csv_safe(article_url),
+            "topic": _csv_safe(payload.get("topic", "")),
+            "pr_fit": _csv_safe(payload.get("pr_fit", "")),
+            "pr_fit_reason": _csv_safe(payload.get("pr_fit_reason", "")),
+            "pr_review_status": _csv_safe(row.get("review_status", "")),
+            "selected_angle": _csv_safe(row.get("selected_angle", "")),
+        }
+        contacts = by_opportunity.get(article_url, [])
+        if not contacts:
+            writer.writerow(
+                {
+                    **base,
+                    "contact_name": "",
+                    "contact_role": "",
+                    "contact_email": "",
+                    "contact_page": "",
+                    "contact_source": "",
+                    "contact_confidence": "",
+                }
+            )
+            continue
+        for journalist in contacts:
+            person = journalist.get("payload") or {}
+            contact_data = journalist.get("contact_data") or {}
+            candidates = contact_data.get("candidates") or []
+            selected_email = (
+                contact_data.get("selected_email") or ""
+            ).strip()
+            if not selected_email and candidates:
+                selected_email = str(candidates[0].get("email") or "").strip()
+            writer.writerow(
+                {
+                    **base,
+                    "contact_name": _csv_safe(person.get("name", "")),
+                    "contact_role": _csv_safe(person.get("current_role", "")),
+                    "contact_email": _csv_safe(selected_email),
+                    "contact_page": _csv_safe(
+                        person.get("author_profile_or_contact_page", "")
+                    ),
+                    "contact_source": _csv_safe(
+                        contact_data.get("recommended_contact_route", "")
+                    ),
+                    "contact_confidence": _csv_safe(
+                        person.get("confidence", "")
+                    ),
+                }
+            )
+
+    return out.getvalue().encode("utf-8-sig")
+
+
 def journalist_csv_bytes() -> bytes:
     rows = list_journalists()
     out = io.StringIO(newline="")

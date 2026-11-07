@@ -79,6 +79,42 @@ stays a non-sending demo.
   panel. A reply, decline, placement, do-not-send, or an existing follow-up
   removes it from the due queue.
 
+### Expert skill and LLM-readable output
+- `skills/seo-aeo-digital-pr/SKILL.md` defines the SEO, AEO, and Digital PR
+  methodology: intent/entity fit, E-E-A-T, the 100-point opportunity rubric,
+  the AEO checklist (40-60 word answers, citations, schema, AI crawler access),
+  contact rules, pitch rules, and a stable output contract.
+- The same skill is published for LLMs at
+  `https://pr.prachiadmane.com/skills/seo-aeo-digital-pr.md`, with a site summary
+  at `https://pr.prachiadmane.com/llms.txt`.
+- AI crawlers (GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, PerplexityBot,
+  Google-Extended, CCBot) and clients sending `Accept: text/markdown` receive a
+  clean Markdown version at `/`; normal browsers still get the interactive app.
+  `robots.txt` explicitly allows these crawlers.
+- Every research and writing agent in both the local app and the Vercel site
+  receives a condensed `EXPERT_RULES` block, so opportunities are judged on
+  search intent, entity fit, E-E-A-T, and answer-engine extractability instead
+  of Domain Rating.
+
+### Next.js site is the primary tool
+- The Vercel site now has a **Back to start** launcher (Digital PR / Listicles,
+  Continue or Start new).
+- Each writer/contact has **Write pitch**, producing a personalized subject and
+  body.
+- The Outreach phase lists drafts with **Copy email**, **Download**, and facts
+  to verify.
+- **Download CSV** exports sites, contacts, and drafts, including the AEO fields.
+- Every opportunity now carries an **AEO angle**: the audience question, a 40–60
+  word answer the brand could supply, the best format (answer box, comparison,
+  definition, step list, FAQ), and schema.org suggestions. Shown on the card and
+  in the CSV.
+- Generated pitches use that AEO angle as the core offer and carry the question
+  and answer with the draft, shown under **AEO angle used**.
+- UI readability raised about 5%: larger body text, slightly more line height,
+  darker secondary text, and a little more card padding.
+- Brand identity is set in Vercel env (`BRAND_NAME`, `BRAND_DOMAIN`,
+  `PRODUCT_DESCRIPTION`).
+
 ### Reliability and speed
 - "Back to start" now survives a browser reload. The old loader treated a
   saved `None` as "no choice" and forced the last workflow open again.

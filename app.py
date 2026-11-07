@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 import email_sender
 import contact_providers
@@ -92,6 +93,7 @@ from database import (
     remove_email_suppression,
     save_app_snapshot,
     save_journalist_contact_data,
+    sites_contacts_csv_bytes,
     update_outreach_draft,
     upsert_contact_book,
     upsert_journalist,
@@ -190,16 +192,95 @@ _handle_google_oauth_callback()
 # OPTIONAL LOGIN GATE FOR A HOSTED DEPLOYMENT
 # =========================================================
 
+def _login_password() -> str:
+    """Password from data/app_password.txt, falling back to APP_PASSWORD."""
+    password_file = Path(DB_PATH).parent / "app_password.txt"
+    try:
+        if password_file.exists():
+            value = password_file.read_text(encoding="utf-8-sig").strip()
+            if value:
+                return value
+    except OSError:
+        pass
+    return (os.environ.get("APP_PASSWORD") or "").strip()
+
+
+def _auth_secret() -> str:
+    path = Path(DB_PATH).parent / "auth_secret.txt"
+    try:
+        if path.exists():
+            value = path.read_text(encoding="utf-8-sig").strip()
+            if value:
+                return value
+    except OSError:
+        pass
+    value = os.urandom(32).hex()
+    try:
+        path.write_text(value, encoding="utf-8")
+    except OSError:
+        pass
+    return value
+
+
+def _remember_token() -> str:
+    return hmac.new(
+        _auth_secret().encode("utf-8"),
+        b"pr-agent-remember",
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _cookie_authenticated() -> bool:
+    try:
+        value = (st.context.cookies.get("pr_auth") or "").strip()
+    except Exception:
+        return False
+    return bool(value) and hmac.compare_digest(
+        value.encode("utf-8"), _remember_token().encode("utf-8")
+    )
+
+
+def _set_remember_cookie() -> None:
+    token = _remember_token()
+    components.html(
+        f"""<script>
+        var secure = location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = "pr_auth={token}; path=/; max-age=2592000; SameSite=Lax" + secure;
+        </script>""",
+        height=0,
+    )
+
+
+def _clear_remember_cookie() -> None:
+    components.html(
+        """<script>
+        document.cookie = "pr_auth=; path=/; max-age=0; SameSite=Lax";
+        </script>""",
+        height=0,
+    )
+
+
 def _require_login() -> None:
-    password = (os.environ.get("APP_PASSWORD") or "").strip()
-    if not password or st.session_state.get("_authenticated"):
+    password = _login_password()
+    if not password:
+        return
+    clearing = st.session_state.pop("_clear_auth_cookie", False)
+    if clearing:
+        _clear_remember_cookie()
+    elif st.session_state.get("_authenticated") or _cookie_authenticated():
+        st.session_state["_authenticated"] = True
+        if st.session_state.pop("_set_auth_cookie", False):
+            _set_remember_cookie()
         return
     st.markdown("## PR Research Agent")
     st.caption("Enter the workspace password to continue.")
     entered = st.text_input("Password", type="password", key="_login_password")
     if st.button("Sign in", type="primary", width="stretch"):
-        if hmac.compare_digest(entered or "", password):
+        if hmac.compare_digest(
+            (entered or "").encode("utf-8"), password.encode("utf-8")
+        ):
             st.session_state["_authenticated"] = True
+            st.session_state["_set_auth_cookie"] = True
             st.session_state.pop("_login_password", None)
             st.rerun()
         else:
@@ -250,16 +331,22 @@ JOURNALIST_STATUS_OPTIONS = [
 
 DRAFT_STATUS_OPTIONS = [
     "Draft",
-    "Approved for automated send",
-    "Approved for manual send",
-    "Sent",
-    "Send failed",
+    "Ready to use",
     "Sent manually",
     "Replied",
     "Placement confirmed",
     "Declined",
     "Do not send",
 ]
+
+# Older drafts may carry sending-oriented statuses. Show the closest
+# research-only status without changing the stored record until saved.
+LEGACY_DRAFT_STATUS = {
+    "Approved for automated send": "Ready to use",
+    "Approved for manual send": "Ready to use",
+    "Sent": "Sent manually",
+    "Send failed": "Ready to use",
+}
 
 PR_STEPS = ["Article", "PR angles", "Opportunities", "Journalists", "Outreach"]
 LISTICLE_STEPS = ["Search", "Prospects", "Outreach"]
@@ -291,8 +378,8 @@ PR_PHASE_COPY = {
         "Approve the real openings, then the tool finds the writer, content manager, SEO lead, or link-building contact.",
     ),
     "Outreach": (
-        "Write, approve, send.",
-        "Draft the pitch, add a verified email, and send one confirmed batch.",
+        "Write and copy.",
+        "Draft the pitch, add a verified email, then copy it into your own email to send.",
     ),
 }
 LISTICLE_PHASE_COPY = {
@@ -302,7 +389,7 @@ LISTICLE_PHASE_COPY = {
     ),
     "Outreach": (
         "Request inclusion.",
-        "Draft the request, add a verified email, and send one confirmed batch.",
+        "Draft the request, add a verified email, then copy it into your own email to send.",
     ),
 }
 
@@ -380,7 +467,6 @@ if not st.session_state.get("_persistent_state_loaded", False):
         "listicle_reviews",
         "listicle_run_id",
         "listicle_placement_progress",
-        "workflow_mode",
         "pr_step",
         "listicle_step",
         "sender_name",
@@ -416,14 +502,9 @@ if not st.session_state.get("_persistent_state_loaded", False):
         active_key = (st.session_state.article_url or "").strip()
         if active_key:
             st.session_state.asset_analyses[active_key] = st.session_state.analysis
-    # Infer a sensible starting workflow only for snapshots that predate the
-    # workflow_mode field. An explicit null means the user chose "Back to
-    # start", so that choice must survive a reload.
-    if "workflow_mode" not in _saved_snapshot:
-        if st.session_state.analysis is not None:
-            st.session_state.workflow_mode = "digital_pr"
-        elif st.session_state.listicle_results is not None:
-            st.session_state.workflow_mode = "listicles"
+    # Every new browser session starts on the launcher. Saved work remains
+    # available through "Continue saved...", and "Back to start" always wins.
+    st.session_state.workflow_mode = None
     st.session_state["_persistent_state_loaded"] = True
 
 if st.session_state.pr_step not in PR_STEPS:
@@ -996,6 +1077,19 @@ def go(page=None, mode=None, pr_step=None, listicle_step=None):
     st.rerun()
 
 
+def _go_home():
+    """Leave the active workflow. Used as a widget callback so it always runs
+    before the page is rendered."""
+    st.session_state.workflow_mode = None
+    for pending in (
+        "_goto_mode",
+        "_goto_page",
+        "_goto_pr_step",
+        "_goto_listicle_step",
+    ):
+        st.session_state.pop(pending, None)
+
+
 def _apply_pending_navigation():
     if "_goto_page" in st.session_state:
         st.session_state.main_nav = st.session_state.pop("_goto_page")
@@ -1335,13 +1429,16 @@ def _render_draft_editor(record, key_prefix):
 
     suffix = _widget_suffix(f"{record['draft_key']}|{record['updated_at']}")
     form_key = f"{key_prefix}_form_{suffix}"
+    current_status = LEGACY_DRAFT_STATUS.get(
+        record.get("draft_status", "Draft"), record.get("draft_status", "Draft")
+    )
     status_index = DRAFT_STATUS_OPTIONS.index(
-        _safe_choice(DRAFT_STATUS_OPTIONS, record.get("draft_status", "Draft"))
+        _safe_choice(DRAFT_STATUS_OPTIONS, current_status)
     )
 
     if st.session_state.pop(f"{key_prefix}_saved", False):
         st.success(
-            "Draft saved locally. It is sent only from the batch panel after you confirm."
+            "Draft saved locally. Copy it below and send it from your email."
         )
     if record.get("sent_at"):
         st.caption(
@@ -1370,7 +1467,7 @@ def _render_draft_editor(record, key_prefix):
             placeholder="name@publication.com",
             help=(
                 "Use a verified public editorial or author email. Leave blank until you "
-                "have checked the address. This is required before batch sending."
+                "have checked the address. It is stored with the draft for your records."
             ),
             key=f"{key_prefix}_email_{suffix}",
         )
@@ -1385,8 +1482,8 @@ def _render_draft_editor(record, key_prefix):
             DRAFT_STATUS_OPTIONS,
             index=status_index,
             help=(
-                "Only 'Approved for automated send' drafts appear in the batch sender. "
-                "Approval is not sending."
+                "Track your own outreach: Draft, Ready to use, Sent manually, "
+                "Replied, Placement confirmed."
             ),
             key=f"{key_prefix}_status_{suffix}",
         )
@@ -1421,6 +1518,18 @@ def _render_draft_editor(record, key_prefix):
             st.write("- None listed. Still verify names, links, and claims.")
         st.write(f"**Compliance notes:** {payload.get('compliance_notes', 'None')}")
 
+    with st.expander("Copy this email"):
+        st.caption(
+            "Use the copy icon, then paste into Gmail. Subject and message are "
+            "included."
+        )
+        st.code(
+            f"To: {record.get('recipient_email', '')}\n"
+            f"Subject: {record.get('subject', '')}\n\n"
+            f"{record.get('body', '')}",
+            language=None,
+        )
+
     download_text = (
         f"To: {record.get('recipient_email', '')}\n"
         f"Subject: {record.get('subject', '')}\n\n{record.get('body', '')}\n"
@@ -1433,8 +1542,8 @@ def _render_draft_editor(record, key_prefix):
         key=f"{key_prefix}_download_{suffix}",
     )
     st.caption(
-        "Email is sent only from the batch send panel on this page, after you confirm. "
-        "Every email includes an opt-out line. The app never submits publisher forms."
+        "Copy or download this draft and send it from your email. The app does "
+        "not send in research-only mode."
     )
 
 
@@ -1540,53 +1649,35 @@ def _render_bulk_outreach_actions(
         for record in list_outreach_drafts()
         if record.get("draft_type") in draft_types
     ]
-    ready = sum(1 for record in records if _draft_ready_for_bulk_approval(record))
-    approved = sum(
-        1
-        for record in records
-        if record.get("draft_status") == "Approved for automated send"
-        and not record.get("sent_at")
-    )
-    needs_email = _drafts_needing_email(draft_types)
-
+    waiting = _drafts_needing_email(draft_types)
     st.caption(
-        f"{ready} ready to approve · {approved} approved · "
-        f"{needs_email} waiting for a recipient email."
+        f"{len(records)} draft{'s' if len(records) != 1 else ''} saved · "
+        f"{waiting} waiting for a recipient email."
     )
     if st.button(
-        "Prepare and approve all",
-        key=f"{scope_key}_prepare_approve",
+        f"Prepare all missing drafts ({missing_count})",
+        key=f"{scope_key}_prepare",
         type="primary",
         width="stretch",
-        disabled=missing_count == 0 and ready == 0,
+        disabled=missing_count == 0,
     ):
         try:
             with st.spinner(
-                "Preparing drafts and approving the complete ones. No web search "
-                "is used for this step..."
+                "Preparing drafts locally. No web search is used for this step..."
             ):
-                created = prepare_missing() if missing_count else 0
-                approved_count, skipped_count = _bulk_approve_ready_drafts(
-                    draft_types
-                )
-            message = (
-                f"Prepared {created} draft{'s' if created != 1 else ''} and "
-                f"approved {approved_count} for automated send. "
-                "Approval is not sending."
+                created = prepare_missing()
+            st.session_state[notice_key] = (
+                "success",
+                f"Prepared {created} draft{'s' if created != 1 else ''}. "
+                "Copy or download them below.",
             )
-            if skipped_count:
-                message += (
-                    f" Skipped {skipped_count} that still need a recipient email "
-                    "or complete content."
-                )
-            st.session_state[notice_key] = ("success", message)
             st.rerun()
         except Exception as exc:
-            st.error(f"Drafts could not be prepared and approved: {exc}")
+            st.error(f"Drafts could not be prepared: {exc}")
 
     st.caption(
-        "Approve only includes drafts with a valid, non-suppressed recipient "
-        "email. The batch sender still requires a separate confirmation."
+        "Drafts are never sent by the app in this mode. Copy or download them "
+        "and send from your email."
     )
 
 
@@ -3295,50 +3386,19 @@ def _create_followups(due: list[dict]) -> int:
 
 def _render_pr_outreach():
     st.caption(
-        "Review each draft, add a verified public email, then approve it. "
-        "Nothing sends until you confirm a batch."
+        "Review or write a draft, add a verified public email, then copy it and "
+        "send it from your email."
     )
 
-    with st.expander("Your sender details (used in drafts)"):
+    with st.expander("Sender identity (used in drafts)"):
         st.markdown(f"**{HARDCODED_SENDER_NAME}** · {HARDCODED_SENDER_ROLE}")
-        st.caption(
-            "Hardcoded for this workspace. SMTP credentials stay in your local data folder."
-        )
-
-    _render_email_batch_panel(
-        "pr_outreach", {"journalist_pitch", "journalist_followup"}
-    )
-
-    due = _followups_due()
-    if due:
-        st.info(
-            f"{len(due)} sent pitch{'es' if len(due) != 1 else ''} "
-            f"{'are' if len(due) != 1 else 'is'} due for a follow-up "
-            f"({FOLLOW_UP_DAYS}+ days, no reply)."
-        )
-        if st.button(
-            f"Create follow-up drafts ({len(due)})",
-            key="pr_create_followups",
-            width="stretch",
-        ):
-            try:
-                created = _create_followups(due)
-                st.session_state["pr_followup_notice"] = (
-                    f"Created {created} follow-up draft"
-                    f"{'s' if created != 1 else ''}. Review and approve them below."
-                )
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Follow-ups could not be created: {exc}")
-    followup_notice = st.session_state.pop("pr_followup_notice", None)
-    if followup_notice:
-        st.success(followup_notice)
+        st.caption("Hardcoded for this workspace.")
 
     targets = _qualified_journalist_targets()
     if not targets:
-        st.warning("No qualified pitch targets yet. Qualify a writer in the Journalists step first.")
-        if st.button("Go to journalists"):
-            go(pr_step="Journalists")
+        st.warning("No qualified contacts yet. Find a writer or contact in the Contacts step first.")
+        if st.button("Go to contacts"):
+            go(pr_step="Opportunities")
         return
 
     def prepare_missing() -> int:
@@ -3429,18 +3489,10 @@ def _render_pr_outreach():
             else:
                 _render_draft_editor(record, f"journalist_draft_{index}")
 
-            followup = get_outreach_draft(
-                "journalist_followup", opportunity.article_url, person.name
-            )
-            if followup:
-                st.markdown("**Follow-up**")
-                _render_draft_editor(followup, f"journalist_followup_{index}")
-
     st.divider()
     st.caption(
-        "Tip: set 'Approved for automated send' only after checking every link, name, "
-        "and claim. Then use the batch sender above. Use 'Sent manually' only when you "
-        "send outside the app."
+        "Review every link, name, and claim. Copy or download the draft and send "
+        "it from your email. Use 'Sent manually' to track it."
     )
 
 
@@ -3475,6 +3527,15 @@ def _render_digital_pr():
             st.markdown("### Find writers (journalists)")
             _render_pr_journalists()
             _render_pr_auto_outreach(approved_opportunities)
+
+        st.download_button(
+            "Download sites + contacts (CSV)",
+            data=sites_contacts_csv_bytes(),
+            file_name="pr_sites_contacts.csv",
+            mime="text/csv",
+            key="download_sites_contacts",
+            width="stretch",
+        )
         return
 
     _render_pr_outreach()
@@ -3942,17 +4003,13 @@ def _listicle_outreach_targets():
 
 def _render_listicle_outreach():
     st.caption(
-        "Review each request, add a verified public email, then approve it. "
-        "Nothing sends until you confirm a batch."
+        "Review or write a request, add a verified public email, then copy it and "
+        "send it from your email."
     )
 
-    with st.expander("Your sender details (used in drafts)"):
+    with st.expander("Sender identity (used in drafts)"):
         st.markdown(f"**{HARDCODED_SENDER_NAME}** · {HARDCODED_SENDER_ROLE}")
-        st.caption(
-            "Hardcoded for this workspace. SMTP credentials stay in your local data folder."
-        )
-
-    _render_email_batch_panel("listicle_outreach", {"listicle_request"})
+        st.caption("Hardcoded for this workspace.")
 
     targets = _listicle_outreach_targets()
     if not targets:
@@ -4079,9 +4136,8 @@ def _render_listicle_outreach():
 
     st.divider()
     st.caption(
-        "Tip: set 'Approved for automated send' only after checking the page, the "
-        "policy, and every claim. Then use the batch sender above. Use 'Sent manually' "
-        "only when you send or submit outside the app."
+        "Review the page, the policy, and every claim. Copy or download the draft "
+        "and send it from your email. Use 'Sent manually' to track it."
     )
 
 
@@ -4125,7 +4181,7 @@ def _render_workspace():
 
         with st.container(border=True, key="workflow-pr"):
             st.markdown("### Digital PR")
-            st.caption("Article → contacts → drafts & send")
+            st.caption("Article → contacts → drafts")
             st.write("Turn a published article into a verified angle, editorial openings, and writer research.")
             st.caption("Best for: expert commentary, data stories, and media coverage.")
             if opportunity_count:
@@ -4183,9 +4239,12 @@ def _render_workspace():
         title, subtitle = copy[phase]
         _render_workflow_header(label, phase, phases, title, subtitle)
     with action_col:
-        if st.button("← Back to start", key="switch-workflow", width="stretch"):
-            st.session_state.workflow_mode = None
-            st.rerun()
+        st.button(
+            "← Back to start",
+            key="switch-workflow",
+            width="stretch",
+            on_click=_go_home,
+        )
 
     if mode == "digital_pr":
         _render_digital_pr()
@@ -4309,6 +4368,13 @@ def _render_library():
                 data=opportunity_csv_bytes(),
                 file_name="pr_opportunities.csv",
                 mime="text/csv",
+            )
+            st.download_button(
+                "Export sites + contacts as CSV",
+                data=sites_contacts_csv_bytes(),
+                file_name="pr_sites_contacts.csv",
+                mime="text/csv",
+                key="library_sites_contacts",
             )
 
     with tab_journalists:
@@ -4524,7 +4590,11 @@ def _render_settings():
     st.caption("This sender identity is hardcoded and used in every outreach draft.")
 
     st.divider()
-    st.subheader("Email sending (designated sender)")
+    st.subheader("Email sending (optional, not used in research-only mode)")
+    st.caption(
+        "You do not need this section. Drafts are copied or downloaded and sent "
+        "from your own email. The setup below is only for optional in-app sending."
+    )
     st.caption(
         "Sending is local only. Use Google Workspace sign-in (OAuth) or a Google "
         "app password for Gmail/Workspace. Use Custom SMTP to send from another "
@@ -5420,7 +5490,9 @@ Testing mode works for a few personal accounts, but Google expires refresh token
     st.subheader("Safety rules")
     st.markdown(
         """
-        - Email sending is local only and requires a draft status of
+        - Research-only mode is the default: drafts are copied or downloaded and
+          sent from your own email. The app does not send anything.
+        - Optional in-app sending is local only and requires a draft status of
           'Approved for automated send' plus a separate batch confirmation.
         - The app sends one recipient at a time, with a delay, a daily cap, and a
           permanent send log. It never sends on a schedule.
@@ -5465,6 +5537,18 @@ with st.sidebar:
         key="main_nav",
         label_visibility="collapsed",
     )
+    if st.session_state.get("workflow_mode"):
+        st.button(
+            "← Back to start",
+            key="sidebar_home",
+            width="stretch",
+            on_click=_go_home,
+        )
+    if _login_password():
+        if st.button("Log out", key="logout", width="stretch"):
+            st.session_state["_clear_auth_cookie"] = True
+            st.session_state["_authenticated"] = False
+            st.rerun()
 
     st.divider()
     st.caption(f"Model: {MODEL}")

@@ -18,6 +18,7 @@ from agent import (
     JournalistResearchResults,
     ListicleOpportunity,
     analyze_article,
+    draft_journalist_pitch,
     find_opportunity_contact,
     research_opportunities,
     research_journalists,
@@ -34,6 +35,8 @@ class AnalyzeRequest(BaseModel):
     article_url: str = ""
     angle: PRAngle | None = None
     opportunity: PROpportunity | None = None
+    person: JournalistProfile | None = None
+    angle_context: str = ""
     search_theme: str = ""
     related_queries: str = ""
     target_audience: str = "All relevant audiences"
@@ -60,6 +63,20 @@ def _dispatch(req: AnalyzeRequest):
             if req.angle is None:
                 raise HTTPException(status_code=400, detail="angle is required")
             return research_opportunities(req.angle).model_dump()
+        if action == "draft":
+            if req.opportunity is None or req.person is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="opportunity and person are required",
+                )
+            return draft_journalist_pitch(
+                req.opportunity,
+                req.person,
+                angle_context=(
+                    req.angle_context
+                    or (req.angle.angle if req.angle is not None else "")
+                ),
+            ).model_dump()
         if action == "journalists":
             if req.angle is None or req.opportunity is None:
                 raise HTTPException(status_code=400, detail="angle and opportunity are required")

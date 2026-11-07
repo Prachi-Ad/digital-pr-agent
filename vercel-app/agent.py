@@ -40,6 +40,27 @@ MAX_TURNS = int(os.environ.get("MAX_TURNS", "3"))
 BRAND_NAME = (os.environ.get("BRAND_NAME") or os.environ.get("VISTA_BRAND_NAME") or "Your Brand").strip() or "Your Brand"
 PRODUCT_DESCRIPTION = (os.environ.get("PRODUCT_DESCRIPTION") or os.environ.get("VISTA_PRODUCT_DESCRIPTION") or "a software product").strip() or "a software product"
 
+EXPERT_RULES = """
+Think like a senior SEO, AEO, and Digital PR strategist.
+
+- Judge every opportunity on search intent, topical/entity fit, E-E-A-T, and
+  answer-engine extractability, not on Domain Rating.
+- Prefer pages that answer a real audience question and can host a concise,
+  sourced answer. Name that question.
+- A backlink is an outcome. Earn coverage with a credible asset: original data,
+  expert commentary, a customer story, or a missing product category.
+- Reject content farms, scraped or duplicated pages, paid-only placements,
+  irrelevant audiences, dead sites, and pages with no editorial route. Name the
+  signal.
+- For AEO, check whether the page can carry a 40-60 word answer, comparison,
+  definition, step list, or cited statistic, and whether the brand would be the
+  source.
+- For every pitch: name the news hook, audience question, credible asset,
+  evidence, and one low-pressure next step.
+- Only use emails explicitly published on public pages. Never guess patterns.
+- Never invent statistics, citations, contacts, policies, or coverage.
+"""
+
 
 # =========================================================
 # ASSET INTELLIGENCE MODELS
@@ -121,6 +142,34 @@ class PROpportunity(BaseModel):
             "content, an irrelevant audience, or no editorial contact. Empty when none."
         ),
     )
+    audience_question: str = Field(
+        default="Not assessed",
+        description=(
+            "The specific question a reader or AI answer engine is trying to answer "
+            "on this topic. Use 'Not assessed' if it cannot be established."
+        ),
+    )
+    aeo_answer: str = Field(
+        default="",
+        description=(
+            "A 40-60 word answer the brand could credibly supply, using only verified "
+            "facts. Use [verify: ...] for anything unconfirmed. Empty if there is no opening."
+        ),
+    )
+    aeo_format: str = Field(
+        default="",
+        description=(
+            "Best format for the answer: answer box, comparison table, definition, "
+            "step list, cited statistic, or FAQ. Empty if no opening."
+        ),
+    )
+    aeo_schema: str = Field(
+        default="",
+        description=(
+            "Recommended schema.org types, such as Article, FAQPage, HowTo, "
+            "Organization, or Person. Empty if no opening."
+        ),
+    )
 
 
 class PRResearchResults(BaseModel):
@@ -162,6 +211,68 @@ class OpportunityContact(BaseModel):
         description="Best route: Direct email, Author profile, Content/SEO team page, Editorial contact page, or Contact form."
     )
 
+
+
+class OutreachDraft(BaseModel):
+    outreach_type: str = Field(
+        description="Either 'Digital PR pitch' or 'Listicle inclusion request'."
+    )
+    channel: str = Field(
+        description=(
+            "The verified route this draft is written for: email, official contact form, "
+            "author profile message, affiliate/partner route, or another named route. "
+            "Never invent a route."
+        )
+    )
+    recipient_name: str = Field(
+        description="The verified recipient name, or 'Editorial team' if only a team route is known."
+    )
+    recipient_role: str = Field(
+        description="The verified role, or Unknown if it could not be established."
+    )
+    publication: str = Field(description="The target publication or website.")
+    target_title: str = Field(
+        description="The exact target article, listicle, roundup, or directory page title."
+    )
+    target_url: str = Field(description="The exact target page URL supplied in the research.")
+    subject_line: str = Field(
+        description="A specific subject line under 70 characters. No clickbait, no fake urgency."
+    )
+    message_body: str = Field(
+        description=(
+            "The complete draft message. Concise, specific, and ready for human review. "
+            "Use the supplied sender name and role exactly; do not invent or alter them."
+        )
+    )
+    personalization_evidence: str = Field(
+        description="The exact verified article, page, or policy evidence used to personalize the draft."
+    )
+    asset_used: str = Field(
+        description="The brand asset, data point, or contribution offered. Do not invent assets."
+    )
+    call_to_action: str = Field(
+        description="The single, low-pressure next step requested from the recipient."
+    )
+    aeo_question: str = Field(
+        default="",
+        description="The audience or answer-engine question this pitch is built around, from the research."
+    )
+    aeo_answer: str = Field(
+        default="",
+        description="The concise, sourced answer the brand is offering, from the research."
+    )
+    facts_to_verify: list[str] = Field(
+        description="Facts, names, links, or claims a human must verify before sending."
+    )
+    compliance_notes: str = Field(
+        description=(
+            "Notes on publisher policy, paid/affiliate disclosure, or reasons the message "
+            "must not be sent as written."
+        )
+    )
+    confidence: str = Field(
+        description="High, Medium, or Low based on the quality of the underlying research."
+    )
 
 
 # =========================================================
@@ -421,6 +532,8 @@ opportunity_agent = Agent(
     instructions=f"""
 You are a Digital PR opportunity researcher for {BRAND_NAME}.
 
+{EXPERT_RULES}
+
 Find real existing articles and editorial conversations that match the
 supplied PR angle.
 
@@ -449,6 +562,16 @@ Red flags include: no bylines, AI-spam or low-effort listicles, duplicated
 copy across sites, "write for us" link-selling, sponsored-only placement,
 irrelevant audience, and no contact route. Name the specific signal you saw.
 Do not call a publication high-quality just because it is well known.
+
+AEO (answer engine optimization):
+- Name the specific question a reader or AI answer engine is trying to answer.
+- Draft a 40-60 word answer the brand could credibly supply, using only verified
+  facts. Mark anything unconfirmed as [verify: ...].
+- Recommend the best format: answer box, comparison table, definition, step
+  list, cited statistic, or FAQ.
+- Recommend schema.org types: Article, FAQPage, HowTo, Organization, Person.
+- If there is no answer-engine opening, use "Not assessed" for the question and
+  leave the answer, format, and schema empty.
 
 Rules:
 - Search the live web.
@@ -485,6 +608,8 @@ opportunity_contact_agent = Agent(
 You find the best outreach contact for one specific article, on behalf of
 {BRAND_NAME}. Work from the exact article URL and publication.
 
+{EXPERT_RULES}
+
 The goal is a content or link placement, not a news pitch. Look for the people
 who own content, SEO, or link building:
 1. The bylined writer of that exact article.
@@ -515,6 +640,51 @@ Return only the requested structured fields.
 
 
 # =========================================================
+# OUTREACH DRAFT AGENT
+# =========================================================
+
+outreach_draft_agent = Agent(
+    name="Outreach Draft Writer",
+    instructions=f"""
+You prepare outreach drafts for a human to review and send manually on behalf of {BRAND_NAME}.
+
+{EXPERT_RULES}
+
+You never send anything. You never claim that a message was sent, a relationship exists,
+or a publisher has agreed to anything. The human remains responsible for every send.
+
+Write only from the research supplied in the prompt. Do not invent statistics, customer
+names, coverage, awards, partnerships, product capabilities, email addresses, recipient
+names, roles, contact routes, policies, deadlines, or commitments.
+
+DIGITAL PR PITCH RULES:
+- 120-180 words in the message body.
+- Open with the specific article or topic and why it is relevant now.
+- Offer one credible asset: original data, expert commentary, a customer story, or a
+  concrete perspective. Explain why it helps the reader.
+- Reference the journalist's actual published work when supplied.
+- Do not ask for a link, mention Domain Rating, or offer payment.
+- End with one low-pressure next step.
+- When the research supplies an AEO question and answer, use them as the core
+  offer and explain why the brand is a credible source. Echo the question in
+  aeo_question and the answer in aeo_answer.
+
+STYLE:
+- Plain, professional, specific, and human. No hype or fake urgency.
+- Subject line under 70 characters and specific to the target.
+- Use the supplied sender name and role exactly.
+- If a necessary fact is missing, leave a clear [verify: ...] placeholder and list it
+  in facts_to_verify.
+
+Return only the requested structured fields.
+""",
+    model=MODEL,
+    model_settings=MODEL_SETTINGS,
+    output_type=OutreachDraft,
+)
+
+
+# =========================================================
 # JOURNALIST RESEARCH AGENT
 # =========================================================
 
@@ -522,6 +692,8 @@ journalist_agent = Agent(
     name="Journalist Researcher",
     instructions=f"""
 You are a journalist researcher supporting a human-led Digital PR workflow for {BRAND_NAME}.
+
+{EXPERT_RULES}
 
 Your task is to identify real writers, reporters, or editors whose published work makes
 these people relevant to one specific, human-approved PR opportunity.
@@ -881,6 +1053,66 @@ email. Include the source URL and evidence.
 """
 
     return _run_agent_in_worker(opportunity_contact_agent, prompt)
+
+
+def draft_journalist_pitch(
+    opportunity: PROpportunity,
+    person: JournalistProfile,
+    angle_context: str = "",
+    sender_name: str = "Prachi",
+    sender_role: str = "SEO Specialist",
+) -> OutreachDraft:
+    """Draft a personalized Digital PR pitch for human review. Never sends."""
+    prompt = f"""
+Write a Digital PR pitch draft for human review. Do not send anything.
+
+SENDER NAME: {sender_name}
+SENDER ROLE: {sender_role}
+BRAND: {BRAND_NAME}
+PRODUCT: {PRODUCT_DESCRIPTION}
+
+PR ANGLE:
+{angle_context or opportunity.why_relevant}
+
+TARGET WRITER / CONTACT:
+Name: {person.name}
+Publication: {person.publication}
+Verified role: {person.current_role}
+Topic covered: {person.topic_covered}
+Relevant published article: {person.relevant_article_title}
+Article URL: {person.relevant_article_url}
+Article date: {person.article_date}
+Why relevant: {person.why_relevant}
+Suggested angle from research: {person.suggested_pitch_angle}
+Research evidence: {person.evidence}
+Known public profile or contact page: {person.author_profile_or_contact_page}
+
+TARGET OPPORTUNITY:
+Publication: {opportunity.publication}
+Article: {opportunity.article_title}
+URL: {opportunity.article_url}
+Published: {opportunity.published_date}
+Topic: {opportunity.topic}
+Why this article matters: {opportunity.why_relevant}
+Credible brand contribution: {opportunity.brand_contribution}
+Research evidence: {opportunity.evidence}
+
+AEO ANGLE FROM RESEARCH:
+Question: {opportunity.audience_question}
+Answer the brand can own: {opportunity.aeo_answer}
+Best format: {opportunity.aeo_format}
+Suggested schema: {opportunity.aeo_schema}
+
+Write a concise pitch that references the person's specific work and offers the
+brand's contribution. Use only the verified facts above. Use the sender name and
+role exactly. If the AEO answer is present, make it the core offer: say what
+question the piece answers and why the brand is a credible source for that
+answer. Put any missing detail in [verify: ...] placeholders and list it in
+facts_to_verify. If the person or route is Unknown, use 'Official publication
+contact route' as the channel and note that the route must be verified.
+"""
+
+    return _run_agent_in_worker(outreach_draft_agent, prompt)
 
 
 def research_listicles(

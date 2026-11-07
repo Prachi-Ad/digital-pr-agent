@@ -6,6 +6,8 @@ import {
   ArrowRight,
   BarChart3,
   BookOpen,
+  Copy,
+  Download,
   ExternalLink,
   FileText,
   KeyRound,
@@ -239,6 +241,7 @@ function PageHeading({
 export default function Home() {
   const [nav, setNav] = useState<Nav>("Workspace");
   const [workflow, setWorkflow] = useState<Workflow>("digital");
+  const [showStart, setShowStart] = useState(false);
   const [digitalStep, setDigitalStep] = useState<DigitalStep>("Article");
   const [listicleStep, setListicleStep] = useState<ListicleStep>("Search");
   const [retryMsg, setRetryMsg] = useState<string | null>(null);
@@ -264,6 +267,9 @@ export default function Home() {
   const [loadingJourn, setLoadingJourn] = useState(false);
   const [journalists, setJournalists] = useState<AnyObj | null>(null);
   const [errJourn, setErrJourn] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, AnyObj>>({});
+  const [loadingDraft, setLoadingDraft] = useState<string | null>(null);
+  const [errDraft, setErrDraft] = useState<string | null>(null);
 
   // Listicle state
   const [listForm, setListForm] = useState({
@@ -307,9 +313,31 @@ export default function Home() {
     }
   }
 
-  function switchWorkflow() {
-    setWorkflow(workflow === "digital" ? "listicles" : "digital");
-    setNav("Workspace");
+  function startNewDigital() {
+    setAnalysis(null);
+    setAnalyses([]);
+    setActiveUrl("");
+    resetAnalysisDownstream();
+    setShowStart(false);
+    setWorkflow("digital");
+    setDigitalStep("Article");
+  }
+
+  function continueDigital() {
+    setShowStart(false);
+    setWorkflow("digital");
+  }
+
+  function startNewListicles() {
+    setListicles(null);
+    setShowStart(false);
+    setWorkflow("listicles");
+    setListicleStep("Search");
+  }
+
+  function continueListicles() {
+    setShowStart(false);
+    setWorkflow("listicles");
   }
 
   function addUrlInput() {
@@ -332,8 +360,10 @@ export default function Home() {
     setOpportunities(null);
     setSelectedOpp(null);
     setJournalists(null);
+    setDrafts({});
     setErrOpp(null);
     setErrJourn(null);
+    setErrDraft(null);
     setRetryMsg(null);
   }
 
@@ -443,6 +473,7 @@ export default function Home() {
     setOpportunities(null);
     setSelectedOpp(null);
     setJournalists(null);
+    setDrafts({});
     setRetryMsg(null);
     try {
       const data = await callApi("opportunities", { angle }, (a) =>
@@ -481,6 +512,7 @@ export default function Home() {
     if (!selectedAngle) return;
     setSelectedOpp(opportunity);
     setJournalists(null);
+    setDrafts({});
     setDigitalStep("Journalists");
     setLoadingJourn(true);
     setErrJourn(null);
@@ -519,6 +551,97 @@ export default function Home() {
       setLoadingJourn(false);
       setRetryMsg(null);
     }
+  }
+
+  async function writeDraft(person: AnyObj) {
+    if (!selectedAngle || !selectedOpp) return;
+    const key = String(person.name || "contact");
+    setLoadingDraft(key);
+    setErrDraft(null);
+    setRetryMsg(null);
+    try {
+      const data = await callApi(
+        "draft",
+        { angle: selectedAngle, opportunity: selectedOpp, person },
+        (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
+      );
+      setDrafts((current) => ({ ...current, [key]: data }));
+      setDigitalStep("Outreach");
+    } catch (err: any) {
+      setErrDraft(err?.message || "Draft generation failed");
+    } finally {
+      setLoadingDraft(null);
+      setRetryMsg(null);
+    }
+  }
+
+  function downloadText(filename: string, text: string) {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadCampaignCsv() {
+    const opps = opportunities?.opportunities ?? [];
+    const people = journalists?.journalists ?? [];
+    const header = [
+      "publication",
+      "site_domain",
+      "article_title",
+      "article_url",
+      "pr_fit",
+      "audience_question",
+      "aeo_answer",
+      "aeo_format",
+      "aeo_schema",
+      "contact_name",
+      "contact_role",
+      "subject",
+      "body",
+    ];
+    const rows: string[][] = [];
+    for (const opportunity of opps) {
+      const selected = selectedOpp?.article_url === opportunity.article_url;
+      const contacts = selected && people.length ? people : [null];
+      for (const person of contacts) {
+        const draft = person ? drafts[String(person.name || "contact")] : null;
+        let domain = "";
+        try {
+          domain = new URL(opportunity.article_url || "").hostname.replace(/^www\./, "");
+        } catch {
+          domain = "";
+        }
+        rows.push([
+          opportunity.publication || "",
+          domain,
+          opportunity.article_title || "",
+          opportunity.article_url || "",
+          opportunity.pr_fit || "",
+          opportunity.audience_question || "",
+          opportunity.aeo_answer || "",
+          opportunity.aeo_format || "",
+          opportunity.aeo_schema || "",
+          person?.name || "",
+          person?.current_role || "",
+          draft?.subject_line || "",
+          draft?.message_body || "",
+        ]);
+      }
+    }
+    const csv = [header, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\r\n");
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "pr_sites_contacts.csv";
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   async function generateListicles() {
@@ -653,15 +776,54 @@ export default function Home() {
       {sidebar}
       <main className="main">
         <div className="content">
-          {nav === "Workspace" && (
+          {nav === "Workspace" && showStart && (
+            <div className="stack">
+              <PageHeading
+                badge="Workspace"
+                title="Start a campaign"
+                subtitle="One clear path from research to a copy-ready pitch. Nothing is sent."
+              />
+              <section className="card">
+                <h2 className="section-title">Digital PR</h2>
+                <p className="body-text">
+                  Turn a published article into angles, editorial openings, writer/contact research, and a
+                  personalized pitch.
+                </p>
+                <div className="actions">
+                  <button className="btn-primary" onClick={continueDigital}>
+                    {analysis ? "Continue Digital PR" : "Start Digital PR"} <ArrowRight size={15} />
+                  </button>
+                  <button className="btn-secondary" onClick={startNewDigital}>
+                    Start new
+                  </button>
+                </div>
+              </section>
+              <section className="card">
+                <h2 className="section-title">Listicle inclusion</h2>
+                <p className="body-text">
+                  Find roundups and directories where the product fits, then research the contact and policy.
+                </p>
+                <div className="actions">
+                  <button className="btn-primary" onClick={continueListicles}>
+                    {listicles ? "Continue listicles" : "Start listicles"} <ArrowRight size={15} />
+                  </button>
+                  <button className="btn-secondary" onClick={startNewListicles}>
+                    Start new
+                  </button>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {nav === "Workspace" && !showStart && (
             <>
               <PageHeading
                 badge="Workspace"
                 title={workflow === "digital" ? "Digital PR" : "Listicles"}
                 subtitle={phaseCopy[activePhase] || "You approve every decision and every send."}
                 action={
-                  <button className="btn-secondary" onClick={switchWorkflow}>
-                    Switch workflow
+                  <button className="btn-secondary" onClick={() => setShowStart(true)}>
+                    ← Back to start
                   </button>
                 }
               />
@@ -948,6 +1110,32 @@ export default function Home() {
                                 <p className="meta">Signals: {o.pr_red_flags.join(" · ")}</p>
                               )}
 
+                              {o.audience_question && o.audience_question !== "Not assessed" && (
+                                <details className="plan" open>
+                                  <summary>AEO angle</summary>
+                                  <div className="plan-body">
+                                    <p>
+                                      <strong>Audience question:</strong> {o.audience_question}
+                                    </p>
+                                    {o.aeo_answer && (
+                                      <p>
+                                        <strong>Answer to own:</strong> {o.aeo_answer}
+                                      </p>
+                                    )}
+                                    {o.aeo_format && (
+                                      <p>
+                                        <strong>Format:</strong> {o.aeo_format}
+                                      </p>
+                                    )}
+                                    {o.aeo_schema && (
+                                      <p>
+                                        <strong>Schema:</strong> {o.aeo_schema}
+                                      </p>
+                                    )}
+                                  </div>
+                                </details>
+                              )}
+
                               <details className="plan">
                                 <summary>Full evidence and notes</summary>
                                 <div className="plan-body">
@@ -1087,6 +1275,31 @@ export default function Home() {
                                   </p>
                                 </div>
                               </details>
+
+                              <div className="actions">
+                                <button
+                                  className="btn-primary"
+                                  onClick={() => writeDraft(j)}
+                                  disabled={loadingDraft === j.name}
+                                >
+                                  {loadingDraft === j.name ? (
+                                    <>
+                                      <Spinner /> Writing pitch...
+                                    </>
+                                  ) : drafts[j.name] ? (
+                                    <>
+                                      Write again <RefreshCw size={15} />
+                                    </>
+                                  ) : (
+                                    <>
+                                      Write pitch <ArrowRight size={15} />
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                              {drafts[j.name] && (
+                                <p className="meta">Draft ready — open Outreach to copy it.</p>
+                              )}
                             </article>
                           ))}
                           {(!journalists.journalists || journalists.journalists.length === 0) && (
@@ -1102,17 +1315,105 @@ export default function Home() {
               )}
 
               {workflow === "digital" && activePhase === "Outreach" && (
-                <div className="card empty-state">
-                  <div className="page-badge">Human approval</div>
-                  <h2 className="empty-title">Draft generation is in the local app</h2>
-                  <p className="empty-copy">
-                    The Vercel demo stops at verified research. The full Streamlit app prepares personalized pitches
-                    for review, with editable subject lines, message bodies, and manual status tracking. Nothing is
-                    sent automatically.
-                  </p>
-                  <button className="btn-secondary" onClick={() => setDigitalStep("Journalists")}>
-                    Back to Journalists
-                  </button>
+                <div className="stack">
+                  <div className="actions-between">
+                    <p className="step-caption">
+                      Personalized drafts for the selected opportunity. Copy or download them; nothing is sent.
+                    </p>
+                    <button className="btn-secondary" onClick={downloadCampaignCsv}>
+                      Download CSV <Download size={15} />
+                    </button>
+                  </div>
+
+                  {errDraft && <Note tone="warn">{errDraft}</Note>}
+
+                  {Object.keys(drafts).length === 0 ? (
+                    <div className="card empty-state">
+                      <div className="page-badge">Human approval</div>
+                      <h2 className="empty-title">No drafts yet</h2>
+                      <p className="empty-copy">
+                        Go back to Contacts and click <strong>Write pitch</strong> on a writer or content/SEO contact.
+                      </p>
+                      <button className="btn-secondary" onClick={() => setDigitalStep("Journalists")}>
+                        Back to Contacts
+                      </button>
+                    </div>
+                  ) : (
+                    Object.entries(drafts).map(([name, draft]) => (
+                      <article className="card" key={name}>
+                        <h2 className="card-title">{draft.recipient_name || name}</h2>
+                        <p className="meta">
+                          {draft.publication} · {draft.recipient_role} · {draft.channel}
+                        </p>
+                        <p className="body-text">
+                          <strong>Subject:</strong> {draft.subject_line}
+                        </p>
+                        <div className="draft-body">{draft.message_body}</div>
+                        {(draft.aeo_question || draft.aeo_answer) && (
+                          <details className="plan">
+                            <summary>AEO angle used</summary>
+                            <div className="plan-body">
+                              {draft.aeo_question && (
+                                <p>
+                                  <strong>Question:</strong> {draft.aeo_question}
+                                </p>
+                              )}
+                              {draft.aeo_answer && (
+                                <p>
+                                  <strong>Answer:</strong> {draft.aeo_answer}
+                                </p>
+                              )}
+                            </div>
+                          </details>
+                        )}
+                        <div className="actions">
+                          <button
+                            className="btn-secondary"
+                            onClick={() =>
+                              navigator.clipboard.writeText(
+                                `Subject: ${draft.subject_line}\n\n${draft.message_body}`
+                              )
+                            }
+                          >
+                            <Copy size={15} /> Copy email
+                          </button>
+                          <button
+                            className="btn-secondary"
+                            onClick={() =>
+                              downloadText(
+                                `pitch-${(draft.recipient_name || name).replace(/\s+/g, "-").toLowerCase()}.txt`,
+                                `Subject: ${draft.subject_line}\n\n${draft.message_body}\n`
+                              )
+                            }
+                          >
+                            <Download size={15} /> Download
+                          </button>
+                        </div>
+                        <details className="plan">
+                          <summary>Facts to verify</summary>
+                          <div className="plan-body">
+                            {(draft.facts_to_verify ?? []).length > 0 ? (
+                              (draft.facts_to_verify ?? []).map((fact: string, index: number) => (
+                                <p key={index}>{fact}</p>
+                              ))
+                            ) : (
+                              <p>None listed. Verify names, links, and claims.</p>
+                            )}
+                            {draft.compliance_notes && (
+                              <p>
+                                <strong>Compliance:</strong> {draft.compliance_notes}
+                              </p>
+                            )}
+                            {draft.personalization_evidence && (
+                              <p>
+                                <strong>Personalization:</strong> {draft.personalization_evidence}
+                              </p>
+                            )}
+                          </div>
+                        </details>
+                      </article>
+                    ))
+                  )}
                 </div>
               )}
 

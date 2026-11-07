@@ -2,8 +2,9 @@
 headless = true
 port = 8501
 enableCORS = false
-corsAllowedOrigins = ["http://localhost:8501", "http://127.0.0.1:8501", "https://pr.prachiadmane.com"]
 enableXsrfProtection = true
+fileWatcherType = "none"
+runOnSave = false
 
 [browser]
 gatherUsageStats = false

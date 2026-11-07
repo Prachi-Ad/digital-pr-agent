@@ -4,7 +4,7 @@
 
 :root {
   --ink: #17182b;
-  --muted: #6b6e85;
+  --muted: #5f6278;
   --line: #e4e6f0;
   --surface: #ffffff;
   --accent: #5b5bd6;
@@ -288,7 +288,7 @@ a {
 }
 
 .card {
-  padding: 18px;
+  padding: 19px;
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--surface);
@@ -328,16 +328,16 @@ a {
 
 .meta {
   margin: 6px 0 0;
-  color: #8a8da6;
-  font-size: 13px;
-  line-height: 1.5;
+  color: #6f7290;
+  font-size: 13.5px;
+  line-height: 1.55;
 }
 
 .body-text {
   margin: 12px 0 0;
   color: #2f3150;
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: 15.75px;
+  line-height: 1.68;
 }
 
 .body-text strong {
@@ -578,6 +578,18 @@ a {
 }
 .fit-bad strong {
   color: #b91c1c;
+}
+
+.draft-body {
+  margin: 12px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f8f9fe;
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.65;
+  color: #2a2c42;
 }
 
 .form-row {

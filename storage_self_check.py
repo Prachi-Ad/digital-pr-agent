@@ -560,6 +560,14 @@ def main() -> int:
         check(f"{label} exports the record", expected in text and len(rows) >= 1, f"rows={len(rows)}")
         check(f"{label} opens cleanly in Excel", data.startswith(b"\xef\xbb\xbf"))
 
+    sites_csv = database.sites_contacts_csv_bytes().decode("utf-8-sig")
+    sites_rows = list(csv.DictReader(io.StringIO(sites_csv)))
+    check(
+        "sites + contacts CSV has the expected columns",
+        "contact_email" in sites_csv and "site_domain" in sites_csv and bool(sites_rows),
+        f"rows={len(sites_rows)}",
+    )
+
     go(app3, "Research Library")
     backup_button = [button for button in app3.button if button.label == "Create database backup"][0]
     backup_button.click()
