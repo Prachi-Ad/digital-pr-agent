@@ -31,6 +31,8 @@ TOKEN_PREFIX = "v1"
 TOKEN_CLOCK_SKEW_SECONDS = 30
 TOKEN_MAX_LIFETIME_SECONDS = 600
 MAX_BODY_BYTES = 256_000
+AUTH_COOKIE = "pr_auth"
+AUTH_MESSAGE = "vista-pr-auth-v1"
 
 # Exact hosts that serve the demo UI.
 EXACT_HOSTS = {
@@ -45,6 +47,32 @@ EXACT_HOSTS = {
 
 def _secret() -> str:
     return (os.environ.get("DEMO_SIGNING_SECRET") or "").strip()
+
+
+def _site_password() -> str:
+    return (os.environ.get("SITE_PASSWORD") or "").strip()
+
+
+def _expected_auth_value() -> str:
+    password = _site_password()
+    if not password:
+        return ""
+    digest = hmac.new(
+        password.encode("utf-8"),
+        AUTH_MESSAGE.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+def _is_authenticated(request: Request) -> bool:
+    expected = _expected_auth_value()
+    if not expected:
+        return False
+    provided = (request.cookies.get(AUTH_COOKIE) or "").strip()
+    if not provided:
+        return False
+    return hmac.compare_digest(provided, expected)
 
 
 def _int_env(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -154,6 +182,11 @@ _global_day = _SlidingWindow()
 
 def guard(request: Request) -> None:
     """Raise an HTTPException unless the request may run a paid research call."""
+    if not _is_authenticated(request):
+        raise HTTPException(
+            status_code=401,
+            detail="Sign in required.",
+        )
     if len(_secret()) < 32:
         raise HTTPException(
             status_code=503,

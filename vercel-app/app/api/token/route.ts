@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { isAuthenticated } from "@/app/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,6 +69,12 @@ function sign(exp: number, secret: string): string {
 }
 
 export async function POST(req: Request) {
+  if (!isAuthenticated(req.headers.get("cookie"))) {
+    return Response.json(
+      { detail: "Sign in required." },
+      { status: 401, headers: { "Cache-Control": "no-store" } }
+    );
+  }
   const secret = process.env.DEMO_SIGNING_SECRET || "";
   if (secret.length < 32) {
     return Response.json(

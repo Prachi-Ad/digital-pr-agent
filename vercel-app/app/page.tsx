@@ -147,6 +147,11 @@ async function getDemoToken(force = false): Promise<string> {
     cache: "no-store",
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401) {
+    // Shared-password gate: send the visitor to sign in, then back here.
+    if (typeof window !== "undefined") window.location.href = "/login?next=/";
+    throw new Error("Sign in required.");
+  }
   if (!res.ok || !data?.token) {
     throw new Error(data?.detail || "Could not start a demo session. Please reload the page.");
   }
@@ -767,6 +772,16 @@ export default function Home() {
           Search context: <strong>low</strong>
         </div>
         <div className="sidebar-note">Vercel demo · no automatic outreach</div>
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={async () => {
+            await fetch("/api/logout", { method: "POST", cache: "no-store" });
+            window.location.href = "/login";
+          }}
+        >
+          Sign out
+        </button>
       </div>
     </aside>
   );
