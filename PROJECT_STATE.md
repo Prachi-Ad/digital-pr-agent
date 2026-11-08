@@ -130,6 +130,10 @@ stays a non-sending demo.
 - Every draft carries a **3-question check** (is it a story? why this
   journalist? why now?) with credibility details, per the think-like-a-
   journalist framework; pitches lead with the story, never the company.
+- The **media library** (Research Library) auto-saves every researched writer
+  with emails merged from lookups, searchable and exportable as CSV — plus a
+  **Collect from web** box that finds writers by beat, outlet, or topic and
+  saves only verifiable ones. All stored in the browser.
 - The digital workflow shows one step per screen (Article, PR angles,
   Opportunities, Journalists, Outreach) with tabs inside each phase, instead of
   one long stacked page. Bulk actions run sequentially with progress:
