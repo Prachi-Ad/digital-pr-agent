@@ -131,6 +131,10 @@ stays a non-sending demo.
   Declined / Do-not-contact status with a coverage URL field on wins, persisted
   in the browser, counted in the Outreach header, shown in the media library,
   and exported in the CSV.
+- **Google Sheet pitch log**: **Sync to Google Sheet** in Outreach appends every
+  pitch (date, angle, publication, article, used, fit + score, contact, email,
+  subject, body, status, coverage URL) and refreshes on re-sync via Apps Script
+  webhook upsert (`SHEET_WEBHOOK_URL` + `SHEET_WEBHOOK_TOKEN` in Vercel).
 - **Campaign board** (Research Library): **Save as campaign** snapshots the
   workspace; loading restores research and drafts; per-campaign pitched /
   replied / covered counts and coverage links stay live.
