@@ -365,6 +365,20 @@ export default function Home() {
   const [drafts, setDrafts] = useState<Record<string, AnyObj>>({});
   const [loadingDraft, setLoadingDraft] = useState<string | null>(null);
   const [errDraft, setErrDraft] = useState<string | null>(null);
+  const [checkedPeople, setCheckedPeople] = useState<string[]>([]);
+  const [emailByPerson, setEmailByPerson] = useState<Record<string, AnyObj>>({});
+  const [loadingEmail, setLoadingEmail] = useState<string | null>(null);
+
+  function personKey(name: any): string {
+    return draftKey(oppKey(selectedOpp), name);
+  }
+
+  function togglePerson(name: any) {
+    const key = String(name || "");
+    setCheckedPeople((current) =>
+      current.includes(key) ? current.filter((n) => n !== key) : [...current, key]
+    );
+  }
 
   // Listicle state
   const [listForm, setListForm] = useState({
@@ -465,6 +479,8 @@ export default function Home() {
     setSelectedOpp(null);
     setJournalists(null);
     setWritersByOpp({});
+    setCheckedPeople([]);
+    setEmailByPerson({});
     setDrafts({});
     setErrOpp(null);
     setErrJourn(null);
@@ -640,7 +656,31 @@ export default function Home() {
   function selectOppCached(opportunity: AnyObj) {
     setSelectedOpp(opportunity);
     setJournalists(writersByOpp[oppKey(opportunity)] ?? null);
+    setCheckedPeople([]);
     setErrJourn(null);
+  }
+
+  async function findEmailFor(person: AnyObj) {
+    if (!selectedOpp) return;
+    const key = personKey(person.name);
+    setLoadingEmail(key);
+    setRetryMsg(null);
+    try {
+      const data = await callApi(
+        "person-contact",
+        { person, opportunity: selectedOpp },
+        (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
+      );
+      setEmailByPerson((current) => ({ ...current, [key]: data }));
+    } catch (err: any) {
+      setEmailByPerson((current) => ({
+        ...current,
+        [key]: { __error: err?.message || "Email lookup failed" },
+      }));
+    } finally {
+      setLoadingEmail(null);
+      setRetryMsg(null);
+    }
   }
 
   async function researchAngle(angle: AnyObj) {
@@ -721,6 +761,7 @@ export default function Home() {
     if (!selectedAngle) return;
     setSelectedOpp(opportunity);
     setJournalists(null);
+    setCheckedPeople([]);
     setDigitalStep("Journalists");
     setLoadingJourn(true);
     setErrJourn(null);
@@ -746,6 +787,7 @@ export default function Home() {
     setLoadingJourn(true);
     setErrJourn(null);
     setJournalists(null);
+    setCheckedPeople([]);
     setRetryMsg(null);
     try {
       const data = await callApi(
@@ -768,6 +810,7 @@ export default function Home() {
     if (!selectedAngle || opps.length === 0) return;
     setLoadingJourn(true);
     setErrJourn(null);
+    setCheckedPeople([]);
     setRetryMsg(null);
     const failures: string[] = [];
     try {
@@ -846,6 +889,27 @@ export default function Home() {
       }
     }
     if (entries.length === 0) return;
+    await runPitchBatch(entries);
+  }
+
+  async function writeSelectedPitches() {
+    if (!selectedAngle || !selectedOpp || checkedPeople.length === 0) return;
+    const people = (journalists?.journalists ?? []).filter((j: AnyObj) =>
+      checkedPeople.includes(String(j.name || ""))
+    );
+    if (people.length === 0) return;
+    await runPitchBatch(
+      people.map((person: AnyObj) => ({
+        angle: selectedAngle,
+        opportunity: selectedOpp,
+        person,
+      }))
+    );
+  }
+
+  async function runPitchBatch(
+    entries: Array<{ angle: AnyObj; opportunity: AnyObj; person: AnyObj }>
+  ) {
     setLoadingDraft("__all__");
     setErrDraft(null);
     setRetryMsg(null);
@@ -1749,6 +1813,17 @@ export default function Home() {
                           {journalists ? "Find again" : "Find writers & contacts"}
                         </button>
                         <button
+                          className="btn-primary"
+                          onClick={writeSelectedPitches}
+                          disabled={loadingDraft !== null || checkedPeople.length === 0}
+                          title="Write pitches only for the people you ticked"
+                        >
+                          {loadingDraft !== null ? <Spinner /> : <Mail size={17} />}
+                          {checkedPeople.length > 0
+                            ? `Write pitches for selected (${checkedPeople.length})`
+                            : "Tick people, then write"}
+                        </button>
+                        <button
                           className="btn-secondary"
                           onClick={writeAllPitches}
                           disabled={loadingDraft !== null || writerEntries.length === 0}
@@ -1807,6 +1882,18 @@ export default function Home() {
                               </details>
 
                               <div className="actions">
+                                <label
+                                  className="meta"
+                                  style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checkedPeople.includes(String(j.name || ""))}
+                                    onChange={() => togglePerson(j.name)}
+                                    aria-label={`Select ${j.name} for pitching`}
+                                  />
+                                  Select
+                                </label>
                                 <button
                                   className="btn-primary"
                                   onClick={() => writeDraft(j)}
@@ -1826,7 +1913,55 @@ export default function Home() {
                                     </>
                                   )}
                                 </button>
+                                <button
+                                  className="btn-secondary"
+                                  onClick={() => findEmailFor(j)}
+                                  disabled={loadingEmail === personKey(j.name)}
+                                  title="Look up this person's publicly published email"
+                                >
+                                  {loadingEmail === personKey(j.name) ? (
+                                    <Spinner />
+                                  ) : (
+                                    <Mail size={15} />
+                                  )}
+                                  {emailByPerson[personKey(j.name)] && !emailByPerson[personKey(j.name)].__error
+                                    ? "Refresh email"
+                                    : "Find email"}
+                                </button>
                               </div>
+                              {emailByPerson[personKey(j.name)] && (
+                                <div className="inline-panel">
+                                  {emailByPerson[personKey(j.name)].__error ? (
+                                    <Note tone="warn">{emailByPerson[personKey(j.name)].__error}</Note>
+                                  ) : (
+                                    <>
+                                      <p className="result-copy">
+                                        <strong>Email:</strong>{" "}
+                                        {emailByPerson[personKey(j.name)].email || "Not publicly found"}
+                                      </p>
+                                      {emailByPerson[personKey(j.name)].contact_page_url &&
+                                        emailByPerson[personKey(j.name)].contact_page_url !== "Unknown" && (
+                                          <p className="result-copy">
+                                            <strong>Contact route:</strong>{" "}
+                                            <a
+                                              href={emailByPerson[personKey(j.name)].contact_page_url}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                            >
+                                              {emailByPerson[personKey(j.name)].route || "Open contact page"}{" "}
+                                              <ExternalLink size={13} className="inline" />
+                                            </a>
+                                          </p>
+                                        )}
+                                      {emailByPerson[personKey(j.name)].evidence && (
+                                        <p className="result-meta">
+                                          {shortText(emailByPerson[personKey(j.name)].evidence, 220)}
+                                        </p>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              )}
                               {drafts[draftKey(oppKey(selectedOpp), j.name)] && (
                                 <p className="meta">Draft ready — open Outreach to copy it.</p>
                               )}

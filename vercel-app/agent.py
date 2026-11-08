@@ -1209,6 +1209,37 @@ email. Include the source URL and evidence.
     return _run_agent_in_worker(opportunity_contact_agent, prompt)
 
 
+def research_person_contact(
+    person: JournalistProfile,
+    opportunity: PROpportunity,
+) -> OpportunityContact:
+    """Find the public email or official contact route for one named person."""
+    prompt = f"""
+Find the public contact details for this specific person, for a PR pitch about
+the article below. This is for human review; do not contact anyone.
+
+PERSON: {person.name}
+PUBLICATION: {person.publication}
+VERIFIED ROLE: {person.current_role}
+THEIR RELEVANT ARTICLE: {person.relevant_article_title}
+ARTICLE URL: {person.relevant_article_url}
+KNOWN PROFILE OR CONTACT PAGE: {person.author_profile_or_contact_page}
+
+TARGET ARTICLE FOR THE PITCH: {opportunity.article_title}
+TARGET URL: {opportunity.article_url}
+
+Start from their author profile page and the publication's team/contact pages.
+Return their professional email ONLY if it is explicitly published on a public
+page you visited, with the exact source URL and quoted evidence. Otherwise use
+"Not publicly found" and return the best official contact route instead (author
+profile, team page, editorial contact page, or contact form). Never guess,
+infer, or construct an email address. Never use data-broker, scraped-email, or
+email-finder sites.
+"""
+
+    return _run_agent_in_worker(opportunity_contact_agent, prompt)
+
+
 def _trim_to_words(text: str, limit: int = 150) -> str:
     """Hard word cap: cut whole sentences so the body never exceeds limit."""
     words = (text or "").split()
@@ -1222,7 +1253,8 @@ def _trim_to_words(text: str, limit: int = 150) -> str:
     return cut.rstrip() + "…"
 
 
-def draft_journalist_pitch(   opportunity: PROpportunity,
+def draft_journalist_pitch(
+    opportunity: PROpportunity,
     person: JournalistProfile,
     angle_context: str = "",
     sender_name: str = "Prachi",

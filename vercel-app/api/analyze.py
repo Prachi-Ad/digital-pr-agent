@@ -25,6 +25,7 @@ from agent import (
     research_listicles,
     research_listicle_contact,
     research_publisher_policy,
+    research_person_contact,
     scan_domain_articles,
 )
 
@@ -152,6 +153,13 @@ def _dispatch(req: AnalyzeRequest):
         if action in ("domain-scan", "domain_scan"):
             domain = _check_domain(req.domain)
             return scan_domain_articles(domain, req.topic_hint).model_dump()
+        if action in ("person-contact", "person_contact"):
+            if req.person is None or req.opportunity is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="person and opportunity are required",
+                )
+            return research_person_contact(req.person, req.opportunity).model_dump()
         raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
     except HTTPException:
         raise
