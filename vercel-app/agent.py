@@ -316,6 +316,14 @@ class OutreachDraft(BaseModel):
     facts_to_verify: list[str] = Field(
         description="Facts, names, links, or claims a human must verify before sending."
     )
+    pitch_checks: list[str] = Field(
+        default_factory=list,
+        description=(
+            "One verdict line per pre-send question, in order: 1. Is this actually "
+            "a story? 2. Why this journalist? 3. Why now? Each names the evidence "
+            "or admits the gap."
+        ),
+    )
     compliance_notes: str = Field(
         description=(
             "Notes on publisher policy, paid/affiliate disclosure, or reasons the message "
@@ -786,6 +794,18 @@ DIGITAL PR PITCH RULES:
   list it FIRST in facts_to_verify.
 - Reference the journalist's actual published work when supplied.
 - Do not ask for a link, mention Domain Rating, or offer payment.
+- The three-question test (answer all three before finishing):
+  1. Is this actually a story? Lead with the story, never the company. Name
+     what the audience learns that is new or surprising.
+  2. Why this journalist? Show relevance to their beat fast: cite their
+     specific recent work and why you thought of them in particular. Generic
+     mass-mail phrasing fails this test.
+  3. Why now? Give the timeliness hook: new research, breaking news, a seasonal
+     trend, or the larger industry conversation this connects to. No hook, no send.
+- Make credibility easy to evaluate: who was surveyed or observed, how many,
+  when the research was conducted, and who is available for interview. Use
+  [verify: ...] for anything unconfirmed.
+- After writing, fill pitch_checks with one verdict line per question above.
 - Never include an AEO section: no "AEO core offer", no audience question, no
   answer paragraph, no schema or format talk. The pitch must read like a normal
   human email.

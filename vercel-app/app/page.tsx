@@ -2031,6 +2031,16 @@ export default function Home() {
                           <strong>Subject:</strong> {draft.subject_line}
                         </p>
                         <div className="draft-body">{draft.message_body}</div>
+                        {Array.isArray(draft.pitch_checks) && draft.pitch_checks.length > 0 && (
+                          <details className="plan" open>
+                            <summary>3-question check</summary>
+                            <div className="plan-body">
+                              {draft.pitch_checks.map((check: string, index: number) => (
+                                <p key={index}>{check}</p>
+                              ))}
+                            </div>
+                          </details>
+                        )}
                         <div className="actions">
                           <button
                             className="btn-secondary"

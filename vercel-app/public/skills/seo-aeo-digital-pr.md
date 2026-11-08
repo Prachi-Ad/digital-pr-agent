@@ -122,6 +122,11 @@ Pitch rules:
 - Offer one asset and explain why it helps their audience, in natural sentences.
 - Every pitch needs one verifiable proof (cited statistic with source and date,
   or a concrete named example). No vague claims without the underlying number.
+- Pre-send test, all three required: 1. Is this actually a story (lead with the
+  story, never the company)? 2. Why this journalist (their specific recent work,
+  not flattery)? 3. Why now (new research, news, season, or industry
+  conversation)? Include credibility details: who, how many, when, and who is
+  available for interview.
 - Never include an AEO section in a pitch: no "AEO core offer", no audience
   question, no answer paragraph, no schema or format talk. AEO stays in
   research cards and exports, never in the email body.
