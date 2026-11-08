@@ -135,6 +135,10 @@ stays a non-sending demo.
   pitch (date, angle, publication, article, used, fit + score, contact, email,
   subject, body, status, coverage URL) and refreshes on re-sync via Apps Script
   webhook upsert (`SHEET_WEBHOOK_URL` + `SHEET_WEBHOOK_TOKEN` in Vercel).
+  Segregated tabs: **Pitches**, **Contacts** (media-library sync), **Coverage**
+  (wins only), plus an auto-built **Dashboard** tab with per-status counts,
+  reply/coverage rates, email coverage, avg score, pitches-by-publication, and
+  the coverage-wins list — all live formulas.
 - **Campaign board** (Research Library): **Save as campaign** snapshots the
   workspace; loading restores research and drafts; per-campaign pitched /
   replied / covered counts and coverage links stay live.
