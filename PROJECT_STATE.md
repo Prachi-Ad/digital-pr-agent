@@ -115,8 +115,9 @@ stays a non-sending demo.
   word answer the brand could supply, the best format (answer box, comparison,
   definition, step list, FAQ), and schema.org suggestions. Shown on the card and
   in the CSV.
-- Generated pitches use that AEO angle as the core offer and carry the question
-  and answer with the draft, shown under **AEO angle used**.
+- Generated pitches are plain human emails (100-150 words, max 3 paragraphs,
+  subject under 60 characters). AEO never appears in the pitch body; it stays
+  on the opportunity cards and in the CSV.
 - UI readability raised about 5%: larger body text, slightly more line height,
   darker secondary text, and a little more card padding.
 - Brand identity is set in Vercel env (`BRAND_NAME`, `BRAND_DOMAIN`,

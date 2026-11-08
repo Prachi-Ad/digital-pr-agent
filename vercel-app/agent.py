@@ -743,20 +743,28 @@ names, coverage, awards, partnerships, product capabilities, email addresses, re
 names, roles, contact routes, policies, deadlines, or commitments.
 
 DIGITAL PR PITCH RULES:
-- 120-180 words in the message body.
-- Open with the specific article or topic and why it is relevant now.
-- Offer one credible asset: original data, expert commentary, a customer story, or a
-  concrete perspective. Explain why it helps the reader.
+- 100-150 words in the message body, max 3 short paragraphs.
+- Paragraph 1: one line on the recipient's specific article and what it covers well.
+- Paragraph 2: the single concrete thing the brand offers (data, expert comment,
+  example, template). One offer only.
+- Paragraph 3: one low-pressure close with a single next step.
 - Reference the journalist's actual published work when supplied.
 - Do not ask for a link, mention Domain Rating, or offer payment.
-- End with one low-pressure next step.
-- When the research supplies an AEO question and answer, use them as the core
-  offer and explain why the brand is a credible source. Echo the question in
-  aeo_question and the answer in aeo_answer.
+- Never include an AEO section: no "AEO core offer", no audience question, no
+  answer paragraph, no schema or format talk. The pitch must read like a normal
+  human email.
+- Never use labeled meta paragraphs such as "Asset:", "why it helps readers:",
+  or "Answer the brand can own:". Fold that information into natural sentences
+  or leave it out.
 
 STYLE:
 - Plain, professional, specific, and human. No hype or fake urgency.
-- Subject line under 70 characters and specific to the target.
+- Short sentences and plain verbs. Never repeat a word or phrase (no "host a
+  hosted", "cap and expand capacity" style doubling). Cut filler such as
+  "data-driven", "plug-and-play", "actionable", "I hope this finds you well".
+- Subject line under 60 characters and specific to the target article.
+- The body is the email only: greeting, paragraphs, sign-off. No headings,
+  labels, or commentary about the pitch itself.
 - Use the supplied sender name and role exactly.
 - If a necessary fact is missing, leave a clear [verify: ...] placeholder and list it
   in facts_to_verify.
@@ -1207,17 +1215,11 @@ Why this article matters: {opportunity.why_relevant}
 Credible brand contribution: {opportunity.brand_contribution}
 Research evidence: {opportunity.evidence}
 
-AEO ANGLE FROM RESEARCH:
-Question: {opportunity.audience_question}
-Answer the brand can own: {opportunity.aeo_answer}
-Best format: {opportunity.aeo_format}
-Suggested schema: {opportunity.aeo_schema}
-
 Write a concise pitch that references the person's specific work and offers the
-brand's contribution. Use only the verified facts above. Use the sender name and
-role exactly. If the AEO answer is present, make it the core offer: say what
-question the piece answers and why the brand is a credible source for that
-answer. Put any missing detail in [verify: ...] placeholders and list it in
+brand's contribution in natural sentences. Use only the verified facts above.
+Use the sender name and role exactly. Do NOT include any AEO section, question,
+or answer paragraph in the message body, and leave aeo_question and aeo_answer
+empty. Put any missing detail in [verify: ...] placeholders and list it in
 facts_to_verify. If the person or route is Unknown, use 'Official publication
 contact route' as the channel and note that the route must be verified.
 """

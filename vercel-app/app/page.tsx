@@ -1595,23 +1595,6 @@ export default function Home() {
                           <strong>Subject:</strong> {draft.subject_line}
                         </p>
                         <div className="draft-body">{draft.message_body}</div>
-                        {(draft.aeo_question || draft.aeo_answer) && (
-                          <details className="plan">
-                            <summary>AEO angle used</summary>
-                            <div className="plan-body">
-                              {draft.aeo_question && (
-                                <p>
-                                  <strong>Question:</strong> {draft.aeo_question}
-                                </p>
-                              )}
-                              {draft.aeo_answer && (
-                                <p>
-                                  <strong>Answer:</strong> {draft.aeo_answer}
-                                </p>
-                              )}
-                            </div>
-                          </details>
-                        )}
                         <div className="actions">
                           <button
                             className="btn-secondary"
