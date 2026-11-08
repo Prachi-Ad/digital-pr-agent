@@ -517,6 +517,81 @@ export default function Home() {
     {}
   );
 
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [syncErr, setSyncErr] = useState<string | null>(null);
+
+  async function syncToSheet() {
+    const ids = Object.keys(drafts);
+    if (ids.length === 0) return;
+    setSyncing(true);
+    setSyncMsg(null);
+    setSyncErr(null);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const rows: string[][] = [];
+      for (const id of ids) {
+        const d = drafts[id];
+        const sep = id.lastIndexOf("##");
+        const oppUrl = sep >= 0 ? id.slice(0, sep) : "";
+        let angleName = "";
+        let opp: AnyObj | null = null;
+        for (const [ak, res] of Object.entries(oppByAngle)) {
+          const found = (res?.opportunities ?? []).find(
+            (o: AnyObj) => o.article_url === oppUrl
+          );
+          if (found) {
+            angleName = ak;
+            opp = found;
+            break;
+          }
+        }
+        const out = pitchOutcomes[id] || {};
+        const emailRec = emailByPerson[id];
+        const email =
+          emailRec && !emailRec.__error ? emailRec.email || "" : "";
+        let domain = "";
+        try {
+          domain = new URL(oppUrl).hostname.replace(/^www\./, "");
+        } catch {
+          domain = "";
+        }
+        rows.push([
+          id,
+          today,
+          angleName,
+          d.publication || "",
+          domain,
+          opp?.article_title || d.target_title || "",
+          oppUrl,
+          isUsed(oppUrl) ? "yes" : "no",
+          String(opp?.pr_fit || ""),
+          String(opp?.pr_score || ""),
+          d.recipient_name || "",
+          d.recipient_role || "",
+          email,
+          d.subject_line || "",
+          d.message_body || "",
+          out.status || "Draft",
+          out.coverage_url || "",
+        ]);
+      }
+      const res = await fetch("/api/sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows }),
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.detail || "Sheet sync failed.");
+      setSyncMsg(`Sheet updated: ${data.appended} added, ${data.updated} refreshed.`);
+    } catch (err: any) {
+      setSyncErr(err?.message || "Sheet sync failed.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   async function collectWriters(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const query = collectQuery.trim();
@@ -2310,9 +2385,22 @@ export default function Home() {
                     <button className="btn-secondary" onClick={downloadCampaignCsv}>
                       Download CSV <Download size={15} />
                     </button>
+                    {Object.keys(drafts).length > 0 && (
+                      <button
+                        className="btn-primary"
+                        onClick={syncToSheet}
+                        disabled={syncing}
+                        title="Add or refresh every pitch in the connected Google Sheet"
+                      >
+                        {syncing ? <Spinner /> : <Server size={17} />}
+                        {syncing ? "Syncing..." : "Sync to Google Sheet"}
+                      </button>
+                    )}
                   </div>
 
                   {errDraft && <Note tone="warn">{errDraft}</Note>}
+                  {syncErr && <Note tone="warn">{syncErr}</Note>}
+                  {syncMsg && <Note>{syncMsg}</Note>}
 
                   {Object.keys(drafts).length === 0 ? (
                     <div className="card empty-state">
