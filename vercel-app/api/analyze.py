@@ -25,6 +25,7 @@ from agent import (
     research_listicles,
     research_listicle_contact,
     research_publisher_policy,
+    scan_domain_articles,
 )
 
 app = FastAPI()
@@ -33,6 +34,8 @@ app = FastAPI()
 class AnalyzeRequest(BaseModel):
     action: str = "analyze"
     article_url: str = ""
+    domain: str = ""
+    topic_hint: str = ""
     angle: PRAngle | None = None
     opportunity: PROpportunity | None = None
     person: JournalistProfile | None = None
@@ -51,6 +54,19 @@ def _check_url(url: str) -> str:
     if not url.startswith("https://"):
         raise HTTPException(status_code=400, detail="Please enter a valid HTTPS URL.")
     return url
+
+
+def _check_domain(domain: str) -> str:
+    domain = (domain or "").strip().lower()
+    for prefix in ("https://", "http://"):
+        if domain.startswith(prefix):
+            domain = domain[len(prefix):]
+    if domain.startswith("www."):
+        domain = domain[4:]
+    domain = domain.split("/")[0].split("?")[0].strip().rstrip(".")
+    if not domain or "." not in domain or " " in domain:
+        raise HTTPException(status_code=400, detail="Enter a valid domain, e.g. example.com.")
+    return domain
 
 
 def _dispatch(req: AnalyzeRequest):
@@ -133,6 +149,9 @@ def _dispatch(req: AnalyzeRequest):
             if req.item is None:
                 raise HTTPException(status_code=400, detail="item is required")
             return research_publisher_policy(req.item).model_dump()
+        if action in ("domain-scan", "domain_scan"):
+            domain = _check_domain(req.domain)
+            return scan_domain_articles(domain, req.topic_hint).model_dump()
         raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
     except HTTPException:
         raise

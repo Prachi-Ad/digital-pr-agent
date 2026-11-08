@@ -16,7 +16,7 @@ const MARKDOWN = `# PR Research Agent
 ## Summary
 
 - [llms.txt](/llms.txt): compact machine-readable summary.
-- API: token-gated POST \`/api/analyze\` with actions \`analyze\`, \`opportunities\`, \`journalists\`, \`draft\`, \`listicles\`, \`listicle-contact\`, \`publisher-policy\`.
+- API: token-gated POST \`/api/analyze\` with actions \`analyze\`, \`domain-scan\`, \`opportunities\`, \`journalists\`, \`draft\`, \`listicles\`, \`listicle-contact\`, \`publisher-policy\`.
 
 ## Rules
 

@@ -262,6 +262,13 @@ export default function Home() {
   const [analysis, setAnalysis] = useState<AnyObj | null>(null);
   const [errAnalyze, setErrAnalyze] = useState<string | null>(null);
 
+  // Domain scan state
+  const [domainInput, setDomainInput] = useState("");
+  const [topicHint, setTopicHint] = useState("");
+  const [loadingScan, setLoadingScan] = useState(false);
+  const [scanResult, setScanResult] = useState<AnyObj | null>(null);
+  const [errScan, setErrScan] = useState<string | null>(null);
+
   // PR workflow state
   const [selectedAngle, setSelectedAngle] = useState<AnyObj | null>(null);
   const [loadingOpp, setLoadingOpp] = useState(false);
@@ -392,6 +399,10 @@ export default function Home() {
       setErrAnalyze("Add at least one article URL.");
       return;
     }
+    await analyzeUrls(urls);
+  }
+
+  async function analyzeUrls(urls: string[]) {
     if (urls.length > 5) {
       setErrAnalyze(`Analyze up to 5 articles at a time. You entered ${urls.length}.`);
       return;
@@ -439,6 +450,41 @@ export default function Home() {
       setLoadingAnalyze(false);
       setRetryMsg(null);
     }
+  }
+
+  async function scanDomain(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const domain = domainInput.trim();
+    if (!domain) {
+      setErrScan("Enter a domain, e.g. example.com.");
+      return;
+    }
+    setLoadingScan(true);
+    setErrScan(null);
+    setScanResult(null);
+    setRetryMsg(null);
+    try {
+      const data = await callApi(
+        "domain-scan",
+        { domain, topic_hint: topicHint.trim() },
+        (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
+      );
+      setScanResult(data);
+    } catch (err: any) {
+      setErrScan(err?.message || "Something went wrong");
+    } finally {
+      setLoadingScan(false);
+      setRetryMsg(null);
+    }
+  }
+
+  async function useScannedArticle(articleUrl: string) {
+    if (!articleUrl?.startsWith("https://")) {
+      setErrAnalyze("That article URL is not usable. Pick another.");
+      return;
+    }
+    setUrlInputs([articleUrl]);
+    await analyzeUrls([articleUrl]);
   }
 
   async function regenerateAnalysis() {
@@ -864,6 +910,112 @@ export default function Home() {
 
               {workflow === "digital" && activePhase === "Research" && (
                 <div className="stack">
+                  <section className="card">
+                    <h2 className="section-title">Scan a domain</h2>
+                    <p className="body-text">
+                      Enter a publication domain to find its recent articles ranked by PR-pitch
+                      suitability. Pick one to analyze it and build angles from it.
+                    </p>
+                    <form onSubmit={scanDomain} style={{ marginTop: 16 }}>
+                      <div className="form-grid">
+                        <div className="field">
+                          <label htmlFor="scan-domain">Domain</label>
+                          <input
+                            id="scan-domain"
+                            type="text"
+                            value={domainInput}
+                            onChange={(e) => setDomainInput(e.target.value)}
+                            placeholder="example.com"
+                            aria-label="Publication domain"
+                            className="input"
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="scan-topic">Topic focus (optional)</label>
+                          <input
+                            id="scan-topic"
+                            type="text"
+                            value={topicHint}
+                            onChange={(e) => setTopicHint(e.target.value)}
+                            placeholder="e.g. social media analytics"
+                            aria-label="Optional topic focus"
+                            className="input"
+                          />
+                        </div>
+                      </div>
+                      <div className="actions" style={{ marginTop: 10 }}>
+                        <button type="submit" disabled={loadingScan} className="btn-primary">
+                          {loadingScan ? <Spinner /> : <Search size={17} />}
+                          {loadingScan ? "Scanning domain..." : "Scan domain"}
+                        </button>
+                      </div>
+                    </form>
+                    <p className="meta" style={{ marginTop: 8 }}>
+                      One research call per scan. Results rank Strong fit first.
+                    </p>
+                    {errScan && <Note tone="warn">{errScan}</Note>}
+                    {scanResult && (
+                      <div className="stack-sm" style={{ marginTop: 14 }}>
+                        <p className="step-caption">
+                          {scanResult.publication_name} · {scanResult.research_summary}
+                        </p>
+                        {(scanResult.articles ?? []).map((a: AnyObj, i: number) => (
+                          <article className="card" key={`${a.article_url}-${i}`}>
+                            <div className="card-head">
+                              <div>
+                                <h2 className="card-title">{a.article_title}</h2>
+                                <p className="meta">
+                                  {a.topic} · {a.published_date}
+                                </p>
+                              </div>
+                              {a.article_url?.startsWith("https://") && (
+                                <a className="btn-secondary" href={a.article_url} target="_blank" rel="noreferrer">
+                                  Open article <ExternalLink size={15} />
+                                </a>
+                              )}
+                            </div>
+                            <p className="body-text">
+                              <strong>Why it matters:</strong> {shortText(a.why_pitchable)}
+                            </p>
+                            {a.suggested_angle && (
+                              <p className="body-text">
+                                <strong>Suggested angle:</strong> {shortText(a.suggested_angle)}
+                              </p>
+                            )}
+                            {a.pr_fit && fitStyles[a.pr_fit] && (
+                              <div className={`fit-banner ${fitStyles[a.pr_fit].className}`}>
+                                <strong>{fitStyles[a.pr_fit].label}</strong>
+                                <span>{a.pr_fit_reason}</span>
+                              </div>
+                            )}
+                            {Array.isArray(a.pr_red_flags) && a.pr_red_flags.length > 0 && (
+                              <p className="meta">Signals: {a.pr_red_flags.join(" · ")}</p>
+                            )}
+                            <div className="actions">
+                              <button
+                                className="btn-primary"
+                                onClick={() => useScannedArticle(a.article_url)}
+                                disabled={loadingAnalyze}
+                              >
+                                {loadingAnalyze ? (
+                                  <>
+                                    <Spinner /> Analyzing...
+                                  </>
+                                ) : (
+                                  <>
+                                    Analyze this article <ArrowRight size={16} />
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </article>
+                        ))}
+                        {(!scanResult.articles || scanResult.articles.length === 0) && (
+                          <Note tone="warn">No usable articles were found on this domain.</Note>
+                        )}
+                      </div>
+                    )}
+                  </section>
                   <section className="card">
                     <h2 className="section-title">Analyze articles</h2>
                     <p className="body-text">

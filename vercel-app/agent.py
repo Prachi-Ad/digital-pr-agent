@@ -178,6 +178,34 @@ class PRResearchResults(BaseModel):
     opportunities: list[PROpportunity] = Field(description="The strongest relevant editorial candidates.")
 
 
+class DomainArticle(BaseModel):
+    article_title: str = Field(description="Title of the article on the scanned domain.")
+    article_url: str = Field(description="Exact URL of the article.")
+    published_date: str = Field(description="Publication date, or Unknown if unverified.")
+    topic: str = Field(description="The article's main topic.")
+    why_pitchable: str = Field(description="One or two sentences on why this article is a usable PR pitch target.")
+    suggested_angle: str = Field(description="The pitch angle the brand could take for this article.")
+    pr_fit: str = Field(
+        default="Not assessed",
+        description="PR suitability verdict: Strong fit, Possible fit, Weak fit, or Not suitable.",
+    )
+    pr_fit_reason: str = Field(
+        default="Not assessed yet.",
+        description="One short sentence naming the specific signal behind the verdict.",
+    )
+    pr_red_flags: list[str] = Field(
+        default_factory=list,
+        description="Specific negative signals, if any. Empty when none.",
+    )
+
+
+class DomainScanResults(BaseModel):
+    domain: str = Field(description="The domain that was scanned.")
+    publication_name: str = Field(description="Publication or website name behind the domain.")
+    research_summary: str = Field(description="A concise summary of what the scan found.")
+    articles: list[DomainArticle] = Field(description="Recent articles ranked by PR-pitch suitability.")
+
+
 class OpportunityContact(BaseModel):
     contact_name: str = Field(
         description=(
@@ -599,6 +627,63 @@ Return only the requested structured fields.
 
 
 # =========================================================
+# DOMAIN SCAN AGENT
+# =========================================================
+
+domain_agent = Agent(
+    name="Domain PR Scanner",
+    instructions=f"""
+You are a Digital PR opportunity researcher for {BRAND_NAME}.
+
+{EXPERT_RULES}
+
+The user supplies one domain (for example example.com). Find that domain's
+recent editorial articles and judge which ones can be used as a PR pitch
+target for {BRAND_NAME} ({PRODUCT_DESCRIPTION}).
+
+Research process:
+1. Confirm the publication or website behind the domain.
+2. Search the web restricted to that domain (site: queries, 2-3 topic
+   variations, plus one general "newest articles" pass).
+3. Collect specific recent articles, not homepages, tag pages, or author
+   archives.
+4. For each article, judge topical relevance to {BRAND_NAME}'s themes and
+   whether the brand can credibly contribute (data, expert comment, customer
+   story, missing angle).
+5. Give every article a PR suitability verdict and rank Strong fit first.
+6. Return up to 8 articles.
+
+PR suitability:
+- Strong fit: original editorial content, a named writer or editor, a relevant
+  audience, and a credible editorial reason to pitch.
+- Possible fit: relevant, but one signal is unclear or missing.
+- Weak fit: thin or unclear editorial value, unclear authorship, or a weak
+  audience match.
+- Not suitable: a content farm, scraped or syndicated content, paid-only
+  placement, a directory or aggregator, a dead or abandoned blog, or a page
+  with no genuine editorial route.
+
+Rules:
+- Search the live web; prefer articles from roughly the last 12 months.
+- Only list articles you actually found. Do not invent titles, URLs, or dates.
+- Use Unknown when a date cannot be verified.
+- Every article URL must be on the scanned domain.
+- Suggest one concrete pitch angle per article.
+- Do not contact anyone or send outreach.
+
+Quality matters more than quantity.
+Return only the requested structured fields.
+""",
+    tools=[web_search],
+    model=MODEL,
+    model_settings=MODEL_SETTINGS,
+    output_type=DomainScanResults,
+)
+
+
+
+
+# =========================================================
 # CONTENT / SEO CONTACT AGENT
 # =========================================================
 
@@ -991,6 +1076,31 @@ topical relevance, editorial fit, evidence, competitor presence, and next action
 Return up to 5 strong candidates.
 """
     return _run_agent_in_worker(opportunity_agent, prompt)
+
+
+def scan_domain_articles(domain: str, topic_hint: str = "") -> DomainScanResults:
+    """Scan one domain for recent articles usable as PR pitch targets."""
+    domain = (domain or "").strip().lower()
+    domain = domain.removeprefix("https://").removeprefix("http://").removeprefix("www.")
+    domain = domain.split("/")[0]
+    hint = (topic_hint or "").strip()
+    prompt = f"""
+Scan this domain for articles {BRAND_NAME} could pitch:
+
+DOMAIN:
+{domain}
+"""
+    if hint:
+        prompt += f"""
+OPTIONAL TOPIC FOCUS (prefer articles related to this, but still list the
+domain's other strong candidates):
+{hint}
+"""
+    prompt += """
+Find the domain's recent articles, judge each one's suitability as a PR pitch
+target, and rank the strongest first. Return up to 8.
+"""
+    return _run_agent_in_worker(domain_agent, prompt)
 
 
 def research_journalists(
