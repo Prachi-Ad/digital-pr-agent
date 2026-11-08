@@ -127,6 +127,10 @@ stays a non-sending demo.
   for selected**, instead of all-or-one. Each card also has **Find email**,
   which looks up that person's publicly published email (or the official
   contact route when none is published) via a `person-contact` research call.
+- **Outcome tracking**: every draft has a Draft / Pitched / Replied / Covered /
+  Declined / Do-not-contact status with a coverage URL field on wins, persisted
+  in the browser, counted in the Outreach header, shown in the media library,
+  and exported in the CSV.
 - Every draft carries a **3-question check** (is it a story? why this
   journalist? why now?) with credibility details, per the think-like-a-
   journalist framework; pitches lead with the story, never the company.
