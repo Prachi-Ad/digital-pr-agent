@@ -118,6 +118,12 @@ stays a non-sending demo.
 - Generated pitches are plain human emails (100-150 words, max 3 paragraphs,
   subject under 60 characters). AEO never appears in the pitch body; it stays
   on the opportunity cards and in the CSV.
+- The digital workflow shows one step per screen (Article, PR angles,
+  Opportunities, Journalists, Outreach) with tabs inside each phase, instead of
+  one long stacked page. Bulk actions run sequentially with progress:
+  **Research all angles**, **Find writers for all**, **Write all pitches**.
+  Results are kept per angle/opportunity with chips to switch, and the CSV
+  covers all researched angles with an angle column.
 - UI readability raised about 5%: larger body text, slightly more line height,
   darker secondary text, and a little more card padding.
 - Brand identity is set in Vercel env (`BRAND_NAME`, `BRAND_DOMAIN`,
