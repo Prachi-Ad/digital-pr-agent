@@ -49,6 +49,11 @@ const firstStepOfDigitalPhase: Record<DigitalPhase, DigitalStep> = {
   Prospects: "Opportunities",
   Outreach: "Outreach",
 };
+const stepsOfDigitalPhase: Record<DigitalPhase, DigitalStep[]> = {
+  Research: ["Article", "PR angles"],
+  Prospects: ["Opportunities", "Journalists"],
+  Outreach: ["Outreach"],
+};
 const phaseOfListicleStep: Record<ListicleStep, ListiclePhase> = {
   Search: "Find & review",
   Prospects: "Find & review",
@@ -330,11 +335,13 @@ export default function Home() {
   const [selectedAngle, setSelectedAngle] = useState<AnyObj | null>(null);
   const [loadingOpp, setLoadingOpp] = useState(false);
   const [opportunities, setOpportunities] = useState<AnyObj | null>(null);
+  const [oppByAngle, setOppByAngle] = useState<Record<string, AnyObj>>({});
   const [errOpp, setErrOpp] = useState<string | null>(null);
 
   const [selectedOpp, setSelectedOpp] = useState<AnyObj | null>(null);
   const [loadingJourn, setLoadingJourn] = useState(false);
   const [journalists, setJournalists] = useState<AnyObj | null>(null);
+  const [writersByOpp, setWritersByOpp] = useState<Record<string, AnyObj>>({});
   const [errJourn, setErrJourn] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, AnyObj>>({});
   const [loadingDraft, setLoadingDraft] = useState<string | null>(null);
@@ -363,8 +370,16 @@ export default function Home() {
   const [errPolicy, setErrPolicy] = useState<string | null>(null);
 
   const angleCount = analysis?.pr_angles?.length || 0;
-  const oppCount = opportunities?.opportunities?.length || 0;
-  const journCount = journalists?.journalists?.length || 0;
+  const oppEntries = Object.entries(oppByAngle);
+  const oppCount =
+    oppEntries.length > 0
+      ? oppEntries.reduce((n, [, res]) => n + (res?.opportunities?.length || 0), 0)
+      : opportunities?.opportunities?.length || 0;
+  const writerEntries = Object.entries(writersByOpp);
+  const journCount =
+    writerEntries.length > 0
+      ? writerEntries.reduce((n, [, res]) => n + (res?.journalists?.length || 0), 0)
+      : journalists?.journalists?.length || 0;
   const listCount = listicles?.opportunities?.length || 0;
   const contactCount = contact?.contacts?.length || 0;
 
@@ -427,8 +442,10 @@ export default function Home() {
   function resetAnalysisDownstream() {
     setSelectedAngle(null);
     setOpportunities(null);
+    setOppByAngle({});
     setSelectedOpp(null);
     setJournalists(null);
+    setWritersByOpp({});
     setDrafts({});
     setErrOpp(null);
     setErrJourn(null);
@@ -574,6 +591,39 @@ export default function Home() {
     }
   }
 
+  function angleKey(angle: AnyObj | null): string {
+    return String(angle?.angle || "").trim();
+  }
+
+  function oppKey(o: AnyObj | null): string {
+    return String(o?.article_url || "").trim();
+  }
+
+  function draftKey(oppUrl: string, name: any): string {
+    return `${oppUrl}##${String(name || "contact")}`;
+  }
+
+  function selectAngleCached(angle: AnyObj) {
+    setSelectedAngle(angle);
+    setOpportunities(oppByAngle[angleKey(angle)] ?? null);
+    setErrOpp(null);
+  }
+
+  function pickAngle(angle: AnyObj) {
+    if (oppByAngle[angleKey(angle)]) {
+      selectAngleCached(angle);
+      setDigitalStep("Opportunities");
+    } else {
+      researchAngle(angle);
+    }
+  }
+
+  function selectOppCached(opportunity: AnyObj) {
+    setSelectedOpp(opportunity);
+    setJournalists(writersByOpp[oppKey(opportunity)] ?? null);
+    setErrJourn(null);
+  }
+
   async function researchAngle(angle: AnyObj) {
     setSelectedAngle(angle);
     setLoadingOpp(true);
@@ -581,13 +631,13 @@ export default function Home() {
     setOpportunities(null);
     setSelectedOpp(null);
     setJournalists(null);
-    setDrafts({});
     setRetryMsg(null);
     try {
       const data = await callApi("opportunities", { angle }, (a) =>
         setRetryMsg(`Retrying (attempt ${a}/3)...`)
       );
       setOpportunities(data);
+      setOppByAngle((current) => ({ ...current, [angleKey(angle)]: data }));
       setDigitalStep("Opportunities");
     } catch (err: any) {
       setErrOpp(err?.message || "Something went wrong");
@@ -608,8 +658,40 @@ export default function Home() {
         setRetryMsg(`Retrying (attempt ${a}/3)...`)
       );
       setOpportunities(data);
+      setOppByAngle((current) => ({ ...current, [angleKey(selectedAngle)]: data }));
     } catch (err: any) {
       setErrOpp(err?.message || "Something went wrong");
+    } finally {
+      setLoadingOpp(false);
+      setRetryMsg(null);
+    }
+  }
+
+  async function researchAllAngles() {
+    const angles = analysis?.pr_angles ?? [];
+    if (angles.length === 0) return;
+    setLoadingOpp(true);
+    setErrOpp(null);
+    setRetryMsg(null);
+    const failures: string[] = [];
+    try {
+      for (let index = 0; index < angles.length; index += 1) {
+        const angle = angles[index];
+        setRetryMsg(`Researching angles ${index + 1} of ${angles.length}...`);
+        try {
+          const data = await callApi("opportunities", { angle }, (attempt) =>
+            setRetryMsg(`Researching angles ${index + 1} of ${angles.length} - retry ${attempt}/3...`)
+          );
+          setOppByAngle((current) => ({ ...current, [angleKey(angle)]: data }));
+          if (angleKey(angle) === angleKey(selectedAngle)) setOpportunities(data);
+        } catch (err: any) {
+          failures.push(`${shortText(angle.angle, 60)}: ${err?.message || "failed"}`);
+          if (String(err?.message || "").match(/429|limit|budget|Too many/i)) break;
+        }
+      }
+      if (failures.length > 0) {
+        setErrOpp(`Stopped with ${failures.length} failure(s). ${failures.join(" | ")}`);
+      }
     } finally {
       setLoadingOpp(false);
       setRetryMsg(null);
@@ -620,7 +702,6 @@ export default function Home() {
     if (!selectedAngle) return;
     setSelectedOpp(opportunity);
     setJournalists(null);
-    setDrafts({});
     setDigitalStep("Journalists");
     setLoadingJourn(true);
     setErrJourn(null);
@@ -632,6 +713,7 @@ export default function Home() {
         (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
       );
       setJournalists(data);
+      setWritersByOpp((current) => ({ ...current, [oppKey(opportunity)]: data }));
     } catch (err: any) {
       setErrJourn(err?.message || "Something went wrong");
     } finally {
@@ -653,6 +735,7 @@ export default function Home() {
         (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
       );
       setJournalists(data);
+      setWritersByOpp((current) => ({ ...current, [oppKey(selectedOpp)]: data }));
     } catch (err: any) {
       setErrJourn(err?.message || "Something went wrong");
     } finally {
@@ -661,9 +744,43 @@ export default function Home() {
     }
   }
 
+  async function findWritersForAll() {
+    const opps = opportunities?.opportunities ?? [];
+    if (!selectedAngle || opps.length === 0) return;
+    setLoadingJourn(true);
+    setErrJourn(null);
+    setRetryMsg(null);
+    const failures: string[] = [];
+    try {
+      for (let index = 0; index < opps.length; index += 1) {
+        const opportunity = opps[index];
+        setRetryMsg(`Finding writers ${index + 1} of ${opps.length}...`);
+        try {
+          const data = await callApi(
+            "journalists",
+            { angle: selectedAngle, opportunity },
+            (attempt) => setRetryMsg(`Finding writers ${index + 1} of ${opps.length} - retry ${attempt}/3...`)
+          );
+          setWritersByOpp((current) => ({ ...current, [oppKey(opportunity)]: data }));
+          if (oppKey(opportunity) === oppKey(selectedOpp)) setJournalists(data);
+        } catch (err: any) {
+          failures.push(`${shortText(opportunity.article_title, 60)}: ${err?.message || "failed"}`);
+          if (String(err?.message || "").match(/429|limit|budget|Too many/i)) break;
+        }
+      }
+      if (failures.length > 0) {
+        setErrJourn(`Stopped with ${failures.length} failure(s). ${failures.join(" | ")}`);
+      }
+      setDigitalStep("Journalists");
+    } finally {
+      setLoadingJourn(false);
+      setRetryMsg(null);
+    }
+  }
+
   async function writeDraft(person: AnyObj) {
     if (!selectedAngle || !selectedOpp) return;
-    const key = String(person.name || "contact");
+    const key = draftKey(oppKey(selectedOpp), person.name);
     setLoadingDraft(key);
     setErrDraft(null);
     setRetryMsg(null);
@@ -683,6 +800,53 @@ export default function Home() {
     }
   }
 
+  async function writeAllPitches() {
+    const entries: Array<{ angle: AnyObj; opportunity: AnyObj; person: AnyObj }> = [];
+    for (const [key, res] of Object.entries(oppByAngle)) {
+      const angle = (analysis?.pr_angles ?? []).find((a: AnyObj) => angleKey(a) === key);
+      if (!angle) continue;
+      for (const opportunity of res?.opportunities ?? []) {
+        for (const person of writersByOpp[oppKey(opportunity)]?.journalists ?? []) {
+          entries.push({ angle, opportunity, person });
+        }
+      }
+    }
+    if (entries.length === 0) return;
+    setLoadingDraft("__all__");
+    setErrDraft(null);
+    setRetryMsg(null);
+    const failures: string[] = [];
+    let done = 0;
+    try {
+      for (let index = 0; index < entries.length; index += 1) {
+        const { angle, opportunity, person } = entries[index];
+        const key = draftKey(oppKey(opportunity), person.name);
+        setRetryMsg(`Writing pitches ${index + 1} of ${entries.length}...`);
+        try {
+          const data = await callApi(
+            "draft",
+            { angle, opportunity, person },
+            (attempt) => setRetryMsg(`Writing pitches ${index + 1} of ${entries.length} - retry ${attempt}/3...`)
+          );
+          setDrafts((current) => ({ ...current, [key]: data }));
+          done += 1;
+        } catch (err: any) {
+          failures.push(`${shortText(person.name, 40)}: ${err?.message || "failed"}`);
+          if (String(err?.message || "").match(/429|limit|budget|Too many/i)) break;
+        }
+      }
+      if (failures.length > 0) {
+        setErrDraft(
+          `Wrote ${done} of ${entries.length} pitches. Failures: ${failures.join(" | ")}`
+        );
+      }
+      if (done > 0) setDigitalStep("Outreach");
+    } finally {
+      setLoadingDraft(null);
+      setRetryMsg(null);
+    }
+  }
+
   function downloadText(filename: string, text: string) {
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -694,9 +858,12 @@ export default function Home() {
   }
 
   function downloadCampaignCsv() {
-    const opps = opportunities?.opportunities ?? [];
-    const people = journalists?.journalists ?? [];
+    const angleGroups: Array<[string, AnyObj | null]> =
+      Object.entries(oppByAngle).length > 0
+        ? Object.entries(oppByAngle)
+        : [[angleKey(selectedAngle), opportunities]];
     const header = [
+      "angle",
       "publication",
       "site_domain",
       "article_title",
@@ -713,33 +880,36 @@ export default function Home() {
       "body",
     ];
     const rows: string[][] = [];
-    for (const opportunity of opps) {
-      const selected = selectedOpp?.article_url === opportunity.article_url;
-      const contacts = selected && people.length ? people : [null];
-      for (const person of contacts) {
-        const draft = person ? drafts[String(person.name || "contact")] : null;
-        let domain = "";
-        try {
-          domain = new URL(opportunity.article_url || "").hostname.replace(/^www\./, "");
-        } catch {
-          domain = "";
+    for (const [angleName, res] of angleGroups) {
+      for (const opportunity of res?.opportunities ?? []) {
+        const writers = writersByOpp[oppKey(opportunity)]?.journalists ?? [];
+        const contacts = writers.length ? writers : [null];
+        for (const person of contacts) {
+          const draft = person ? drafts[draftKey(oppKey(opportunity), person.name)] : null;
+          let domain = "";
+          try {
+            domain = new URL(opportunity.article_url || "").hostname.replace(/^www\./, "");
+          } catch {
+            domain = "";
+          }
+          rows.push([
+            angleName || "",
+            opportunity.publication || "",
+            domain,
+            opportunity.article_title || "",
+            opportunity.article_url || "",
+            isUsed(opportunity.article_url) ? "yes" : "no",
+            opportunity.pr_fit || "",
+            opportunity.audience_question || "",
+            opportunity.aeo_answer || "",
+            opportunity.aeo_format || "",
+            opportunity.aeo_schema || "",
+            person?.name || "",
+            person?.current_role || "",
+            draft?.subject_line || "",
+            draft?.message_body || "",
+          ]);
         }
-        rows.push([
-          opportunity.publication || "",
-          domain,
-          opportunity.article_title || "",
-          opportunity.article_url || "",
-          isUsed(opportunity.article_url) ? "yes" : "no",
-          opportunity.pr_fit || "",
-          opportunity.audience_question || "",
-          opportunity.aeo_answer || "",
-          opportunity.aeo_format || "",
-          opportunity.aeo_schema || "",
-          person?.name || "",
-          person?.current_role || "",
-          draft?.subject_line || "",
-          draft?.message_body || "",
-        ]);
       }
     }
     const csv = [header, ...rows]
@@ -964,10 +1134,25 @@ export default function Home() {
               <p className="meta" style={{ marginTop: 8 }}>
                 Phase {phases.indexOf(activePhase) + 1} of {phases.length} · {activePhase}
               </p>
+              {workflow === "digital" && stepsOfDigitalPhase[activePhase as DigitalPhase].length > 1 && (
+                <div className="stepper" role="tablist" aria-label="Steps in this phase">
+                  {stepsOfDigitalPhase[activePhase as DigitalPhase].map((step) => (
+                    <button
+                      key={step}
+                      role="tab"
+                      aria-selected={digitalStep === step}
+                      className={digitalStep === step ? "active" : ""}
+                      onClick={() => setDigitalStep(step)}
+                    >
+                      {step}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {retryMsg && <Note>{retryMsg}</Note>}
 
-              {workflow === "digital" && activePhase === "Research" && (
+              {workflow === "digital" && activePhase === "Research" && digitalStep === "Article" && (
                 <div className="stack">
                   <section className="card">
                     <h2 className="section-title">Scan a domain</h2>
@@ -1190,10 +1375,10 @@ export default function Home() {
                 </div>
               )}
 
-              {workflow === "digital" && activePhase === "Research" && !!analysis && (
+              {workflow === "digital" && activePhase === "Research" && digitalStep === "PR angles" && !!analysis && (
                 <>
                   <p className="step-caption">
-                    Choose the angle with the clearest editorial value. Research is only run for the angle you pick.
+                    Research one angle, or research them all at once. Each angle keeps its own results.
                   </p>
                   {!analysis ? (
                     <div className="card empty-state">
@@ -1212,6 +1397,12 @@ export default function Home() {
                         <button className="btn-secondary" onClick={regenerateAnalysis} disabled={loadingAnalyze}>
                           {loadingAnalyze ? <Spinner /> : <RefreshCw size={16} />}
                           {loadingAnalyze ? "Generating again..." : "Generate again"}
+                        </button>
+                      </div>
+                      <div className="actions">
+                        <button className="btn-primary" onClick={researchAllAngles} disabled={loadingOpp}>
+                          {loadingOpp ? <Spinner /> : <Search size={17} />}
+                          {loadingOpp ? "Researching all angles..." : "Research all angles at once"}
                         </button>
                       </div>
                       {errOpp && <Note tone="warn">{errOpp}</Note>}
@@ -1258,11 +1449,15 @@ export default function Home() {
                             <button
                               className="btn-primary w-full"
                               disabled={loadingOpp}
-                              onClick={() => researchAngle(a)}
+                              onClick={() => pickAngle(a)}
                             >
                               {loadingOpp && selectedAngle?.angle === a.angle ? (
                                 <>
                                   <Spinner /> Researching angle...
+                                </>
+                              ) : oppByAngle[angleKey(a)] ? (
+                                <>
+                                  Researched ✓ — view opportunities <ArrowRight size={16} />
                                 </>
                               ) : (
                                 <>
@@ -1278,7 +1473,7 @@ export default function Home() {
                 </>
               )}
 
-              {workflow === "digital" && activePhase === "Prospects" && (
+              {workflow === "digital" && activePhase === "Prospects" && digitalStep === "Opportunities" && (
                 <>
                   <p className="step-caption">
                     Research finds existing articles where this angle can add evidence, a useful perspective, or a
@@ -1293,6 +1488,19 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="stack">
+                      <div className="actions" style={{ marginTop: 0 }}>
+                        {(analysis?.pr_angles ?? []).map((a: AnyObj, i: number) => (
+                          <button
+                            key={`${a.angle}-${i}`}
+                            type="button"
+                            className={angleKey(a) === angleKey(selectedAngle) ? "btn-primary" : "btn-secondary"}
+                            onClick={() => pickAngle(a)}
+                            title={shortText(a.angle, 120)}
+                          >
+                            {i + 1}. {shortText(a.angle, 32)} {oppByAngle[angleKey(a)] ? "✓" : ""}
+                          </button>
+                        ))}
+                      </div>
                       <section className="context-card">
                         <span className="context-label">Selected angle</span>
                         <span className="context-value">{selectedAngle.angle}</span>
@@ -1303,6 +1511,12 @@ export default function Home() {
                           {loadingOpp ? <Spinner /> : opportunities ? <RefreshCw size={17} /> : <Search size={17} />}
                           {opportunities ? "Generate again" : "Run opportunity research"}
                         </button>
+                        {opportunities && (opportunities.opportunities ?? []).length > 1 && (
+                          <button className="btn-secondary" onClick={findWritersForAll} disabled={loadingJourn}>
+                            {loadingJourn ? <Spinner /> : <Users size={17} />}
+                            {loadingJourn ? "Finding writers..." : "Find writers for all"}
+                          </button>
+                        )}
                       </div>
 
                       {errOpp && <Note tone="warn">{errOpp}</Note>}
@@ -1447,10 +1661,10 @@ export default function Home() {
                 </>
               )}
 
-              {workflow === "digital" && activePhase === "Prospects" && !!selectedOpp && (
+              {workflow === "digital" && activePhase === "Prospects" && digitalStep === "Journalists" && (
                 <>
                   <p className="step-caption">
-                    Find writers or the best content/SEO contact for this article. If no named writer matches, the publication contact is used instead.
+                    Find writers or the best content/SEO contact for each opportunity, then write all pitches at once.
                   </p>
                   {!selectedAngle || !selectedOpp ? (
                     <div className="card empty-state">
@@ -1461,6 +1675,19 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="stack">
+                      <div className="actions" style={{ marginTop: 0 }}>
+                        {(opportunities?.opportunities ?? []).map((o: AnyObj, i: number) => (
+                          <button
+                            key={`${o.article_url}-${i}`}
+                            type="button"
+                            className={oppKey(o) === oppKey(selectedOpp) ? "btn-primary" : "btn-secondary"}
+                            onClick={() => selectOppCached(o)}
+                            title={shortText(o.article_title, 120)}
+                          >
+                            {i + 1}. {shortText(o.article_title, 32)} {writersByOpp[oppKey(o)] ? "✓" : ""}
+                          </button>
+                        ))}
+                      </div>
                       <section className="context-card">
                         <span className="context-label">Selected opportunity</span>
                         <span className="context-value">
@@ -1472,6 +1699,15 @@ export default function Home() {
                         <button className="btn-primary" onClick={runJournalists} disabled={loadingJourn}>
                           {loadingJourn ? <Spinner /> : journalists ? <RefreshCw size={17} /> : <Users size={17} />}
                           {journalists ? "Find again" : "Find writers & contacts"}
+                        </button>
+                        <button
+                          className="btn-secondary"
+                          onClick={writeAllPitches}
+                          disabled={loadingDraft !== null || writerEntries.length === 0}
+                          title="Write a pitch for every researched writer across all angles"
+                        >
+                          {loadingDraft === "__all__" ? <Spinner /> : <Mail size={17} />}
+                          {loadingDraft === "__all__" ? "Writing all..." : "Write all pitches"}
                         </button>
                       </div>
 
@@ -1526,13 +1762,13 @@ export default function Home() {
                                 <button
                                   className="btn-primary"
                                   onClick={() => writeDraft(j)}
-                                  disabled={loadingDraft === j.name}
+                                  disabled={loadingDraft === draftKey(oppKey(selectedOpp), j.name)}
                                 >
-                                  {loadingDraft === j.name ? (
+                                  {loadingDraft === draftKey(oppKey(selectedOpp), j.name) ? (
                                     <>
                                       <Spinner /> Writing pitch...
                                     </>
-                                  ) : drafts[j.name] ? (
+                                  ) : drafts[draftKey(oppKey(selectedOpp), j.name)] ? (
                                     <>
                                       Write again <RefreshCw size={15} />
                                     </>
@@ -1543,7 +1779,7 @@ export default function Home() {
                                   )}
                                 </button>
                               </div>
-                              {drafts[j.name] && (
+                              {drafts[draftKey(oppKey(selectedOpp), j.name)] && (
                                 <p className="meta">Draft ready — open Outreach to copy it.</p>
                               )}
                             </article>
@@ -1564,7 +1800,7 @@ export default function Home() {
                 <div className="stack">
                   <div className="actions-between">
                     <p className="step-caption">
-                      Personalized drafts for the selected opportunity. Copy or download them; nothing is sent.
+                      Personalized drafts for every researched contact. Copy or download them; nothing is sent.
                     </p>
                     <button className="btn-secondary" onClick={downloadCampaignCsv}>
                       Download CSV <Download size={15} />
