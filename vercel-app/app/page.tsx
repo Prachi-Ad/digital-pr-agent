@@ -521,72 +521,156 @@ export default function Home() {
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [syncErr, setSyncErr] = useState<string | null>(null);
 
+  async function postSheetTab(tab: string, rows: string[][]) {
+    const res = await fetch("/api/sheet", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tab, rows }),
+      cache: "no-store",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.detail || `Sheet sync failed (${tab}).`);
+    return data;
+  }
+
+  function splitDraftId(id: string): string {
+    const sep = id.lastIndexOf("##");
+    return sep >= 0 ? id.slice(0, sep) : "";
+  }
+
+  function buildPitchRows(): string[][] {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows: string[][] = [];
+    for (const id of Object.keys(drafts)) {
+      const d = drafts[id];
+      const oppUrl = splitDraftId(id);
+      let angleName = "";
+      let opp: AnyObj | null = null;
+      for (const [ak, res] of Object.entries(oppByAngle)) {
+        const found = (res?.opportunities ?? []).find(
+          (o: AnyObj) => o.article_url === oppUrl
+        );
+        if (found) {
+          angleName = ak;
+          opp = found;
+          break;
+        }
+      }
+      const out = pitchOutcomes[id] || {};
+      const emailRec = emailByPerson[id];
+      const email = emailRec && !emailRec.__error ? emailRec.email || "" : "";
+      let domain = "";
+      try {
+        domain = new URL(oppUrl).hostname.replace(/^www\./, "");
+      } catch {
+        domain = "";
+      }
+      rows.push([
+        id,
+        today,
+        angleName,
+        d.publication || "",
+        domain,
+        opp?.article_title || d.target_title || "",
+        oppUrl,
+        isUsed(oppUrl) ? "yes" : "no",
+        String(opp?.pr_fit || ""),
+        String(opp?.pr_score || ""),
+        d.recipient_name || "",
+        d.recipient_role || "",
+        email,
+        d.subject_line || "",
+        d.message_body || "",
+        out.status || "Draft",
+        out.coverage_url || "",
+      ]);
+    }
+    return rows;
+  }
+
+  function buildCoverageRows(): string[][] {
+    const rows: string[][] = [];
+    for (const id of Object.keys(drafts)) {
+      const out = pitchOutcomes[id] || {};
+      if (out.status !== "Covered") continue;
+      const d = drafts[id];
+      const oppUrl = splitDraftId(id);
+      let opp: AnyObj | null = null;
+      for (const res of Object.values(oppByAngle)) {
+        const found = (res?.opportunities ?? []).find(
+          (o: AnyObj) => o.article_url === oppUrl
+        );
+        if (found) {
+          opp = found;
+          break;
+        }
+      }
+      rows.push([
+        id,
+        out.updated || new Date().toISOString().slice(0, 10),
+        d.recipient_name || "",
+        d.publication || "",
+        opp?.article_title || d.target_title || "",
+        oppUrl,
+        d.subject_line || "",
+        out.coverage_url || "",
+        "Covered",
+      ]);
+    }
+    return rows;
+  }
+
+  function buildContactRows(): string[][] {
+    return (Object.entries(mediaLibrary) as Array<[string, AnyObj]>).map(([key, e]) => [
+      key,
+      e.name || "",
+      e.publication || "",
+      e.role || "",
+      e.beat || "",
+      e.email || "",
+      e.contact_page || "",
+      e.profile_url || "",
+      e.article_title || "",
+      e.article_url || "",
+      (e.angles ?? []).slice(-1)[0] || "",
+      e.last_seen || "",
+      draftStatusFor(e.name) || "",
+    ]);
+  }
+
   async function syncToSheet() {
-    const ids = Object.keys(drafts);
-    if (ids.length === 0) return;
+    if (Object.keys(drafts).length === 0) return;
     setSyncing(true);
     setSyncMsg(null);
     setSyncErr(null);
     try {
-      const today = new Date().toISOString().slice(0, 10);
-      const rows: string[][] = [];
-      for (const id of ids) {
-        const d = drafts[id];
-        const sep = id.lastIndexOf("##");
-        const oppUrl = sep >= 0 ? id.slice(0, sep) : "";
-        let angleName = "";
-        let opp: AnyObj | null = null;
-        for (const [ak, res] of Object.entries(oppByAngle)) {
-          const found = (res?.opportunities ?? []).find(
-            (o: AnyObj) => o.article_url === oppUrl
-          );
-          if (found) {
-            angleName = ak;
-            opp = found;
-            break;
-          }
-        }
-        const out = pitchOutcomes[id] || {};
-        const emailRec = emailByPerson[id];
-        const email =
-          emailRec && !emailRec.__error ? emailRec.email || "" : "";
-        let domain = "";
-        try {
-          domain = new URL(oppUrl).hostname.replace(/^www\./, "");
-        } catch {
-          domain = "";
-        }
-        rows.push([
-          id,
-          today,
-          angleName,
-          d.publication || "",
-          domain,
-          opp?.article_title || d.target_title || "",
-          oppUrl,
-          isUsed(oppUrl) ? "yes" : "no",
-          String(opp?.pr_fit || ""),
-          String(opp?.pr_score || ""),
-          d.recipient_name || "",
-          d.recipient_role || "",
-          email,
-          d.subject_line || "",
-          d.message_body || "",
-          out.status || "Draft",
-          out.coverage_url || "",
-        ]);
+      const pitches = await postSheetTab("Pitches", buildPitchRows());
+      const coverageRows = buildCoverageRows();
+      let coverage = { updated: 0, appended: 0 };
+      if (coverageRows.length > 0) {
+        coverage = await postSheetTab("Coverage", coverageRows);
       }
-      const res = await fetch("/api/sheet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows }),
-        cache: "no-store",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.detail || "Sheet sync failed.");
-      setSyncMsg(`Sheet updated: ${data.appended} added, ${data.updated} refreshed.`);
+      setSyncMsg(
+        `Sheet updated — Pitches: ${pitches.appended} added, ${pitches.updated} refreshed; ` +
+          `Coverage: ${coverage.appended} added, ${coverage.updated} refreshed.`
+      );
     } catch (err: any) {
       setSyncErr(err?.message || "Sheet sync failed.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function syncContactsToSheet() {
+    if (Object.keys(mediaLibrary).length === 0) return;
+    setSyncing(true);
+    setSyncMsg(null);
+    setSyncErr(null);
+    try {
+      const data = await postSheetTab("Contacts", buildContactRows());
+      setCollectMsg(`Contacts synced: ${data.appended} added, ${data.updated} refreshed.`);
+    } catch (err: any) {
+      setErrCollect(err?.message || "Sheet sync failed.");
     } finally {
       setSyncing(false);
     }
@@ -3003,6 +3087,15 @@ export default function Home() {
                     disabled={Object.keys(mediaLibrary).length === 0}
                   >
                     <Download size={15} /> Contacts CSV
+                  </button>
+                  <button
+                    className="btn-primary"
+                    onClick={syncContactsToSheet}
+                    disabled={syncing || Object.keys(mediaLibrary).length === 0}
+                    title="Sync the media library to the Contacts tab"
+                  >
+                    {syncing ? <Spinner /> : <Server size={17} />}
+                    {syncing ? "Syncing..." : "Sync contacts"}
                   </button>
                   <button
                     className="btn-ghost"
