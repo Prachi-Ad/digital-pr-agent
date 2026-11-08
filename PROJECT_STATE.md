@@ -115,9 +115,14 @@ stays a non-sending demo.
   word answer the brand could supply, the best format (answer box, comparison,
   definition, step list, FAQ), and schema.org suggestions. Shown on the card and
   in the CSV.
-- Generated pitches are plain human emails (100-150 words, max 3 paragraphs,
-  subject under 60 characters). AEO never appears in the pitch body; it stays
-  on the opportunity cards and in the CSV.
+- Generated pitches are plain human emails (hard 150-word cap, max 3 paragraphs,
+  subject under 60 characters) with at least one verifiable proof (cited
+  statistic or named example, else a [verify] placeholder). AEO never appears
+  in the pitch body; it stays on the opportunity cards and in the CSV.
+- Every opportunity and domain-scan article carries a 0-100 score with the top
+  2 reasons, sorted best-first, and exported in the CSV.
+- Day-to-day automation: writing a pitch auto-marks its article Used; Outreach
+  has **Copy all** for every draft at once.
 - The digital workflow shows one step per screen (Article, PR angles,
   Opportunities, Journalists, Outreach) with tabs inside each phase, instead of
   one long stacked page. Bulk actions run sequentially with progress:
