@@ -369,6 +369,121 @@ export default function Home() {
   const [emailByPerson, setEmailByPerson] = useState<Record<string, AnyObj>>({});
   const [loadingEmail, setLoadingEmail] = useState<string | null>(null);
 
+  // Media library: every researched writer auto-saved, persisted in this browser.
+  const MEDIA_LIBRARY_KEY = "pr_media_library_v1";
+  const [mediaLibrary, setMediaLibrary] = useState<Record<string, AnyObj>>(() => {
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(MEDIA_LIBRARY_KEY) : null;
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  const [libSearch, setLibSearch] = useState("");
+  const [libEmailOnly, setLibEmailOnly] = useState(false);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MEDIA_LIBRARY_KEY, JSON.stringify(mediaLibrary));
+    } catch {
+      // Private-mode storage may be unavailable; the in-memory list still works.
+    }
+  }, [mediaLibrary]);
+
+  function libraryKey(name: any, publication: any): string {
+    return `${String(name || "").trim().toLowerCase()} @ ${String(publication || "").trim().toLowerCase()}`;
+  }
+
+  function saveToLibrary(people: AnyObj[], opportunity?: AnyObj | null, angle?: AnyObj | null) {
+    if (!Array.isArray(people) || people.length === 0) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const angleText = String(angle?.angle || "").trim();
+    setMediaLibrary((current) => {
+      const next = { ...current };
+      for (const p of people) {
+        const key = libraryKey(p.name, p.publication);
+        if (key === " @ ") continue;
+        const prev = next[key] || {};
+        const angles = Array.isArray(prev.angles) ? [...prev.angles] : [];
+        if (angleText && !angles.includes(angleText)) angles.push(angleText);
+        next[key] = {
+          name: p.name || prev.name || "",
+          publication: p.publication || prev.publication || "",
+          role: p.current_role || prev.role || "",
+          beat: p.topic_covered || prev.beat || "",
+          article_title: p.relevant_article_title || prev.article_title || "",
+          article_url: p.relevant_article_url || prev.article_url || "",
+          profile_url:
+            p.author_profile_or_contact_page && p.author_profile_or_contact_page !== "Unknown"
+              ? p.author_profile_or_contact_page
+              : prev.profile_url || "",
+          why: p.why_relevant || prev.why || "",
+          pitch_angle: p.suggested_pitch_angle || prev.pitch_angle || "",
+          opportunity_title: opportunity?.article_title || prev.opportunity_title || "",
+          opportunity_url: opportunity?.article_url || prev.opportunity_url || "",
+          angles: angles.slice(-5),
+          email: prev.email || "",
+          email_evidence: prev.email_evidence || "",
+          contact_page: prev.contact_page || "",
+          first_seen: prev.first_seen || today,
+          last_seen: today,
+        };
+      }
+      return next;
+    });
+  }
+
+  function mergeLibraryEmail(person: AnyObj, contact: AnyObj) {
+    const key = libraryKey(person.name, person.publication);
+    if (key === " @ ") return;
+    const today = new Date().toISOString().slice(0, 10);
+    setMediaLibrary((current) => {
+      const prev = current[key] || {
+        name: person.name || "",
+        publication: person.publication || "",
+        first_seen: today,
+        angles: [],
+      };
+      return {
+        ...current,
+        [key]: {
+          ...prev,
+          email: contact.email && contact.email !== "Not publicly found" ? contact.email : prev.email || "",
+          email_evidence: contact.evidence || prev.email_evidence || "",
+          contact_page:
+            contact.contact_page_url && contact.contact_page_url !== "Unknown"
+              ? contact.contact_page_url
+              : prev.contact_page || "",
+          last_seen: today,
+        },
+      };
+    });
+  }
+
+  function downloadLibraryCsv(entries: AnyObj[]) {
+    const header = [
+      "name", "publication", "role", "beat", "email", "contact_page",
+      "profile_url", "source_article", "source_url", "last_angle", "last_seen",
+    ];
+    const rows = entries.map((e) => [
+      e.name || "", e.publication || "", e.role || "", e.beat || "",
+      e.email || "", e.contact_page || "", e.profile_url || "",
+      e.article_title || "", e.article_url || "",
+      (e.angles ?? []).slice(-1)[0] || "", e.last_seen || "",
+    ]);
+    const csv = [header, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\r\n");
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "media_library.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function personKey(name: any): string {
     return draftKey(oppKey(selectedOpp), name);
   }
@@ -672,6 +787,7 @@ export default function Home() {
         (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
       );
       setEmailByPerson((current) => ({ ...current, [key]: data }));
+      mergeLibraryEmail(person, data);
     } catch (err: any) {
       setEmailByPerson((current) => ({
         ...current,
@@ -774,6 +890,7 @@ export default function Home() {
       );
       setJournalists(data);
       setWritersByOpp((current) => ({ ...current, [oppKey(opportunity)]: data }));
+      saveToLibrary(data?.journalists, opportunity, selectedAngle);
     } catch (err: any) {
       setErrJourn(err?.message || "Something went wrong");
     } finally {
@@ -797,6 +914,7 @@ export default function Home() {
       );
       setJournalists(data);
       setWritersByOpp((current) => ({ ...current, [oppKey(selectedOpp)]: data }));
+      saveToLibrary(data?.journalists, selectedOpp, selectedAngle);
     } catch (err: any) {
       setErrJourn(err?.message || "Something went wrong");
     } finally {
@@ -824,6 +942,7 @@ export default function Home() {
             (attempt) => setRetryMsg(`Finding writers ${index + 1} of ${opps.length} - retry ${attempt}/3...`)
           );
           setWritersByOpp((current) => ({ ...current, [oppKey(opportunity)]: data }));
+          saveToLibrary(data?.journalists, opportunity, selectedAngle);
           if (oppKey(opportunity) === oppKey(selectedOpp)) setJournalists(data);
         } catch (err: any) {
           failures.push(`${shortText(opportunity.article_title, 60)}: ${err?.message || "failed"}`);
@@ -2494,9 +2613,150 @@ export default function Home() {
                 </section>
               </div>
 
+              <section className="card">
+                <div className="card-head">
+                  <div>
+                    <h2 className="section-title">
+                      Media library · {Object.keys(mediaLibrary).length} saved contacts
+                    </h2>
+                    <p className="meta">
+                      Every researched writer is saved here automatically, with emails merged
+                      from Find-email lookups. Stored in this browser.
+                    </p>
+                  </div>
+                </div>
+                <div className="form-row">
+                  <input
+                    type="search"
+                    value={libSearch}
+                    onChange={(e) => setLibSearch(e.target.value)}
+                    placeholder="Search name, outlet, beat, topic..."
+                    aria-label="Search saved contacts"
+                    className="input"
+                  />
+                </div>
+                <div className="actions">
+                  <label className="meta" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={libEmailOnly}
+                      onChange={(e) => setLibEmailOnly(e.target.checked)}
+                    />
+                    Has email only
+                  </label>
+                  <button
+                    className="btn-secondary"
+                    onClick={() =>
+                      downloadLibraryCsv(
+                        Object.values(mediaLibrary).sort((a: AnyObj, b: AnyObj) =>
+                          String(b.last_seen || "").localeCompare(String(a.last_seen || ""))
+                        )
+                      )
+                    }
+                    disabled={Object.keys(mediaLibrary).length === 0}
+                  >
+                    <Download size={15} /> Contacts CSV
+                  </button>
+                  <button
+                    className="btn-ghost"
+                    onClick={() => {
+                      if (window.confirm("Delete all saved contacts in this browser?")) {
+                        setMediaLibrary({});
+                      }
+                    }}
+                    disabled={Object.keys(mediaLibrary).length === 0}
+                  >
+                    Clear all
+                  </button>
+                </div>
+                <div className="stack-sm" style={{ marginTop: 14 }}>
+                  {(() => {
+                    const q = libSearch.trim().toLowerCase();
+                    const entries = (Object.values(mediaLibrary) as AnyObj[])
+                      .filter((e: AnyObj) => !libEmailOnly || e.email)
+                      .filter(
+                        (e: AnyObj) =>
+                          !q ||
+                          [e.name, e.publication, e.role, e.beat, e.article_title, (e.angles ?? []).join(" ")]
+                            .join(" ")
+                            .toLowerCase()
+                            .includes(q)
+                      )
+                      .sort((a: AnyObj, b: AnyObj) =>
+                        String(b.last_seen || "").localeCompare(String(a.last_seen || ""))
+                      );
+                    if (entries.length === 0) {
+                      return (
+                        <p className="meta">
+                          {Object.keys(mediaLibrary).length === 0
+                            ? "No contacts saved yet. Research writers in the Digital PR workflow and they will appear here."
+                            : "No saved contacts match this search."}
+                        </p>
+                      );
+                    }
+                    return entries.slice(0, 100).map((e: AnyObj, i: number) => (
+                      <div className="context-card" key={`${e.name}-${e.publication}-${i}`}>
+                        <div className="card-head">
+                          <div>
+                            <span className="context-value">
+                              <strong>{e.name}</strong>{" "}
+                              {e.email && <span className="status-pill">Has email</span>}
+                            </span>
+                            <p className="meta">
+                              {e.publication}
+                              {e.role ? ` · ${e.role}` : ""}
+                              {e.beat ? ` · ${e.beat}` : ""}
+                            </p>
+                          </div>
+                          <button
+                            className="btn-ghost"
+                            onClick={() =>
+                              setMediaLibrary((current) => {
+                                const next = { ...current };
+                                delete next[libraryKey(e.name, e.publication)];
+                                return next;
+                              })
+                            }
+                            aria-label={`Delete ${e.name}`}
+                            title="Delete this contact"
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+                        {e.email ? (
+                          <p className="result-copy">
+                            <strong>Email:</strong> {e.email}
+                          </p>
+                        ) : (
+                          <p className="result-meta">No verified email yet — use Find email on their card.</p>
+                        )}
+                        {e.article_title && (
+                          <p className="result-meta">
+                            Via: {e.article_title}
+                            {e.article_url?.startsWith("https://") && (
+                              <>
+                                {" · "}
+                                <a href={e.article_url} target="_blank" rel="noreferrer">
+                                  Open <ExternalLink size={12} className="inline" />
+                                </a>
+                              </>
+                            )}
+                          </p>
+                        )}
+                        <p className="result-meta">
+                          Saved {e.first_seen || ""}
+                          {e.last_seen && e.last_seen !== e.first_seen ? ` · updated ${e.last_seen}` : ""}
+                          {(e.angles ?? []).length > 0 ? ` · ${(e.angles ?? []).slice(-2).join(" · ")}` : ""}
+                        </p>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </section>
+
               <Note>
-                Saved libraries, CSV exports, backups, and draft history live in the full local Streamlit app. This
-                Vercel demo keeps research in the current browser session only.
+                Workspace research resets on reload, but Used marks and the media library persist in this browser.
+                Full saved libraries, backups, and send history live in the local Streamlit app.
               </Note>
             </>
           )}
