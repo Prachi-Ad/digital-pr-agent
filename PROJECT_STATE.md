@@ -49,7 +49,10 @@ generation, accounts, quotas, billing, or email sending. The Research phase
 also has a **Scan a domain** input: one `domain-scan` research call finds the
 domain's recent articles, ranks them Strong/Possible/Weak with a suggested
 pitch angle each, and **Analyze this article** feeds any pick into the normal
-article -> angles flow. An optional topic focus steers the scan. The demo now mirrors
+article -> angles flow. An optional topic focus steers the scan. Prospect cards
+(opportunities, domain-scan results, listicles) have a **Mark used** toggle
+persisted in the browser, a green Used badge, a Hide-used filter, and a `used`
+column in the CSV export, so pitched targets are not repeated. The demo now mirrors
 the local three-phase workflow: Digital PR runs Research -> Prospects ->
 Outreach, and Listicles runs Find & review -> Outreach. Opportunity cards show a
 short "Why it matters" line plus a Good for PR / Possible / Weak / Not good for
