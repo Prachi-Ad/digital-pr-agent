@@ -52,10 +52,12 @@ async function ensureTab(api: any, sheetId: string) {
 }
 
 export async function GET() {
-  const client = await sheets();
+  const webhook = (process.env.SHEET_WEBHOOK_URL || "").trim();
+  const client = webhook ? null : await sheets();
   return Response.json(
     {
-      configured: !!client,
+      configured: !!webhook || !!client,
+      mode: webhook ? "webhook" : "service-account",
       tab: TAB,
       columns: HEADERS.filter((h) => h !== "key"),
     },
@@ -63,16 +65,24 @@ export async function GET() {
   );
 }
 
+async function syncViaWebhook(rows: any[][]) {
+  const url = (process.env.SHEET_WEBHOOK_URL || "").trim();
+  const token = (process.env.SHEET_WEBHOOK_TOKEN || "").trim();
+  if (!url || !token) return null;
+  const payload = rows.map((r) => Object.fromEntries(HEADERS.map((h, i) => [h, r[i] ?? ""])));
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, rows: payload }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.detail || `Webhook sync failed (${res.status}).`);
+  return data;
+}
+
 export async function POST(req: Request) {
   if (!isAuthenticated(req.headers.get("cookie"))) {
     return Response.json({ detail: "Sign in required." }, { status: 401 });
-  }
-  const client = await sheets();
-  if (!client) {
-    return Response.json(
-      { detail: "Google Sheet is not connected. Set SHEET_ID and GOOGLE_SERVICE_ACCOUNT_JSON in Vercel." },
-      { status: 503 }
-    );
   }
   let rows: any[][] = [];
   try {
@@ -87,6 +97,31 @@ export async function POST(req: Request) {
   }
   if (rows.length > 200) {
     return Response.json({ detail: "Max 200 rows per sync." }, { status: 400 });
+  }
+
+  // Key-free path: Apps Script webhook (works where key creation is blocked).
+  if ((process.env.SHEET_WEBHOOK_URL || "").trim()) {
+    try {
+      const data = await syncViaWebhook(rows);
+      if (!data) throw new Error("Webhook not configured.");
+      return Response.json(
+        { ok: true, updated: data.updated || 0, appended: data.appended || 0 },
+        { status: 200 }
+      );
+    } catch (err: any) {
+      return Response.json(
+        { detail: String(err?.message || err).slice(0, 300) },
+        { status: 502 }
+      );
+    }
+  }
+
+  const client = await sheets();
+  if (!client) {
+    return Response.json(
+      { detail: "Google Sheet is not connected. Set SHEET_WEBHOOK_URL + SHEET_WEBHOOK_TOKEN, or SHEET_ID + GOOGLE_SERVICE_ACCOUNT_JSON in Vercel." },
+      { status: 503 }
+    );
   }
 
   const { api, sheetId } = client;
