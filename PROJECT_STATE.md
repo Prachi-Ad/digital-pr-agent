@@ -138,7 +138,10 @@ stays a non-sending demo.
   Segregated tabs: **Pitches**, **Contacts** (media-library sync), **Coverage**
   (wins only), plus an auto-built **Dashboard** tab with per-status counts,
   reply/coverage rates, email coverage, avg score, pitches-by-publication, and
-  the coverage-wins list — all live formulas.
+  the coverage-wins list — all live formulas. Tabs are styled: indigo frozen
+  headers, dropdown filters, coloured status pills, formatted dates and scores,
+  and a dashboard with KPI blocks. Apps Script source is kept at
+  `vercel-app/apps-script/pitch-sheet.gs` (token redacted).
 - **Campaign board** (Research Library): **Save as campaign** snapshots the
   workspace; loading restores research and drafts; per-campaign pitched /
   replied / covered counts and coverage links stay live.

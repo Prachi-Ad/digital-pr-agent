@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   ArrowRight,
@@ -497,6 +497,7 @@ export default function Home() {
         updated: new Date().toISOString().slice(0, 10),
       },
     }));
+    scheduleSheetSync(1200);
   }
 
   function draftStatusFor(recipientName: any): string {
@@ -520,6 +521,89 @@ export default function Home() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [syncErr, setSyncErr] = useState<string | null>(null);
+  const [selectedDrafts, setSelectedDrafts] = useState<string[]>([]);
+
+  // Auto-sync to the sheet after pitch writing / status changes.
+  const AUTO_SYNC_KEY = "pr_autosync_v1";
+  const [autoSync, setAutoSync] = useState<boolean>(() => {
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(AUTO_SYNC_KEY) : null;
+      return raw === null ? true : raw === "1";
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(AUTO_SYNC_KEY, autoSync ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [autoSync]);
+
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function scheduleSheetSync(delay = 2500) {
+    if (!autoSync) return;
+    if (typeof window === "undefined") return;
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => {
+      if (Object.keys(drafts).length > 0) void syncToSheet(true);
+    }, delay);
+  }
+
+  // Sheet connection status
+  const [sheetStatus, setSheetStatus] = useState<AnyObj | null>(null);
+  const [checkingSheet, setCheckingSheet] = useState(false);
+  async function testSheetConnection() {
+    setCheckingSheet(true);
+    try {
+      const res = await fetch("/api/sheet", { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      setSheetStatus(data);
+    } catch (err: any) {
+      setSheetStatus({ configured: false, error: err?.message || "Unreachable" });
+    } finally {
+      setCheckingSheet(false);
+    }
+  }
+  useEffect(() => {
+    void testSheetConnection();
+  }, []);
+
+  async function copySetupScript() {
+    try {
+      const res = await fetch("/apps-script/pitch-sheet.js", { cache: "no-store" });
+      const text = await res.text();
+      await navigator.clipboard.writeText(text);
+      setSyncMsg("Setup script copied. Paste it into Apps Script, add your token, deploy.");
+    } catch {
+      setSyncErr("Could not copy the script. Open /apps-script/pitch-sheet.js instead.");
+    }
+  }
+
+  function toggleDraftSel(id: string) {
+    setSelectedDrafts((current) =>
+      current.includes(id) ? current.filter((x) => x !== id) : [...current, id]
+    );
+  }
+
+  function bulkStatus(status: string) {
+    if (selectedDrafts.length === 0) return;
+    const today = new Date().toISOString().slice(0, 10);
+    setPitchOutcomes((current) => {
+      const next = { ...current };
+      for (const id of selectedDrafts) {
+        next[id] = { ...(current[id] || {}), status, updated: today };
+      }
+      return next;
+    });
+    setSelectedDrafts([]);
+    scheduleSheetSync(800);
+  }
+
+  function toggleAllDrafts(ids: string[]) {
+    setSelectedDrafts((current) => (current.length === ids.length ? [] : ids));
+  }
 
   async function postSheetTab(tab: string, rows: string[][]) {
     const res = await fetch("/api/sheet", {
@@ -638,11 +722,13 @@ export default function Home() {
     ]);
   }
 
-  async function syncToSheet() {
+  async function syncToSheet(silent = false) {
     if (Object.keys(drafts).length === 0) return;
-    setSyncing(true);
-    setSyncMsg(null);
-    setSyncErr(null);
+    if (!silent) {
+      setSyncing(true);
+      setSyncMsg(null);
+      setSyncErr(null);
+    }
     try {
       const pitches = await postSheetTab("Pitches", buildPitchRows());
       const coverageRows = buildCoverageRows();
@@ -650,6 +736,7 @@ export default function Home() {
       if (coverageRows.length > 0) {
         coverage = await postSheetTab("Coverage", coverageRows);
       }
+      setSyncErr(null);
       setSyncMsg(
         `Sheet updated — Pitches: ${pitches.appended} added, ${pitches.updated} refreshed; ` +
           `Coverage: ${coverage.appended} added, ${coverage.updated} refreshed.`
@@ -1384,6 +1471,7 @@ export default function Home() {
       }
       markUrlsUsed(pitchedUrls);
       if (done > 0) setDigitalStep("Outreach");
+      if (done > 0) scheduleSheetSync(1200);
     } finally {
       setLoadingDraft(null);
       setRetryMsg(null);
@@ -2472,7 +2560,7 @@ export default function Home() {
                     {Object.keys(drafts).length > 0 && (
                       <button
                         className="btn-primary"
-                        onClick={syncToSheet}
+                        onClick={() => syncToSheet()}
                         disabled={syncing}
                         title="Add or refresh every pitch in the connected Google Sheet"
                       >
@@ -2480,7 +2568,50 @@ export default function Home() {
                         {syncing ? "Syncing..." : "Sync to Google Sheet"}
                       </button>
                     )}
+                    <label className="meta" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={autoSync}
+                        onChange={(e) => setAutoSync(e.target.checked)}
+                      />
+                      Auto-sync
+                    </label>
                   </div>
+
+                  {Object.keys(drafts).length > 0 && (
+                    <div className="card">
+                      <div className="card-head">
+                        <div>
+                          <h2 className="section-title" style={{ fontSize: "1.05rem" }}>
+                            Batch update
+                          </h2>
+                          <p className="meta">
+                            {selectedDrafts.length === 0
+                              ? "Tick drafts below, then set the same status in one click."
+                              : `${selectedDrafts.length} selected`}
+                          </p>
+                        </div>
+                        <button
+                          className="btn-secondary"
+                          onClick={() => toggleAllDrafts(Object.keys(drafts))}
+                        >
+                          {selectedDrafts.length === Object.keys(drafts).length ? "Clear all" : "Select all"}
+                        </button>
+                      </div>
+                      <div className="actions" style={{ marginTop: 12 }}>
+                        {["Pitched", "Replied", "Covered", "Declined", "Do not contact"].map((s) => (
+                          <button
+                            key={s}
+                            className={s === "Covered" ? "btn-primary" : "btn-secondary"}
+                            onClick={() => bulkStatus(s)}
+                            disabled={selectedDrafts.length === 0}
+                          >
+                            Mark {s}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {errDraft && <Note tone="warn">{errDraft}</Note>}
                   {syncErr && <Note tone="warn">{syncErr}</Note>}
@@ -2512,6 +2643,18 @@ export default function Home() {
                           >
                             {pitchOutcomes[name]?.status || "Draft"}
                           </span>
+                          <label
+                            className="meta"
+                            style={{ display: "flex", gap: 6, alignItems: "center", whiteSpace: "nowrap" }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedDrafts.includes(name)}
+                              onChange={() => toggleDraftSel(name)}
+                              aria-label={`Select ${draft.recipient_name || name}`}
+                            />
+                            Select
+                          </label>
                         </div>
                         <div className="form-row">
                           <div className="field">
@@ -3312,6 +3455,56 @@ export default function Home() {
                 }
               />
               <div className="stack">
+                <section className="card">
+                  <div className="card-head">
+                    <div>
+                      <h2 className="section-title">Google Sheet sync</h2>
+                      <p className="meta">
+                        Pitches, Contacts, Coverage and Dashboard tabs update from this app.
+                      </p>
+                    </div>
+                    <span className={`status-pill ${sheetStatus?.configured ? "active" : ""}`}>
+                      {sheetStatus === null
+                        ? "Checking..."
+                        : sheetStatus?.configured
+                          ? "Connected"
+                          : "Not connected"}
+                    </span>
+                  </div>
+                  {sheetStatus?.configured && (
+                    <div className="setting-row">
+                      <span>Mode</span>
+                      <strong>{sheetStatus?.mode === "webhook" ? "Apps Script webhook" : "Service account"}</strong>
+                    </div>
+                  )}
+                  <div className="setting-row">
+                    <span>Auto-sync after pitches and status changes</span>
+                    <strong>{autoSync ? "On" : "Off"}</strong>
+                  </div>
+                  <div className="actions">
+                    <button className="btn-secondary" onClick={testSheetConnection} disabled={checkingSheet}>
+                      {checkingSheet ? <Spinner /> : <RefreshCw size={16} />}
+                      Test connection
+                    </button>
+                    <button className="btn-secondary" onClick={copySetupScript}>
+                      <Copy size={16} /> Copy setup script
+                    </button>
+                    <button className="btn-secondary" onClick={() => syncToSheet()} disabled={syncing}>
+                      {syncing ? <Spinner /> : <Server size={16} />}
+                      Sync now
+                    </button>
+                  </div>
+                  {!sheetStatus?.configured && sheetStatus !== null && (
+                    <Note tone="warn">
+                      Setup: copy the script, paste it in Extensions → Apps Script, add your token,
+                      deploy as a Web app (Anyone), then set SHEET_WEBHOOK_URL and
+                      SHEET_WEBHOOK_TOKEN in Vercel.
+                    </Note>
+                  )}
+                  {syncErr && <Note tone="warn">{syncErr}</Note>}
+                  {syncMsg && <Note>{syncMsg}</Note>}
+                </section>
+
                 <section className="card">
                   <h2 className="section-title">Brand and model</h2>
                   <div className="setting-row">
