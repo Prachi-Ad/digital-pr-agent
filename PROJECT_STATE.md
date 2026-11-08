@@ -123,6 +123,10 @@ stays a non-sending demo.
   2 reasons, sorted best-first, and exported in the CSV.
 - Day-to-day automation: writing a pitch auto-marks its article Used; Outreach
   has **Copy all** for every draft at once.
+- Journalist cards have checkboxes: tick one or two people and **Write pitches
+  for selected**, instead of all-or-one. Each card also has **Find email**,
+  which looks up that person's publicly published email (or the official
+  contact route when none is published) via a `person-contact` research call.
 - The digital workflow shows one step per screen (Article, PR angles,
   Opportunities, Journalists, Outreach) with tabs inside each phase, instead of
   one long stacked page. Bulk actions run sequentially with progress:
