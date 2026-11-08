@@ -386,6 +386,54 @@ export default function Home() {
   const [loadingCollect, setLoadingCollect] = useState(false);
   const [errCollect, setErrCollect] = useState<string | null>(null);
   const [collectMsg, setCollectMsg] = useState<string | null>(null);
+  const OUTCOME_KEY = "pr_pitch_outcomes_v1";
+  const [pitchOutcomes, setPitchOutcomes] = useState<Record<string, AnyObj>>(() => {
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(OUTCOME_KEY) : null;
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(OUTCOME_KEY, JSON.stringify(pitchOutcomes));
+    } catch {
+      // Private-mode storage may be unavailable; the in-memory list still works.
+    }
+  }, [pitchOutcomes]);
+
+  function setOutcome(draftId: string, patch: AnyObj) {
+    setPitchOutcomes((current) => ({
+      ...current,
+      [draftId]: {
+        status: "Draft",
+        ...(current[draftId] || {}),
+        ...patch,
+        updated: new Date().toISOString().slice(0, 10),
+      },
+    }));
+  }
+
+  function draftStatusFor(recipientName: any): string {
+    const entry = Object.values(drafts).find(
+      (d: AnyObj) => String(d.recipient_name || "").toLowerCase() === String(recipientName || "").toLowerCase()
+    );
+    if (!entry) return "";
+    const id = Object.keys(drafts).find((k) => drafts[k] === entry) || "";
+    return pitchOutcomes[id]?.status || "Draft";
+  }
+
+  const outcomeCounts = Object.keys(drafts).reduce(
+    (acc: Record<string, number>, id) => {
+      const s = pitchOutcomes[id]?.status || "Draft";
+      acc[s] = (acc[s] || 0) + 1;
+      return acc;
+    },
+    {}
+  );
 
   async function collectWriters(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -1134,6 +1182,8 @@ export default function Home() {
       "contact_role",
       "subject",
       "body",
+      "outcome",
+      "coverage_url",
     ];
     const rows: string[][] = [];
     for (const [angleName, res] of angleGroups) {
@@ -1168,6 +1218,14 @@ export default function Home() {
             person?.current_role || "",
             draft?.subject_line || "",
             draft?.message_body || "",
+            (() => {
+              const id = draftKey(oppKey(opportunity), person?.name);
+              return pitchOutcomes[id]?.status || (draft ? "Draft" : "");
+            })(),
+            (() => {
+              const id = draftKey(oppKey(opportunity), person?.name);
+              return pitchOutcomes[id]?.coverage_url || "";
+            })(),
           ]);
         }
       }
@@ -2137,6 +2195,8 @@ export default function Home() {
                   <div className="actions-between">
                     <p className="step-caption">
                       Personalized drafts for every researched contact. Copy or download them; nothing is sent.
+                      {Object.keys(drafts).length > 0 &&
+                        ` · ${outcomeCounts["Pitched"] || 0} pitched · ${outcomeCounts["Replied"] || 0} replied · ${outcomeCounts["Covered"] || 0} covered`}
                     </p>
                     {Object.keys(drafts).length > 0 && (
                       <button
@@ -2176,10 +2236,58 @@ export default function Home() {
                   ) : (
                     Object.entries(drafts).map(([name, draft]) => (
                       <article className="card" key={name}>
-                        <h2 className="card-title">{draft.recipient_name || name}</h2>
-                        <p className="meta">
-                          {draft.publication} · {draft.recipient_role} · {draft.channel}
-                        </p>
+                        <div className="card-head">
+                          <div>
+                            <h2 className="card-title">{draft.recipient_name || name}</h2>
+                            <p className="meta">
+                              {draft.publication} · {draft.recipient_role} · {draft.channel}
+                            </p>
+                          </div>
+                          <span
+                            className={`status-pill ${(pitchOutcomes[name]?.status || "Draft") !== "Draft" ? "active" : ""}`}
+                          >
+                            {pitchOutcomes[name]?.status || "Draft"}
+                          </span>
+                        </div>
+                        <div className="form-row">
+                          <div className="field">
+                            <label htmlFor={`outcome-${name}`}>Outcome</label>
+                            <select
+                              id={`outcome-${name}`}
+                              className="input"
+                              value={pitchOutcomes[name]?.status || "Draft"}
+                              onChange={(e) => setOutcome(name, { status: e.target.value })}
+                            >
+                              {["Draft", "Pitched", "Replied", "Covered", "Declined", "Do not contact"].map((s) => (
+                                <option key={s} value={s}>
+                                  {s}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          {(pitchOutcomes[name]?.status === "Covered" ||
+                            pitchOutcomes[name]?.coverage_url) && (
+                            <div className="field">
+                              <label htmlFor={`coverage-${name}`}>Coverage URL</label>
+                              <input
+                                id={`coverage-${name}`}
+                                type="url"
+                                className="input"
+                                placeholder="https://..."
+                                value={pitchOutcomes[name]?.coverage_url || ""}
+                                onChange={(e) => setOutcome(name, { coverage_url: e.target.value })}
+                              />
+                            </div>
+                          )}
+                        </div>
+                        {pitchOutcomes[name]?.status === "Covered" && pitchOutcomes[name]?.coverage_url?.startsWith("https://") && (
+                          <p className="meta" style={{ marginTop: 8 }}>
+                            Coverage:{" "}
+                            <a href={pitchOutcomes[name].coverage_url} target="_blank" rel="noreferrer">
+                              Open <ExternalLink size={12} className="inline" />
+                            </a>
+                          </p>
+                        )}
                         <p className="body-text">
                           <strong>Subject:</strong> {draft.subject_line}
                         </p>
@@ -2759,7 +2867,10 @@ export default function Home() {
                           <div>
                             <span className="context-value">
                               <strong>{e.name}</strong>{" "}
-                              {e.email && <span className="status-pill">Has email</span>}
+                              {e.email && <span className="status-pill">Has email</span>}{" "}
+                              {draftStatusFor(e.name) && draftStatusFor(e.name) !== "Draft" && (
+                                <span className="status-pill active">{draftStatusFor(e.name)}</span>
+                              )}
                             </span>
                             <p className="meta">
                               {e.publication}
