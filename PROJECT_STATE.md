@@ -45,7 +45,11 @@ personal-Gmail app-password method, batch safeguards, and the do-not-send list.
 The preview collects no credentials and cannot send. The local Streamlit app
 remains the full tool. The Vercel Article step also accepts up to five URLs, but
 keeps results in memory only; the port does not add saved libraries, draft
-generation, accounts, quotas, billing, or email sending. The demo now mirrors
+generation, accounts, quotas, billing, or email sending. The Research phase
+also has a **Scan a domain** input: one `domain-scan` research call finds the
+domain's recent articles, ranks them Strong/Possible/Weak with a suggested
+pitch angle each, and **Analyze this article** feeds any pick into the normal
+article -> angles flow. An optional topic focus steers the scan. The demo now mirrors
 the local three-phase workflow: Digital PR runs Research -> Prospects ->
 Outreach, and Listicles runs Find & review -> Outreach. Opportunity cards show a
 short "Why it matters" line plus a Good for PR / Possible / Weak / Not good for
