@@ -131,6 +131,9 @@ stays a non-sending demo.
   Declined / Do-not-contact status with a coverage URL field on wins, persisted
   in the browser, counted in the Outreach header, shown in the media library,
   and exported in the CSV.
+- **Campaign board** (Research Library): **Save as campaign** snapshots the
+  workspace; loading restores research and drafts; per-campaign pitched /
+  replied / covered counts and coverage links stay live.
 - Every draft carries a **3-question check** (is it a story? why this
   journalist? why now?) with credibility details, per the think-like-a-
   journalist framework; pitches lead with the story, never the company.
