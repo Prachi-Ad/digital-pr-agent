@@ -1206,6 +1206,36 @@ relevant person nor an official contact route can be verified.
     return _run_agent_in_worker(journalist_agent, prompt)
 
 
+def collect_media_contacts(query: str) -> JournalistResearchResults:
+    """Collect writers from the live web for a beat, outlet, or topic."""
+    query = (query or "").strip()
+    prompt = f"""
+Collect writers and editors from the live web matching this request. This is
+for building a media contact library for {BRAND_NAME} ({PRODUCT_DESCRIPTION}).
+Do not pitch, draft, or contact anyone.
+
+REQUEST:
+{query}
+
+Treat this as the human-approved research focus:
+- Selected opportunity: media contacts covering {query}.
+- Research summary context: writers, reporters, or editors with recent,
+  verifiable coverage relevant to {query}, usable for future {BRAND_NAME} pitches
+  (expert commentary, original data, or customer stories).
+
+Research process:
+1. Search the live web for the beat, outlet, or topic plus writer bylines.
+2. Verify each person through a specific recent article, official author page,
+   or another reliable source, ideally within the last 12 months.
+3. Return up to 8 strong contacts, and fewer when the evidence is weak.
+
+Strict rules: no invented names, titles, articles, dates, or profile URLs; no
+inferred emails; Unknown when unverifiable; relevance over seniority. Explain
+for each person exactly why their published work makes them relevant.
+"""
+    return _run_agent_in_worker(journalist_agent, prompt)
+
+
 def find_opportunity_contact(opportunity: PROpportunity) -> OpportunityContact:
     """Find a content/SEO/link-building contact for one article."""
     prompt = f"""

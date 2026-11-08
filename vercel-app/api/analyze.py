@@ -20,6 +20,7 @@ from agent import (
     analyze_article,
     draft_journalist_pitch,
     find_opportunity_contact,
+    collect_media_contacts,
     research_opportunities,
     research_journalists,
     research_listicles,
@@ -37,6 +38,7 @@ class AnalyzeRequest(BaseModel):
     article_url: str = ""
     domain: str = ""
     topic_hint: str = ""
+    query: str = ""
     angle: PRAngle | None = None
     opportunity: PROpportunity | None = None
     person: JournalistProfile | None = None
@@ -160,6 +162,10 @@ def _dispatch(req: AnalyzeRequest):
                     detail="person and opportunity are required",
                 )
             return research_person_contact(req.person, req.opportunity).model_dump()
+        if action in ("collect-writers", "collect_writers"):
+            if not req.query.strip():
+                raise HTTPException(status_code=400, detail="query is required")
+            return collect_media_contacts(req.query).model_dump()
         raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
     except HTTPException:
         raise

@@ -382,6 +382,40 @@ export default function Home() {
   });
   const [libSearch, setLibSearch] = useState("");
   const [libEmailOnly, setLibEmailOnly] = useState(false);
+  const [collectQuery, setCollectQuery] = useState("");
+  const [loadingCollect, setLoadingCollect] = useState(false);
+  const [errCollect, setErrCollect] = useState<string | null>(null);
+  const [collectMsg, setCollectMsg] = useState<string | null>(null);
+
+  async function collectWriters(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const query = collectQuery.trim();
+    if (!query) {
+      setErrCollect("Describe what to collect, e.g. fintech reporters at TechCrunch.");
+      return;
+    }
+    setLoadingCollect(true);
+    setErrCollect(null);
+    setCollectMsg(null);
+    setRetryMsg(null);
+    try {
+      const data = await callApi("collect-writers", { query }, (a) =>
+        setRetryMsg(`Retrying (attempt ${a}/3)...`)
+      );
+      const people = data?.journalists ?? [];
+      saveToLibrary(people, null, null);
+      setCollectMsg(
+        people.length > 0
+          ? `Saved ${people.length} contact(s) to the library. ${data?.research_summary || ""}`
+          : "No verifiable writers found. Try a more specific beat or outlet."
+      );
+    } catch (err: any) {
+      setErrCollect(err?.message || "Something went wrong");
+    } finally {
+      setLoadingCollect(false);
+      setRetryMsg(null);
+    }
+  }
 
   useEffect(() => {
     try {
@@ -2625,6 +2659,31 @@ export default function Home() {
                     </p>
                   </div>
                 </div>
+                <form onSubmit={collectWriters} style={{ marginTop: 16 }}>
+                  <div className="field">
+                    <label htmlFor="collect-query">Collect from the web</label>
+                    <input
+                      id="collect-query"
+                      type="text"
+                      value={collectQuery}
+                      onChange={(e) => setCollectQuery(e.target.value)}
+                      placeholder="e.g. SaaS reporters at The Verge, or writers covering social media analytics"
+                      aria-label="What contacts to collect from the web"
+                      className="input"
+                    />
+                    <span className="field-note">
+                      One research call per collection. Only verifiable writers with real coverage are saved.
+                    </span>
+                  </div>
+                  <div className="actions" style={{ marginTop: 10 }}>
+                    <button type="submit" disabled={loadingCollect} className="btn-primary">
+                      {loadingCollect ? <Spinner /> : <Search size={17} />}
+                      {loadingCollect ? "Collecting..." : "Collect from web"}
+                    </button>
+                  </div>
+                </form>
+                {errCollect && <Note tone="warn">{errCollect}</Note>}
+                {collectMsg && <Note>{collectMsg}</Note>}
                 <div className="form-row">
                   <input
                     type="search"
