@@ -130,6 +130,18 @@ class PROpportunity(BaseModel):
             "Weak fit, or Not suitable."
         ),
     )
+    pr_score: int = Field(
+        default=0,
+        description=(
+            "Suitability score 0-100: search intent and topical fit (30), E-E-A-T "
+            "and credibility of the contribution (25), freshness of the article "
+            "(15), clarity of the editorial route (15), angle clarity (15)."
+        ),
+    )
+    pr_score_reasons: list[str] = Field(
+        default_factory=list,
+        description="The top 2 reasons behind pr_score, most important first.",
+    )
     pr_fit_reason: str = Field(
         default="Not assessed yet.",
         description="One short sentence naming the specific signal behind the verdict.",
@@ -188,6 +200,18 @@ class DomainArticle(BaseModel):
     pr_fit: str = Field(
         default="Not assessed",
         description="PR suitability verdict: Strong fit, Possible fit, Weak fit, or Not suitable.",
+    )
+    pr_score: int = Field(
+        default=0,
+        description=(
+            "Suitability score 0-100: search intent and topical fit (30), E-E-A-T "
+            "and credibility of the contribution (25), freshness of the article "
+            "(15), clarity of the editorial route (15), angle clarity (15)."
+        ),
+    )
+    pr_score_reasons: list[str] = Field(
+        default_factory=list,
+        description="The top 2 reasons behind pr_score, most important first.",
     )
     pr_fit_reason: str = Field(
         default="Not assessed yet.",
@@ -575,6 +599,9 @@ Research process:
 7. Exclude generic SEO opportunities that lack a real editorial reason.
 8. Return the strongest candidates, up to 5.
 9. Give every candidate a PR suitability verdict for its publication.
+10. Score every candidate 0-100 (intent/topical fit 30, E-E-A-T and credibility
+    25, freshness 15, editorial route 15, angle clarity 15) with the top 2
+    reasons, most important first.
 
 PR suitability:
 - Strong fit: original editorial content, a named writer or editor, a relevant
@@ -651,7 +678,10 @@ Research process:
    whether the brand can credibly contribute (data, expert comment, customer
    story, missing angle).
 5. Give every article a PR suitability verdict and rank Strong fit first.
-6. Return up to 8 articles.
+6. Score every article 0-100 (intent/topical fit 30, E-E-A-T and credibility
+   25, freshness 15, editorial route 15, angle clarity 15) with the top 2
+   reasons, most important first.
+7. Return up to 8 articles.
 
 PR suitability:
 - Strong fit: original editorial content, a named writer or editor, a relevant
@@ -743,11 +773,17 @@ names, coverage, awards, partnerships, product capabilities, email addresses, re
 names, roles, contact routes, policies, deadlines, or commitments.
 
 DIGITAL PR PITCH RULES:
-- 100-150 words in the message body, max 3 short paragraphs.
+- Hard limit: 150 words max in the message body, max 3 short paragraphs. Count
+  the words before returning; if over, cut whole sentences until it fits.
 - Paragraph 1: one line on the recipient's specific article and what it covers well.
 - Paragraph 2: the single concrete thing the brand offers (data, expert comment,
   example, template). One offer only.
 - Paragraph 3: one low-pressure close with a single next step.
+- Every pitch must contain at least one verifiable proof: a cited statistic with
+  source and date, or a concrete named example. Vague claims ("data-driven",
+  "proven", "leading") without the underlying number or name are forbidden. If
+  no proof is verified, put a [verify: ...] placeholder where it belongs and
+  list it FIRST in facts_to_verify.
 - Reference the journalist's actual published work when supplied.
 - Do not ask for a link, mention Domain Rating, or offer payment.
 - Never include an AEO section: no "AEO core offer", no audience question, no
@@ -1173,8 +1209,20 @@ email. Include the source URL and evidence.
     return _run_agent_in_worker(opportunity_contact_agent, prompt)
 
 
-def draft_journalist_pitch(
-    opportunity: PROpportunity,
+def _trim_to_words(text: str, limit: int = 150) -> str:
+    """Hard word cap: cut whole sentences so the body never exceeds limit."""
+    words = (text or "").split()
+    if len(words) <= limit:
+        return text
+    cut = " ".join(words[:limit])
+    for sep in (". ", "! ", "? ", "\n"):
+        idx = cut.rfind(sep)
+        if idx > len(cut) * 0.5:
+            return cut[: idx + len(sep)].rstrip()
+    return cut.rstrip() + "…"
+
+
+def draft_journalist_pitch(   opportunity: PROpportunity,
     person: JournalistProfile,
     angle_context: str = "",
     sender_name: str = "Prachi",
@@ -1224,7 +1272,9 @@ facts_to_verify. If the person or route is Unknown, use 'Official publication
 contact route' as the channel and note that the route must be verified.
 """
 
-    return _run_agent_in_worker(outreach_draft_agent, prompt)
+    draft = _run_agent_in_worker(outreach_draft_agent, prompt)
+    draft.message_body = _trim_to_words(draft.message_body)
+    return draft
 
 
 def research_listicles(

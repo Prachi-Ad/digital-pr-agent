@@ -317,6 +317,25 @@ export default function Home() {
     return <span className="status-pill active">Used</span>;
   }
 
+  function sortByScore<T extends AnyObj>(items: T[]): T[] {
+    const arr = [...items];
+    if (!arr.some((x) => Number((x as AnyObj).pr_score) > 0)) return arr;
+    return arr.sort(
+      (a, b) => (Number((b as AnyObj).pr_score) || 0) - (Number((a as AnyObj).pr_score) || 0)
+    );
+  }
+
+  function ScoreLine({ item }: { item: AnyObj }) {
+    if (!(Number(item.pr_score) > 0)) return null;
+    const reasons = Array.isArray(item.pr_score_reasons) ? item.pr_score_reasons : [];
+    return (
+      <p className="meta">
+        <strong>Score: {item.pr_score}/100</strong>
+        {reasons.length > 0 && ` — ${reasons.join("; ")}`}
+      </p>
+    );
+  }
+
   function UsedToggle({ url }: { url: any }) {
     const used = isUsed(url);
     return (
@@ -778,6 +797,20 @@ export default function Home() {
     }
   }
 
+  function markUrlsUsed(urls: ArrayLike<any>) {
+    const norms = Array.from(urls)
+      .map((u) => normalizeUrl(u))
+      .filter(Boolean);
+    if (norms.length === 0) return;
+    setUsedUrls((current) => {
+      const next = [...current];
+      for (const u of norms) {
+        if (!next.includes(u)) next.push(u);
+      }
+      return next;
+    });
+  }
+
   async function writeDraft(person: AnyObj) {
     if (!selectedAngle || !selectedOpp) return;
     const key = draftKey(oppKey(selectedOpp), person.name);
@@ -791,6 +824,7 @@ export default function Home() {
         (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
       );
       setDrafts((current) => ({ ...current, [key]: data }));
+      markUrlsUsed([oppKey(selectedOpp)]);
       setDigitalStep("Outreach");
     } catch (err: any) {
       setErrDraft(err?.message || "Draft generation failed");
@@ -817,6 +851,7 @@ export default function Home() {
     setRetryMsg(null);
     const failures: string[] = [];
     let done = 0;
+    const pitchedUrls: string[] = [];
     try {
       for (let index = 0; index < entries.length; index += 1) {
         const { angle, opportunity, person } = entries[index];
@@ -829,6 +864,7 @@ export default function Home() {
             (attempt) => setRetryMsg(`Writing pitches ${index + 1} of ${entries.length} - retry ${attempt}/3...`)
           );
           setDrafts((current) => ({ ...current, [key]: data }));
+          pitchedUrls.push(oppKey(opportunity));
           done += 1;
         } catch (err: any) {
           failures.push(`${shortText(person.name, 40)}: ${err?.message || "failed"}`);
@@ -840,6 +876,7 @@ export default function Home() {
           `Wrote ${done} of ${entries.length} pitches. Failures: ${failures.join(" | ")}`
         );
       }
+      markUrlsUsed(pitchedUrls);
       if (done > 0) setDigitalStep("Outreach");
     } finally {
       setLoadingDraft(null);
@@ -870,6 +907,8 @@ export default function Home() {
       "article_url",
       "used",
       "pr_fit",
+      "pr_score",
+      "pr_score_reasons",
       "audience_question",
       "aeo_answer",
       "aeo_format",
@@ -900,6 +939,10 @@ export default function Home() {
             opportunity.article_url || "",
             isUsed(opportunity.article_url) ? "yes" : "no",
             opportunity.pr_fit || "",
+            opportunity.pr_score || "",
+            Array.isArray(opportunity.pr_score_reasons)
+              ? opportunity.pr_score_reasons.join("; ")
+              : "",
             opportunity.audience_question || "",
             opportunity.aeo_answer || "",
             opportunity.aeo_format || "",
@@ -1203,9 +1246,11 @@ export default function Home() {
                         <p className="step-caption">
                           {scanResult.publication_name} · {scanResult.research_summary}
                         </p>
-                        {(scanResult.articles ?? [])
-                          .filter((a: AnyObj) => !hideUsed || !isUsed(a.article_url))
-                          .map((a: AnyObj, i: number) => (
+                        {sortByScore(
+                          (scanResult.articles ?? []).filter(
+                            (a: AnyObj) => !hideUsed || !isUsed(a.article_url)
+                          )
+                        ).map((a: AnyObj, i: number) => (
                           <article className="card" key={`${a.article_url}-${i}`}>
                             <div className="card-head">
                               <div>
@@ -1225,6 +1270,7 @@ export default function Home() {
                             <p className="body-text">
                               <strong>Why it matters:</strong> {shortText(a.why_pitchable)}
                             </p>
+                            <ScoreLine item={a} />
                             {a.suggested_angle && (
                               <p className="body-text">
                                 <strong>Suggested angle:</strong> {shortText(a.suggested_angle)}
@@ -1534,10 +1580,11 @@ export default function Home() {
                               Hide used ({usedUrls.length} marked)
                             </label>
                           )}
-                          {(opportunities.opportunities ?? [])
-                            .filter((o: AnyObj) => !hideUsed || !isUsed(o.article_url))
-                            .map((o: AnyObj, i: number) => (
-                            <article className="card" key={`${o.article_url}-${i}`}>
+                          {sortByScore(
+                            (opportunities.opportunities ?? []).filter(
+                              (o: AnyObj) => !hideUsed || !isUsed(o.article_url)
+                            )
+                          ).map((o: AnyObj, i: number) => (                            <article className="card" key={`${o.article_url}-${i}`}>
                               <div className="card-head">
                                 <div>
                                   <h2 className="card-title">
@@ -1556,6 +1603,7 @@ export default function Home() {
                               <p className="body-text">
                                 <strong>Why it matters:</strong> {shortText(o.why_relevant)}
                               </p>
+                              <ScoreLine item={o} />
                               <p className="meta">
                                 {o.topic} · {o.opportunity_type} · Confidence: {o.confidence}
                               </p>
@@ -1802,6 +1850,23 @@ export default function Home() {
                     <p className="step-caption">
                       Personalized drafts for every researched contact. Copy or download them; nothing is sent.
                     </p>
+                    {Object.keys(drafts).length > 0 && (
+                      <button
+                        className="btn-secondary"
+                        onClick={() =>
+                          navigator.clipboard.writeText(
+                            Object.entries(drafts)
+                              .map(
+                                ([name, d]) =>
+                                  `To: ${d.recipient_name || name} (${d.publication || ""})\nSubject: ${d.subject_line}\n\n${d.message_body}`
+                              )
+                              .join("\n\n---\n\n")
+                          )
+                        }
+                      >
+                        <Copy size={15} /> Copy all
+                      </button>
+                    )}
                     <button className="btn-secondary" onClick={downloadCampaignCsv}>
                       Download CSV <Download size={15} />
                     </button>

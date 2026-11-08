@@ -115,10 +115,13 @@ For each story or pitch, define:
 
 Pitch rules:
 
-- 100-150 words for a first pitch, max 3 short paragraphs.
+- 100-150 words for a first pitch, max 3 short paragraphs. Hard limit: count the
+  words; if over, cut whole sentences until it fits.
 - Subject line under 60 characters, specific to the target article.
 - Open with the target's actual work or the exact page.
 - Offer one asset and explain why it helps their audience, in natural sentences.
+- Every pitch needs one verifiable proof (cited statistic with source and date,
+  or a concrete named example). No vague claims without the underlying number.
 - Never include an AEO section in a pitch: no "AEO core offer", no audience
   question, no answer paragraph, no schema or format talk. AEO stays in
   research cards and exports, never in the email body.
