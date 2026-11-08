@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   ArrowRight,
@@ -268,6 +268,63 @@ export default function Home() {
   const [loadingScan, setLoadingScan] = useState(false);
   const [scanResult, setScanResult] = useState<AnyObj | null>(null);
   const [errScan, setErrScan] = useState<string | null>(null);
+
+  // Already-used articles (persisted in this browser so pitched targets are not repeated)
+  const USED_URLS_KEY = "pr_used_urls_v1";
+  const [usedUrls, setUsedUrls] = useState<string[]>(() => {
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(USED_URLS_KEY) : null;
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter((u) => typeof u === "string") : [];
+    } catch {
+      return [];
+    }
+  });
+  const [hideUsed, setHideUsed] = useState(false);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(USED_URLS_KEY, JSON.stringify(usedUrls));
+    } catch {
+      // Private-mode storage may be unavailable; the in-memory list still works.
+    }
+  }, [usedUrls]);
+
+  function normalizeUrl(url: any): string {
+    const u = String(url || "").trim();
+    return u.length > 1 && u.endsWith("/") ? u.slice(0, -1) : u;
+  }
+
+  function isUsed(url: any): boolean {
+    const norm = normalizeUrl(url);
+    return !!norm && usedUrls.includes(norm);
+  }
+
+  function toggleUsed(url: any) {
+    const norm = normalizeUrl(url);
+    if (!norm) return;
+    setUsedUrls((current) =>
+      current.includes(norm) ? current.filter((u) => u !== norm) : [...current, norm]
+    );
+  }
+
+  function UsedBadge() {
+    return <span className="status-pill active">Used</span>;
+  }
+
+  function UsedToggle({ url }: { url: any }) {
+    const used = isUsed(url);
+    return (
+      <button
+        type="button"
+        className={used ? "btn-primary" : "btn-secondary"}
+        onClick={() => toggleUsed(url)}
+        title={used ? "Remove the Used mark" : "Mark as already used so it is skipped next time"}
+      >
+        {used ? "✓ Used" : "Mark used"}
+      </button>
+    );
+  }
 
   // PR workflow state
   const [selectedAngle, setSelectedAngle] = useState<AnyObj | null>(null);
@@ -644,6 +701,7 @@ export default function Home() {
       "site_domain",
       "article_title",
       "article_url",
+      "used",
       "pr_fit",
       "audience_question",
       "aeo_answer",
@@ -671,6 +729,7 @@ export default function Home() {
           domain,
           opportunity.article_title || "",
           opportunity.article_url || "",
+          isUsed(opportunity.article_url) ? "yes" : "no",
           opportunity.pr_fit || "",
           opportunity.audience_question || "",
           opportunity.aeo_answer || "",
@@ -959,11 +1018,15 @@ export default function Home() {
                         <p className="step-caption">
                           {scanResult.publication_name} · {scanResult.research_summary}
                         </p>
-                        {(scanResult.articles ?? []).map((a: AnyObj, i: number) => (
+                        {(scanResult.articles ?? [])
+                          .filter((a: AnyObj) => !hideUsed || !isUsed(a.article_url))
+                          .map((a: AnyObj, i: number) => (
                           <article className="card" key={`${a.article_url}-${i}`}>
                             <div className="card-head">
                               <div>
-                                <h2 className="card-title">{a.article_title}</h2>
+                                <h2 className="card-title">
+                                  {a.article_title} {isUsed(a.article_url) && <UsedBadge />}
+                                </h2>
                                 <p className="meta">
                                   {a.topic} · {a.published_date}
                                 </p>
@@ -1007,6 +1070,7 @@ export default function Home() {
                                   </>
                                 )}
                               </button>
+                              <UsedToggle url={a.article_url} />
                             </div>
                           </article>
                         ))}
@@ -1246,11 +1310,25 @@ export default function Home() {
                       {opportunities && (
                         <>
                           <p className="step-caption">{opportunities.research_summary}</p>
-                          {(opportunities.opportunities ?? []).map((o: AnyObj, i: number) => (
+                          {usedUrls.length > 0 && (
+                            <label className="meta" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                              <input
+                                type="checkbox"
+                                checked={hideUsed}
+                                onChange={(e) => setHideUsed(e.target.checked)}
+                              />
+                              Hide used ({usedUrls.length} marked)
+                            </label>
+                          )}
+                          {(opportunities.opportunities ?? [])
+                            .filter((o: AnyObj) => !hideUsed || !isUsed(o.article_url))
+                            .map((o: AnyObj, i: number) => (
                             <article className="card" key={`${o.article_url}-${i}`}>
                               <div className="card-head">
                                 <div>
-                                  <h2 className="card-title">{o.article_title}</h2>
+                                  <h2 className="card-title">
+                                    {o.article_title} {isUsed(o.article_url) && <UsedBadge />}
+                                  </h2>
                                   <p className="meta">
                                     {o.publication} · {o.published_date} · {o.opportunity_type}
                                   </p>
@@ -1355,6 +1433,7 @@ export default function Home() {
                                     </>
                                   )}
                                 </button>
+                                <UsedToggle url={o.article_url} />
                               </div>
                             </article>
                           ))}
@@ -1713,11 +1792,15 @@ export default function Home() {
                           {loadingList ? "Generating again..." : "Generate again"}
                         </button>
                       </div>
-                      {(listicles.opportunities ?? []).map((item: AnyObj, i: number) => (
+                      {(listicles.opportunities ?? [])
+                        .filter((item: AnyObj) => !hideUsed || !isUsed(item.listicle_url))
+                        .map((item: AnyObj, i: number) => (
                         <article className="card" key={`${item.listicle_url}-${i}`}>
                           <div className="card-head">
                             <div>
-                              <h2 className="card-title">{item.listicle_title}</h2>
+                              <h2 className="card-title">
+                                {item.listicle_title} {isUsed(item.listicle_url) && <UsedBadge />}
+                              </h2>
                               <p className="meta">
                                 {item.publication} · {item.placement_type} · {item.published_or_updated}
                               </p>
@@ -1783,6 +1866,7 @@ export default function Home() {
                               {loadingPolicy && selectedItem === item ? <Spinner /> : <Shield size={16} />}
                               Check policy
                             </button>
+                            <UsedToggle url={item.listicle_url} />
                           </div>
 
                           {selectedItem === item &&
