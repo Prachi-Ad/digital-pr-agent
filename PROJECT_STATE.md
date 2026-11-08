@@ -127,6 +127,9 @@ stays a non-sending demo.
   for selected**, instead of all-or-one. Each card also has **Find email**,
   which looks up that person's publicly published email (or the official
   contact route when none is published) via a `person-contact` research call.
+- Every draft carries a **3-question check** (is it a story? why this
+  journalist? why now?) with credibility details, per the think-like-a-
+  journalist framework; pitches lead with the story, never the company.
 - The digital workflow shows one step per screen (Article, PR angles,
   Opportunities, Journalists, Outreach) with tabs inside each phase, instead of
   one long stacked page. Bulk actions run sequentially with progress:
