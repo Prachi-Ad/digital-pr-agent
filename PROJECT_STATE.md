@@ -142,6 +142,11 @@ stays a non-sending demo.
   headers, dropdown filters, coloured status pills, formatted dates and scores,
   and a dashboard with KPI blocks. Apps Script source is kept at
   `vercel-app/apps-script/pitch-sheet.gs` (token redacted).
+- **Auto-sync** (on by default, toggle in Outreach): pitch batches and outcome
+  changes push to the sheet automatically. **Batch update** marks many drafts
+  Pitched / Replied / Covered / Declined / Do-not-contact in one click. Settings
+  has a **Google Sheet sync** panel with connection status, Test connection,
+  Sync now, and Copy setup script.
 - **Campaign board** (Research Library): **Save as campaign** snapshots the
   workspace; loading restores research and drafts; per-campaign pitched /
   replied / covered counts and coverage links stay live.
