@@ -405,6 +405,88 @@ export default function Home() {
     }
   }, [pitchOutcomes]);
 
+  // Campaigns: named workspace snapshots with live outcome counts.
+  const CAMPAIGNS_KEY = "pr_campaigns_v1";
+  const [campaigns, setCampaigns] = useState<Record<string, AnyObj>>(() => {
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(CAMPAIGNS_KEY) : null;
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(campaigns));
+    } catch {
+      // Private-mode storage may be unavailable; the in-memory list still works.
+    }
+  }, [campaigns]);
+
+  function saveCampaign() {
+    if (!analysis && Object.keys(drafts).length === 0) return;
+    const name = window.prompt("Campaign name", analysis?.article_title || "Untitled campaign");
+    if (!name || !name.trim()) return;
+    const id = `c${Date.now()}`;
+    const today = new Date().toISOString().slice(0, 10);
+    setCampaigns((current) => ({
+      ...current,
+      [id]: {
+        id,
+        name: name.trim(),
+        created: today,
+        urlInputs,
+        analyses,
+        analysis,
+        activeUrl,
+        selectedAngle,
+        oppByAngle,
+        selectedOpp,
+        writersByOpp,
+        drafts,
+        draftKeys: Object.keys(drafts),
+      },
+    }));
+  }
+
+  function loadCampaign(id: string) {
+    const c = campaigns[id];
+    if (!c) return;
+    setUrlInputs(Array.isArray(c.urlInputs) && c.urlInputs.length ? c.urlInputs : [""]);
+    setAnalyses(Array.isArray(c.analyses) ? c.analyses : []);
+    setAnalysis(c.analysis || null);
+    setActiveUrl(c.activeUrl || "");
+    setSelectedAngle(c.selectedAngle || null);
+    setOppByAngle(c.oppByAngle || {});
+    setOpportunities(
+      c.selectedAngle && c.oppByAngle ? (c.oppByAngle[angleKey(c.selectedAngle)] ?? null) : null
+    );
+    setSelectedOpp(c.selectedOpp || null);
+    setWritersByOpp(c.writersByOpp || {});
+    setJournalists(
+      c.selectedOpp && c.writersByOpp ? (c.writersByOpp[oppKey(c.selectedOpp)] ?? null) : null
+    );
+    setDrafts(c.drafts || {});
+    setCheckedPeople([]);
+    setErrOpp(null);
+    setErrJourn(null);
+    setErrDraft(null);
+    setShowStart(false);
+    setWorkflow("digital");
+    setNav("Workspace");
+    setDigitalStep(
+      c.drafts && Object.keys(c.drafts).length
+        ? "Outreach"
+        : c.selectedOpp
+          ? "Journalists"
+          : c.selectedAngle
+            ? "Opportunities"
+            : "Article"
+    );
+  }
+
   function setOutcome(draftId: string, patch: AnyObj) {
     setPitchOutcomes((current) => ({
       ...current,
@@ -1430,9 +1512,19 @@ export default function Home() {
                 title={workflow === "digital" ? "Digital PR" : "Listicles"}
                 subtitle={phaseCopy[activePhase] || "You approve every decision and every send."}
                 action={
-                  <button className="btn-secondary" onClick={() => setShowStart(true)}>
-                    ← Back to start
-                  </button>
+                  <div className="actions" style={{ marginTop: 0 }}>
+                    <button
+                      className="btn-secondary"
+                      onClick={saveCampaign}
+                      disabled={!analysis && Object.keys(drafts).length === 0}
+                      title="Save this workspace as a named campaign on the board"
+                    >
+                      Save as campaign
+                    </button>
+                    <button className="btn-secondary" onClick={() => setShowStart(true)}>
+                      ← Back to start
+                    </button>
+                  </div>
                 }
               />
 
@@ -2924,8 +3016,103 @@ export default function Home() {
                 </div>
               </section>
 
+              <section className="card">
+                <div className="card-head">
+                  <div>
+                    <h2 className="section-title">
+                      Campaign board · {Object.keys(campaigns).length} saved
+                    </h2>
+                    <p className="meta">
+                      Named snapshots of your workspace. Loading one restores its research and
+                      drafts; outcome counts stay live.
+                    </p>
+                  </div>
+                </div>
+                <div className="stack-sm" style={{ marginTop: 14 }}>
+                  {Object.keys(campaigns).length === 0 ? (
+                    <p className="meta">
+                      No campaigns yet. Use <strong>Save as campaign</strong> in the Workspace header.
+                    </p>
+                  ) : (
+                    (Object.values(campaigns) as AnyObj[])
+                      .sort((a: AnyObj, b: AnyObj) => String(b.created || "").localeCompare(String(a.created || "")))
+                      .map((c: AnyObj) => {
+                        const keys: string[] = Array.isArray(c.draftKeys) ? c.draftKeys : [];
+                        const counts: Record<string, number> = {};
+                        const coverage: string[] = [];
+                        for (const k of keys) {
+                          const st = pitchOutcomes[k]?.status || "Draft";
+                          counts[st] = (counts[st] || 0) + 1;
+                          if (st === "Covered" && pitchOutcomes[k]?.coverage_url) {
+                            coverage.push(pitchOutcomes[k].coverage_url);
+                          }
+                        }
+                        const oppTotal = (Object.values(c.oppByAngle || {}) as AnyObj[]).reduce(
+                          (n: number, r: AnyObj) => n + (r?.opportunities?.length || 0),
+                          0
+                        );
+                        const writerTotal = (Object.values(c.writersByOpp || {}) as AnyObj[]).reduce(
+                          (n: number, r: AnyObj) => n + (r?.journalists?.length || 0),
+                          0
+                        );
+                        return (
+                          <div className="context-card" key={c.id}>
+                            <div className="card-head">
+                              <div>
+                                <span className="context-value">
+                                  <strong>{c.name}</strong>
+                                </span>
+                                <p className="meta">
+                                  Saved {c.created || ""} · {oppTotal} opportunities · {writerTotal} writers ·{" "}
+                                  {keys.length} drafts
+                                  {(counts["Pitched"] || counts["Replied"] || counts["Covered"]) &&
+                                    ` · ${counts["Pitched"] || 0} pitched · ${counts["Replied"] || 0} replied · ${counts["Covered"] || 0} covered`}
+                                </p>
+                              </div>
+                              <div className="actions" style={{ marginTop: 0 }}>
+                                <button className="btn-secondary" onClick={() => loadCampaign(c.id)}>
+                                  Load
+                                </button>
+                                <button
+                                  className="btn-ghost"
+                                  onClick={() => {
+                                    if (window.confirm(`Delete campaign "${c.name}"?`)) {
+                                      setCampaigns((current) => {
+                                        const next = { ...current };
+                                        delete next[c.id];
+                                        return next;
+                                      });
+                                    }
+                                  }}
+                                  aria-label={`Delete ${c.name}`}
+                                >
+                                  <X size={15} />
+                                </button>
+                              </div>
+                            </div>
+                            {coverage.length > 0 && (
+                              <p className="result-meta">
+                                Coverage:{" "}
+                                {coverage.map((u, i) => (
+                                  <span key={`${u}-${i}`}>
+                                    {i > 0 && " · "}
+                                    <a href={u} target="_blank" rel="noreferrer">
+                                      Link {i + 1} <ExternalLink size={12} className="inline" />
+                                    </a>
+                                  </span>
+                                ))}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })
+                  )}
+                </div>
+              </section>
+
               <Note>
-                Workspace research resets on reload, but Used marks and the media library persist in this browser.
+                Workspace research resets on reload, but Used marks, the media library, outcomes,
+                and campaigns persist in this browser.
                 Full saved libraries, backups, and send history live in the local Streamlit app.
               </Note>
             </>
