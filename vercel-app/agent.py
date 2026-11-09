@@ -1292,7 +1292,16 @@ email-finder sites.
 
 def _trim_to_words(text: str, limit: int = 150) -> str:
     """Hard word cap: cut whole sentences so the body never exceeds limit."""
-    words = (text or "").split()
+    text = (
+        (text or "")
+        .replace("\u2019", "'")
+        .replace("\u2018", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2013", "-")
+        .replace("\u2014", " - ")
+    )
+    words = text.split()
     if len(words) <= limit:
         return text
     cut = " ".join(words[:limit])

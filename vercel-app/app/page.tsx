@@ -368,6 +368,7 @@ export default function Home() {
   const [listicleDrafts, setListicleDrafts] = useState<Record<string, AnyObj>>({});
   const [loadingListDraft, setLoadingListDraft] = useState<string | null>(null);
   const [errListDraft, setErrListDraft] = useState<string | null>(null);
+  const [contactByItem, setContactByItem] = useState<Record<string, AnyObj>>({});
 
   const [loadingDraft, setLoadingDraft] = useState<string | null>(null);
   const [errDraft, setErrDraft] = useState<string | null>(null);
@@ -992,6 +993,54 @@ export default function Home() {
   const [errPolicy, setErrPolicy] = useState<string | null>(null);
   function listDraftKey(url: any, name: any): string {
     return `list::${String(url || "")}##${String(name || "contact")}`;
+  }
+
+  async function writeAllListicleDrafts() {
+    const entries: Array<{ item: AnyObj; person: AnyObj }> = [];
+    for (const item of listicles?.opportunities ?? []) {
+      const c = contactByItem[item.listicle_url];
+      for (const person of c?.contacts ?? []) {
+        entries.push({ item, person });
+      }
+    }
+    if (entries.length === 0) {
+      setErrListDraft("Run Find contact on at least one listicle first.");
+      return;
+    }
+    setLoadingListDraft("__all__");
+    setErrListDraft(null);
+    setRetryMsg(null);
+    const failures: string[] = [];
+    let done = 0;
+    try {
+      for (let index = 0; index < entries.length; index += 1) {
+        const { item, person } = entries[index];
+        setRetryMsg(`Writing inclusion requests ${index + 1} of ${entries.length}...`);
+        try {
+          const data = await callApi(
+            "listicle-draft",
+            { item, contact: person },
+            (a) => setRetryMsg(`Writing requests ${index + 1} of ${entries.length} - retry ${a}/3...`)
+          );
+          setListicleDrafts((current) => ({
+            ...current,
+            [listDraftKey(item.listicle_url, person.contact_name)]: { ...data, __item: item },
+          }));
+          markUrlsUsed([item.listicle_url]);
+          done += 1;
+        } catch (err: any) {
+          failures.push(`${shortText(person.contact_name, 30)}: ${err?.message || "failed"}`);
+          if (String(err?.message || "").match(/429|limit|budget|Too many/i)) break;
+        }
+      }
+      if (failures.length > 0) {
+        setErrListDraft(`Wrote ${done} of ${entries.length}. Failures: ${failures.join(" | ")}`);
+      }
+      if (done > 0) setListicleStep("Outreach");
+    } finally {
+      setLoadingListDraft(null);
+      setRetryMsg(null);
+    }
   }
 
   async function writeListicleDraft(item: AnyObj, person: AnyObj) {
@@ -1710,6 +1759,7 @@ export default function Home() {
         setRetryMsg(`Retrying (attempt ${a}/3)...`)
       );
       setContact(data);
+      setContactByItem((current) => ({ ...current, [item.listicle_url]: data }));
     } catch (err: any) {
       setErrContact(err?.message || "Something went wrong");
     } finally {
@@ -2968,15 +3018,43 @@ export default function Home() {
                     <div className="stack">
                       <div className="actions-between">
                         <p className="step-caption">{listicles.research_summary}</p>
-                        <button
-                          className="btn-secondary"
-                          onClick={generateListicles}
-                          disabled={loadingList || !listForm.search_theme.trim()}
-                        >
-                          {loadingList ? <Spinner /> : <RefreshCw size={16} />}
-                          {loadingList ? "Generating again..." : "Generate again"}
-                        </button>
+                        <div className="actions" style={{ marginTop: 0 }}>
+                          <button
+                            className="btn-primary"
+                            onClick={writeAllListicleDrafts}
+                            disabled={loadingListDraft !== null}
+                            title="Write an inclusion request for every contact you have researched"
+                          >
+                            {loadingListDraft === "__all__" ? <Spinner /> : <Mail size={16} />}
+                            {loadingListDraft === "__all__"
+                              ? "Writing requests..."
+                              : `Write all inclusion requests (${Object.values(contactByItem).reduce(
+                                  (n: number, c: AnyObj) => n + (c?.contacts?.length || 0),
+                                  0
+                                )})`}
+                          </button>
+                          <button
+                            className="btn-secondary"
+                            onClick={() => setListicleStep("Outreach")}
+                            disabled={Object.keys(listicleDrafts).length === 0}
+                          >
+                            View requests ({Object.keys(listicleDrafts).length})
+                          </button>
+                          <button
+                            className="btn-secondary"
+                            onClick={generateListicles}
+                            disabled={loadingList || !listForm.search_theme.trim()}
+                          >
+                            {loadingList ? <Spinner /> : <RefreshCw size={16} />}
+                            {loadingList ? "Generating again..." : "Generate again"}
+                          </button>
+                        </div>
                       </div>
+                      {errListDraft && <Note tone="warn">{errListDraft}</Note>}
+                      <Note>
+                        Run <strong>Find contact</strong> on the listicles you want, then{" "}
+                        <strong>Write all inclusion requests</strong> — it uses every researched contact at once.
+                      </Note>
                       {(listicles.opportunities ?? [])
                         .filter((item: AnyObj) => !hideUsed || !isUsed(item.listicle_url))
                         .map((item: AnyObj, i: number) => (
