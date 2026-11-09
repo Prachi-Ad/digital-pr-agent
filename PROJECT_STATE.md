@@ -152,6 +152,9 @@ stays a non-sending demo.
   contact (80-130 words, route-aware: editorial vs form vs affiliate/sponsored),
   with outcome tracking, coverage URL, Copy/Download/Copy all, and the same
   Pitches/Coverage sheet sync (listed as angle "Listicle inclusion").
+  Prospects now has **Write all inclusion requests (n)** for every contact
+  researched so far, plus **View requests (n)**; researched contacts are cached
+  per listicle so the bulk action works across the whole list.
 - **Campaign board** (Research Library): **Save as campaign** snapshots the
   workspace; loading restores research and drafts; per-campaign pitched /
   replied / covered counts and coverage links stay live.
