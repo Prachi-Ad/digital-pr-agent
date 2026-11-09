@@ -625,8 +625,7 @@ export default function Home() {
   function buildPitchRows(): string[][] {
     const today = new Date().toISOString().slice(0, 10);
     const rows: string[][] = [];
-    for (const id of Object.keys(drafts)) {
-      const d = drafts[id];
+    for (const id of Object.keys(drafts)) {      const d = drafts[id];
       const oppUrl = splitDraftId(id);
       let angleName = "";
       let opp: AnyObj | null = null;
@@ -722,16 +721,54 @@ export default function Home() {
     ]);
   }
 
+  function buildListicleRows(): string[][] {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows: string[][] = [];
+    for (const id of Object.keys(listicleDrafts)) {
+      const d = listicleDrafts[id];
+      const item = d.__item || {};
+      const out = pitchOutcomes[id] || {};
+      let domain = "";
+      try {
+        domain = new URL(item.listicle_url || "").hostname.replace(/^www\./, "");
+      } catch {
+        domain = "";
+      }
+      rows.push([
+        id,
+        today,
+        "Listicle inclusion",
+        item.publication || d.publication || "",
+        domain,
+        item.listicle_title || d.target_title || "",
+        item.listicle_url || "",
+        isUsed(item.listicle_url) ? "yes" : "no",
+        item.placement_type || "",
+        "",
+        d.recipient_name || "",
+        d.recipient_role || "",
+        "",
+        d.subject_line || "",
+        d.message_body || "",
+        out.status || "Draft",
+        out.coverage_url || "",
+      ]);
+    }
+    return rows;
+  }
+
   async function syncToSheet(silent = false) {
-    if (Object.keys(drafts).length === 0) return;
+    const digitalRows = buildPitchRows();
+    const listRows = buildListicleRows();
+    if (digitalRows.length === 0 && listRows.length === 0) return;
     if (!silent) {
       setSyncing(true);
       setSyncMsg(null);
       setSyncErr(null);
     }
     try {
-      const pitches = await postSheetTab("Pitches", buildPitchRows());
-      const coverageRows = buildCoverageRows();
+      const pitches = await postSheetTab("Pitches", [...digitalRows, ...listRows]);
+      const coverageRows = [...buildCoverageRows(), ...buildListicleCoverageRows()];
       let coverage = { updated: 0, appended: 0 };
       if (coverageRows.length > 0) {
         coverage = await postSheetTab("Coverage", coverageRows);
@@ -746,6 +783,28 @@ export default function Home() {
     } finally {
       setSyncing(false);
     }
+  }
+
+  function buildListicleCoverageRows(): string[][] {
+    const rows: string[][] = [];
+    for (const id of Object.keys(listicleDrafts)) {
+      const out = pitchOutcomes[id] || {};
+      if (out.status !== "Covered") continue;
+      const d = listicleDrafts[id];
+      const item = d.__item || {};
+      rows.push([
+        id,
+        out.updated || new Date().toISOString().slice(0, 10),
+        d.recipient_name || "",
+        item.publication || d.publication || "",
+        item.listicle_title || d.target_title || "",
+        item.listicle_url || "",
+        d.subject_line || "",
+        out.coverage_url || "",
+        "Covered",
+      ]);
+    }
+    return rows;
   }
 
   async function syncContactsToSheet() {
@@ -926,6 +985,38 @@ export default function Home() {
   const [loadingPolicy, setLoadingPolicy] = useState(false);
   const [policy, setPolicy] = useState<AnyObj | null>(null);
   const [errPolicy, setErrPolicy] = useState<string | null>(null);
+
+  // Listicle inclusion drafts
+  const [listicleDrafts, setListicleDrafts] = useState<Record<string, AnyObj>>({});
+  const [loadingListDraft, setLoadingListDraft] = useState<string | null>(null);
+  const [errListDraft, setErrListDraft] = useState<string | null>(null);
+
+  function listDraftKey(url: any, name: any): string {
+    return `list::${String(url || "")}##${String(name || "contact")}`;
+  }
+
+  async function writeListicleDraft(item: AnyObj, person: AnyObj) {
+    const key = listDraftKey(item.listicle_url, person.contact_name);
+    setLoadingListDraft(key);
+    setErrListDraft(null);
+    setRetryMsg(null);
+    try {
+      const data = await callApi(
+        "listicle-draft",
+        { item, contact: person },
+        (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
+      );
+      setListicleDrafts((current) => ({ ...current, [key]: { ...data, __item: item } }));
+      markUrlsUsed([item.listicle_url]);
+      setListicleStep("Outreach");
+      scheduleSheetSync(1200);
+    } catch (err: any) {
+      setErrListDraft(err?.message || "Draft generation failed");
+    } finally {
+      setLoadingListDraft(null);
+      setRetryMsg(null);
+    }
+  }
 
   const angleCount = analysis?.pr_angles?.length || 0;
   const oppEntries = Object.entries(oppByAngle);
@@ -3013,6 +3104,27 @@ export default function Home() {
                                             Open source <ExternalLink size={13} className="inline" />
                                           </a>
                                         )}
+                                        <div className="actions" style={{ marginTop: 8 }}>
+                                          <button
+                                            className="btn-primary"
+                                            onClick={() => writeListicleDraft(item, c)}
+                                            disabled={loadingListDraft === listDraftKey(item.listicle_url, c.contact_name)}
+                                          >
+                                            {loadingListDraft === listDraftKey(item.listicle_url, c.contact_name) ? (
+                                              <>
+                                                <Spinner /> Writing request...
+                                              </>
+                                            ) : listicleDrafts[listDraftKey(item.listicle_url, c.contact_name)] ? (
+                                              <>
+                                                Write again <RefreshCw size={15} />
+                                              </>
+                                            ) : (
+                                              <>
+                                                Write inclusion request <ArrowRight size={15} />
+                                              </>
+                                            )}
+                                          </button>
+                                        </div>
                                       </div>
                                     ))}
                                     {(!contact.contacts || contact.contacts.length === 0) && (
@@ -3075,17 +3187,158 @@ export default function Home() {
               )}
 
               {workflow === "listicles" && listicleStep === "Outreach" && (
-                <div className="card empty-state">
-                  <div className="page-badge">Human approval</div>
-                  <h2 className="empty-title">Inclusion requests are in the local app</h2>
-                  <p className="empty-copy">
-                    The Vercel demo stops at verified prospects, contacts, and publisher policies. The full Streamlit
-                    app prepares listicle inclusion requests for manual review. Nothing is sent or submitted
-                    automatically.
-                  </p>
-                  <button className="btn-secondary" onClick={() => setListicleStep("Prospects")}>
-                    Back to Prospects
-                  </button>
+                <div className="stack">
+                  <div className="actions-between">
+                    <p className="step-caption">
+                      Inclusion requests for the contacts you selected. Copy or download them; nothing is sent or
+                      submitted.
+                      {Object.keys(listicleDrafts).length > 0 &&
+                        ` · ${Object.values(pitchOutcomes).filter((o: AnyObj) => o?.status === "Covered").length} covered`}
+                    </p>
+                    {Object.keys(listicleDrafts).length > 0 && (
+                      <button
+                        className="btn-secondary"
+                        onClick={() =>
+                          navigator.clipboard.writeText(
+                            Object.entries(listicleDrafts)
+                              .map(
+                                ([, d]) =>
+                                  `To: ${d.recipient_name || ""} (${(d.__item || {}).publication || d.publication || ""})\nSubject: ${d.subject_line}\n\n${d.message_body}`
+                              )
+                              .join("\n\n---\n\n")
+                          )
+                        }
+                      >
+                        <Copy size={15} /> Copy all
+                      </button>
+                    )}
+                    {Object.keys(listicleDrafts).length > 0 && (
+                      <button
+                        className="btn-primary"
+                        onClick={() => syncToSheet()}
+                        disabled={syncing}
+                      >
+                        {syncing ? <Spinner /> : <Server size={17} />}
+                        {syncing ? "Syncing..." : "Sync to Google Sheet"}
+                      </button>
+                    )}
+                  </div>
+
+                  {errListDraft && <Note tone="warn">{errListDraft}</Note>}
+                  {syncErr && <Note tone="warn">{syncErr}</Note>}
+                  {syncMsg && <Note>{syncMsg}</Note>}
+
+                  {Object.keys(listicleDrafts).length === 0 ? (
+                    <div className="card empty-state">
+                      <div className="page-badge">Human approval</div>
+                      <h2 className="empty-title">No inclusion requests yet</h2>
+                      <p className="empty-copy">
+                        Go to Prospects, run <strong>Find contact</strong> on a listicle, then click{" "}
+                        <strong>Write inclusion request</strong>.
+                      </p>
+                      <button className="btn-secondary" onClick={() => setListicleStep("Prospects")}>
+                        Back to Prospects
+                      </button>
+                    </div>
+                  ) : (
+                    Object.entries(listicleDrafts).map(([key, d]) => {
+                      const item = d.__item || {};
+                      const status = pitchOutcomes[key]?.status || "Draft";
+                      return (
+                        <article className="card" key={key}>
+                          <div className="card-head">
+                            <div>
+                              <h2 className="card-title">{d.recipient_name || "Editorial team"}</h2>
+                              <p className="meta">
+                                {item.publication || d.publication} · {d.recipient_role} · {d.channel}
+                              </p>
+                              <p className="meta">{item.listicle_title || d.target_title}</p>
+                            </div>
+                            <span className={`status-pill ${status !== "Draft" ? "active" : ""}`}>{status}</span>
+                          </div>
+                          <p className="body-text">
+                            <strong>Subject:</strong> {d.subject_line}
+                          </p>
+                          <div className="draft-body">{d.message_body}</div>
+                          <div className="form-row">
+                            <div className="field">
+                              <label htmlFor={`lout-${key}`}>Outcome</label>
+                              <select
+                                id={`lout-${key}`}
+                                className="input"
+                                value={status}
+                                onChange={(e) => setOutcome(key, { status: e.target.value })}
+                              >
+                                {["Draft", "Pitched", "Replied", "Covered", "Declined", "Do not contact"].map((s) => (
+                                  <option key={s} value={s}>
+                                    {s}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            {(status === "Covered" || pitchOutcomes[key]?.coverage_url) && (
+                              <div className="field">
+                                <label htmlFor={`lcov-${key}`}>Live listicle URL</label>
+                                <input
+                                  id={`lcov-${key}`}
+                                  type="url"
+                                  className="input"
+                                  placeholder="https://..."
+                                  value={pitchOutcomes[key]?.coverage_url || ""}
+                                  onChange={(e) => setOutcome(key, { coverage_url: e.target.value })}
+                                />
+                              </div>
+                            )}
+                          </div>
+                          <div className="actions">
+                            <button
+                              className="btn-secondary"
+                              onClick={() =>
+                                navigator.clipboard.writeText(
+                                  `Subject: ${d.subject_line}\n\n${d.message_body}`
+                                )
+                              }
+                            >
+                              <Copy size={15} /> Copy
+                            </button>
+                            <button
+                              className="btn-secondary"
+                              onClick={() =>
+                                downloadText(
+                                  `listicle-${(d.recipient_name || "contact").replace(/\s+/g, "-").toLowerCase()}.txt`,
+                                  `Subject: ${d.subject_line}\n\n${d.message_body}\n`
+                                )
+                              }
+                            >
+                              <Download size={15} /> Download
+                            </button>
+                            {item.listicle_url?.startsWith("https://") && (
+                              <a className="btn-secondary" href={item.listicle_url} target="_blank" rel="noreferrer">
+                                Open listicle <ExternalLink size={15} />
+                              </a>
+                            )}
+                          </div>
+                          <details className="plan">
+                            <summary>Facts to verify</summary>
+                            <div className="plan-body">
+                              {(d.facts_to_verify ?? []).length > 0 ? (
+                                (d.facts_to_verify ?? []).map((fact: string, index: number) => (
+                                  <p key={index}>{fact}</p>
+                                ))
+                              ) : (
+                                <p>None listed. Verify the contact and the inclusion route.</p>
+                              )}
+                              {d.compliance_notes && (
+                                <p>
+                                  <strong>Policy:</strong> {d.compliance_notes}
+                                </p>
+                              )}
+                            </div>
+                          </details>
+                        </article>
+                      );
+                    })
+                  )}
                 </div>
               )}
             </>

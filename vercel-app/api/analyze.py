@@ -17,8 +17,10 @@ from agent import (
     JournalistProfile,
     JournalistResearchResults,
     ListicleOpportunity,
+    ListicleContact,
     analyze_article,
     draft_journalist_pitch,
+    draft_listicle_inclusion,
     find_opportunity_contact,
     collect_media_contacts,
     research_opportunities,
@@ -50,6 +52,7 @@ class AnalyzeRequest(BaseModel):
     competitors: list[str] = Field(default_factory=list)
     max_results: int = 15
     item: ListicleOpportunity | None = None
+    contact: ListicleContact | None = None
 
 
 def _check_url(url: str) -> str:
@@ -166,6 +169,10 @@ def _dispatch(req: AnalyzeRequest):
             if not req.query.strip():
                 raise HTTPException(status_code=400, detail="query is required")
             return collect_media_contacts(req.query).model_dump()
+        if action in ("listicle-draft", "listicle_draft"):
+            if req.item is None or req.contact is None:
+                raise HTTPException(status_code=400, detail="item and contact are required")
+            return draft_listicle_inclusion(req.item, req.contact).model_dump()
         raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
     except HTTPException:
         raise

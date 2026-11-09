@@ -1359,8 +1359,55 @@ contact route' as the channel and note that the route must be verified.
     return draft
 
 
-def research_listicles(
-    search_theme: str,
+def draft_listicle_inclusion(
+    item: ListicleOpportunity,
+    contact: ListicleContact,
+) -> OutreachDraft:
+    """Draft a listicle inclusion request for human review. Never sends."""
+    prompt = f"""
+Write a listicle inclusion request for human review. Do not send or submit anything.
+
+SENDER NAME: Prachi
+SENDER ROLE: SEO Specialist
+BRAND: {BRAND_NAME}
+PRODUCT: {PRODUCT_DESCRIPTION}
+
+TARGET LISTICLE:
+Publication: {item.publication}
+Title: {item.listicle_title}
+URL: {item.listicle_url}
+Category: {item.listicle_category}
+Placement type: {item.placement_type}
+Brand currently listed: {item.brand_currently_listed}
+Fit: {item.brand_fit}
+Inclusion gap: {item.inclusion_gap}
+Documented contact route: {item.contact_route}
+Evidence: {item.evidence}
+
+CONTACT:
+Name: {contact.contact_name}
+Role: {contact.current_role}
+Email: {contact.professional_email}
+Route: {contact.contact_method}
+Why this contact: {contact.why_this_contact}
+Evidence: {contact.evidence}
+
+Rules:
+- 80-130 words in the message body, max 3 short paragraphs, subject under 60 characters.
+- Name the exact listicle, say specifically where the brand would sit, and offer one
+  useful verified detail (a product fact, data point, or resource).
+- Respect the documented route: if it is a form, affiliate, or sponsored route, write
+  for that route and never imply a free editorial slot when the policy is paid.
+- No AEO section, no link-begging, no Domain Rating talk, no invented facts or metrics.
+- Use [verify: ...] for anything unconfirmed and list it in facts_to_verify.
+- outreach_type must be "Listicle inclusion request".
+"""
+    draft = _run_agent_in_worker(outreach_draft_agent, prompt)
+    draft.message_body = _trim_to_words(draft.message_body, 130)
+    return draft
+
+
+def research_listicles(    search_theme: str,
     related_queries: str = "",
     target_audience: str = "All relevant audiences",
     target_market: str = "Global English-language",
