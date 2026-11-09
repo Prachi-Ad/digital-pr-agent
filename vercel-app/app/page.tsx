@@ -363,6 +363,12 @@ export default function Home() {
   const [writersByOpp, setWritersByOpp] = useState<Record<string, AnyObj>>({});
   const [errJourn, setErrJourn] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, AnyObj>>({});
+
+  // Listicle inclusion drafts
+  const [listicleDrafts, setListicleDrafts] = useState<Record<string, AnyObj>>({});
+  const [loadingListDraft, setLoadingListDraft] = useState<string | null>(null);
+  const [errListDraft, setErrListDraft] = useState<string | null>(null);
+
   const [loadingDraft, setLoadingDraft] = useState<string | null>(null);
   const [errDraft, setErrDraft] = useState<string | null>(null);
   const [checkedPeople, setCheckedPeople] = useState<string[]>([]);
@@ -497,7 +503,6 @@ export default function Home() {
         updated: new Date().toISOString().slice(0, 10),
       },
     }));
-    scheduleSheetSync(1200);
   }
 
   function draftStatusFor(recipientName: any): string {
@@ -521,9 +526,7 @@ export default function Home() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [syncErr, setSyncErr] = useState<string | null>(null);
-  const [selectedDrafts, setSelectedDrafts] = useState<string[]>([]);
-
-  // Auto-sync to the sheet after pitch writing / status changes.
+  const [selectedDrafts, setSelectedDrafts] = useState<string[]>([]);  // Auto-sync to the sheet after pitch writing / status changes.
   const AUTO_SYNC_KEY = "pr_autosync_v1";
   const [autoSync, setAutoSync] = useState<boolean>(() => {
     try {
@@ -542,14 +545,6 @@ export default function Home() {
   }, [autoSync]);
 
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  function scheduleSheetSync(delay = 2500) {
-    if (!autoSync) return;
-    if (typeof window === "undefined") return;
-    if (syncTimer.current) clearTimeout(syncTimer.current);
-    syncTimer.current = setTimeout(() => {
-      if (Object.keys(drafts).length > 0) void syncToSheet(true);
-    }, delay);
-  }
 
   // Sheet connection status
   const [sheetStatus, setSheetStatus] = useState<AnyObj | null>(null);
@@ -598,7 +593,6 @@ export default function Home() {
       return next;
     });
     setSelectedDrafts([]);
-    scheduleSheetSync(800);
   }
 
   function toggleAllDrafts(ids: string[]) {
@@ -784,6 +778,17 @@ export default function Home() {
       setSyncing(false);
     }
   }
+
+  // Auto-sync: state-driven so it always sees the latest drafts.
+  useEffect(() => {
+    if (!autoSync) return;
+    if (Object.keys(drafts).length === 0 && Object.keys(listicleDrafts).length === 0) return;
+    const t = setTimeout(() => {
+      void syncToSheet(true);
+    }, 2000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drafts, listicleDrafts, pitchOutcomes, autoSync]);
 
   function buildListicleCoverageRows(): string[][] {
     const rows: string[][] = [];
@@ -985,12 +990,6 @@ export default function Home() {
   const [loadingPolicy, setLoadingPolicy] = useState(false);
   const [policy, setPolicy] = useState<AnyObj | null>(null);
   const [errPolicy, setErrPolicy] = useState<string | null>(null);
-
-  // Listicle inclusion drafts
-  const [listicleDrafts, setListicleDrafts] = useState<Record<string, AnyObj>>({});
-  const [loadingListDraft, setLoadingListDraft] = useState<string | null>(null);
-  const [errListDraft, setErrListDraft] = useState<string | null>(null);
-
   function listDraftKey(url: any, name: any): string {
     return `list::${String(url || "")}##${String(name || "contact")}`;
   }
@@ -1009,7 +1008,6 @@ export default function Home() {
       setListicleDrafts((current) => ({ ...current, [key]: { ...data, __item: item } }));
       markUrlsUsed([item.listicle_url]);
       setListicleStep("Outreach");
-      scheduleSheetSync(1200);
     } catch (err: any) {
       setErrListDraft(err?.message || "Draft generation failed");
     } finally {
@@ -1562,7 +1560,6 @@ export default function Home() {
       }
       markUrlsUsed(pitchedUrls);
       if (done > 0) setDigitalStep("Outreach");
-      if (done > 0) scheduleSheetSync(1200);
     } finally {
       setLoadingDraft(null);
       setRetryMsg(null);
