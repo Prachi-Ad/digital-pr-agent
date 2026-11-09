@@ -723,23 +723,13 @@ export default function Home() {
       const d = listicleDrafts[id];
       const item = d.__item || {};
       const out = pitchOutcomes[id] || {};
-      let domain = "";
-      try {
-        domain = new URL(item.listicle_url || "").hostname.replace(/^www\./, "");
-      } catch {
-        domain = "";
-      }
       rows.push([
         id,
         today,
-        "Listicle inclusion",
         item.publication || d.publication || "",
-        domain,
         item.listicle_title || d.target_title || "",
         item.listicle_url || "",
-        isUsed(item.listicle_url) ? "yes" : "no",
         item.placement_type || "",
-        "",
         d.recipient_name || "",
         d.recipient_role || "",
         "",
@@ -762,7 +752,14 @@ export default function Home() {
       setSyncErr(null);
     }
     try {
-      const pitches = await postSheetTab("Pitches", [...digitalRows, ...listRows]);
+      let pitches = { updated: 0, appended: 0 };
+      let listicles = { updated: 0, appended: 0 };
+      if (digitalRows.length > 0) {
+        pitches = await postSheetTab("Pitches", digitalRows);
+      }
+      if (listRows.length > 0) {
+        listicles = await postSheetTab("Listicles", listRows);
+      }
       const coverageRows = [...buildCoverageRows(), ...buildListicleCoverageRows()];
       let coverage = { updated: 0, appended: 0 };
       if (coverageRows.length > 0) {
@@ -771,6 +768,7 @@ export default function Home() {
       setSyncErr(null);
       setSyncMsg(
         `Sheet updated — Pitches: ${pitches.appended} added, ${pitches.updated} refreshed; ` +
+          `Listicles: ${listicles.appended} added, ${listicles.updated} refreshed; ` +
           `Coverage: ${coverage.appended} added, ${coverage.updated} refreshed.`
       );
     } catch (err: any) {

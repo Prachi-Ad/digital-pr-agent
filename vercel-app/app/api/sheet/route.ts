@@ -20,6 +20,10 @@ const HEADER_MAP: Record<string, string[]> = {
     "key", "date", "contact_name", "publication", "article_title", "article_url",
     "subject", "coverage_url", "status",
   ],
+  Listicles: [
+    "key", "date", "publication", "listicle_title", "listicle_url", "placement_type",
+    "contact_name", "contact_role", "email", "subject", "body", "status", "coverage_url",
+  ],
 };
 const HEADERS = HEADER_MAP.Pitches;
 
