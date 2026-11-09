@@ -151,7 +151,10 @@ stays a non-sending demo.
 - **Listicles outreach** now drafts a real inclusion request per researched
   contact (80-130 words, route-aware: editorial vs form vs affiliate/sponsored),
   with outcome tracking, coverage URL, Copy/Download/Copy all, and the same
-  Pitches/Coverage sheet sync (listed as angle "Listicle inclusion").
+  Pitches/Coverage sheet sync. A dedicated **Listicles** sheet tab now holds
+  inclusion requests separately (listicle, outlet, placement type, contact,
+  subject, body, status, live URL), and the Dashboard adds listicle counts,
+  coverage rate, and a listicles-by-outlet table.
   Prospects now has **Write all inclusion requests (n)** for every contact
   researched so far, plus **View requests (n)**; researched contacts are cached
   per listicle so the bulk action works across the whole list.
