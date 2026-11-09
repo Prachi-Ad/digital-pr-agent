@@ -147,6 +147,10 @@ stays a non-sending demo.
   Pitched / Replied / Covered / Declined / Do-not-contact in one click. Settings
   has a **Google Sheet sync** panel with connection status, Test connection,
   Sync now, and Copy setup script.
+- **Listicles outreach** now drafts a real inclusion request per researched
+  contact (80-130 words, route-aware: editorial vs form vs affiliate/sponsored),
+  with outcome tracking, coverage URL, Copy/Download/Copy all, and the same
+  Pitches/Coverage sheet sync (listed as angle "Listicle inclusion").
 - **Campaign board** (Research Library): **Save as campaign** snapshots the
   workspace; loading restores research and drafts; per-campaign pitched /
   replied / covered counts and coverage links stay live.
