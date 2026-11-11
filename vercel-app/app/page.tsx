@@ -433,6 +433,7 @@ export default function Home() {
   const [loadingListDraft, setLoadingListDraft] = useState<string | null>(null);
   const [errListDraft, setErrListDraft] = useState<string | null>(null);
   const [contactByItem, setContactByItem] = useState<Record<string, AnyObj>>({});
+  const [policyByItem, setPolicyByItem] = useState<Record<string, AnyObj>>({});
 
   const [loadingDraft, setLoadingDraft] = useState<string | null>(null);
   const [errDraft, setErrDraft] = useState<string | null>(null);
@@ -531,6 +532,7 @@ export default function Home() {
         contact,
         policy,
         contactByItem,
+        policyByItem,
         emailByPerson,
         domainInput,
         topicHint,
@@ -571,6 +573,7 @@ export default function Home() {
     setContact(c.contact || null);
     setPolicy(c.policy || null);
     setContactByItem(c.contactByItem || {});
+    setPolicyByItem(c.policyByItem || {});
     setEmailByPerson(c.emailByPerson && typeof c.emailByPerson === "object" ? c.emailByPerson : {});
     setDomainInput(typeof c.domainInput === "string" ? c.domainInput : "");
     setTopicHint(typeof c.topicHint === "string" ? c.topicHint : "");
@@ -1329,6 +1332,7 @@ export default function Home() {
     setContact(null);
     setPolicy(null);
     setContactByItem({});
+    setPolicyByItem({});
     setListicleDrafts({});
     setErrList(null);
     setErrContact(null);
@@ -1995,8 +1999,15 @@ export default function Home() {
     await generateListicles();
   }
 
-  async function runContact(item: AnyObj) {
+  async function runContact(item: AnyObj, force = false) {
     setSelectedItem(item);
+    const cached = contactByItem[item.listicle_url];
+    // Instant when already researched: show the cache, Refresh forces a new call.
+    if (cached && !force) {
+      setContact(cached);
+      setErrContact(null);
+      return;
+    }
     setLoadingContact(true);
     setErrContact(null);
     setContact(null);
@@ -2015,8 +2026,14 @@ export default function Home() {
     }
   }
 
-  async function runPolicy(item: AnyObj) {
+  async function runPolicy(item: AnyObj, force = false) {
     setSelectedItem(item);
+    const cached = policyByItem[item.listicle_url];
+    if (cached && !force) {
+      setPolicy(cached);
+      setErrPolicy(null);
+      return;
+    }
     setLoadingPolicy(true);
     setErrPolicy(null);
     setPolicy(null);
@@ -2026,6 +2043,7 @@ export default function Home() {
         setRetryMsg(`Retrying (attempt ${a}/3)...`)
       );
       setPolicy(data);
+      setPolicyByItem((current) => ({ ...current, [item.listicle_url]: data }));
     } catch (err: any) {
       setErrPolicy(err?.message || "Something went wrong");
     } finally {
@@ -3444,7 +3462,7 @@ export default function Home() {
                               disabled={loadingContact}
                             >
                               {loadingContact && selectedItem === item ? <Spinner /> : <Mail size={16} />}
-                              Find contact
+                              {contactByItem[item.listicle_url] ? "View contact ✓" : "Find contact"}
                             </button>
                             <button
                               className="btn-secondary"
@@ -3452,7 +3470,7 @@ export default function Home() {
                               disabled={loadingPolicy}
                             >
                               {loadingPolicy && selectedItem === item ? <Spinner /> : <Shield size={16} />}
-                              Check policy
+                              {policyByItem[item.listicle_url] ? "View policy ✓" : "Check policy"}
                             </button>
                             <UsedToggle url={item.listicle_url} />
                           </div>
@@ -3478,7 +3496,7 @@ export default function Home() {
                                       <button
                                         type="button"
                                         className="btn-ghost"
-                                        onClick={() => runContact(item)}
+                                        onClick={() => runContact(item, true)}
                                         disabled={loadingContact}
                                       >
                                         {loadingContact ? <Spinner /> : <RefreshCw size={14} />}
@@ -3544,7 +3562,7 @@ export default function Home() {
                                       <button
                                         type="button"
                                         className="btn-ghost"
-                                        onClick={() => runPolicy(item)}
+                                        onClick={() => runPolicy(item, true)}
                                         disabled={loadingPolicy}
                                       >
                                         {loadingPolicy ? <Spinner /> : <RefreshCw size={14} />}
