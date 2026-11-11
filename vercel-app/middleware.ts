@@ -60,6 +60,20 @@ async function isAuthenticated(request: NextRequest): Promise<boolean> {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Per-browser id used by the API for a per-person daily research budget.
+  const withClient = (res: NextResponse) => {
+    if (!request.cookies.get("pr_client")) {
+      res.cookies.set("pr_client", crypto.randomUUID(), {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 365,
+        secure: process.env.NODE_ENV === "production",
+      });
+    }
+    return res;
+  };
+
   // Public machine-readable endpoints stay open for AI crawlers and everyone.
   if (
     pathname === "/llm" ||
@@ -89,24 +103,26 @@ export async function middleware(request: NextRequest) {
       url.pathname = "/llm";
       return NextResponse.rewrite(url);
     }
-    if (await isAuthenticated(request)) return NextResponse.next();
+    if (await isAuthenticated(request)) return withClient(NextResponse.next());
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", "/");
-    return NextResponse.redirect(url);
+    return withClient(NextResponse.redirect(url));
   }
 
   // Token minting requires the same gate; the Python /api/analyze guard
   // re-checks the cookie since that function does not run through Next.
   if (pathname === "/api/token") {
-    if (await isAuthenticated(request)) return NextResponse.next();
-    return NextResponse.json(
-      { detail: "Sign in required." },
-      { status: 401, headers: { "Cache-Control": "no-store" } }
+    if (await isAuthenticated(request)) return withClient(NextResponse.next());
+    return withClient(
+      NextResponse.json(
+        { detail: "Sign in required." },
+        { status: 401, headers: { "Cache-Control": "no-store" } }
+      )
     );
   }
 
-  return NextResponse.next();
+  return withClient(NextResponse.next());
 }
 
 export const config = {

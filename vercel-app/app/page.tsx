@@ -27,6 +27,41 @@ import {
 
 type AnyObj = Record<string, any>;
 
+function safeHref(value: any): string {
+  const raw = String(value || "").trim();
+  if (!raw || raw.length > 2048) return "";
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "https:") return "";
+    if (u.username || u.password) return "";
+    const host = u.hostname.toLowerCase().replace(/\.$/, "");
+    if (!host.includes(".") || host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) return "";
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return "";
+    if (!/^[a-z0-9.-]+$/.test(host)) return "";
+    if (host.split(".").some((label) => label.startsWith("xn--"))) return "";
+    if (!/^[a-z]{2,}$/.test(host.split(".").pop() || "")) return "";
+    return raw;
+  } catch {
+    return "";
+  }
+}
+
+function SafeA({
+  url,
+  children,
+  ...rest
+}: { url: any; children: ReactNode } & React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+  const href = safeHref(url);
+  if (!href) {
+    return <span className="meta">Link withheld: not a verified website URL</span>;
+  }
+  return (
+    <a href={href} target="_blank" rel="noreferrer noopener" title="Unverified source link" {...rest}>
+      {children}
+    </a>
+  );
+}
+
 const digitalPhases = ["Research", "Prospects", "Outreach"] as const;
 const listiclePhases = ["Find & review", "Outreach"] as const;
 type DigitalPhase = (typeof digitalPhases)[number];
@@ -280,7 +315,20 @@ export default function Home() {
     try {
       const raw = typeof window !== "undefined" ? window.localStorage.getItem(USED_URLS_KEY) : null;
       const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed.filter((u) => typeof u === "string") : [];
+      if (!Array.isArray(parsed)) return [];
+      const normed = parsed
+        .filter((u) => typeof u === "string")
+        .map((u) => {
+          try {
+            const url = new URL(u);
+            const host = url.hostname.toLowerCase().replace(/^www\./, "");
+            return `https://${host}${url.pathname.replace(/\/+$/, "")}${url.search}`.toLowerCase();
+          } catch {
+            return String(u).replace(/\/+$/, "").toLowerCase();
+          }
+        })
+        .filter(Boolean);
+      return Array.from(new Set(normed));
     } catch {
       return [];
     }
@@ -296,8 +344,16 @@ export default function Home() {
   }, [usedUrls]);
 
   function normalizeUrl(url: any): string {
-    const u = String(url || "").trim();
-    return u.length > 1 && u.endsWith("/") ? u.slice(0, -1) : u;
+    const raw = String(url || "").trim();
+    if (!raw) return "";
+    try {
+      const u = new URL(raw);
+      const host = u.hostname.toLowerCase().replace(/^www\./, "");
+      let path = u.pathname.replace(/\/+$/, "");
+      return `https://${host}${path}${u.search}`.toLowerCase();
+    } catch {
+      return raw.replace(/\/+$/, "").toLowerCase();
+    }
   }
 
   function isUsed(url: any): boolean {
@@ -454,6 +510,9 @@ export default function Home() {
         writersByOpp,
         drafts,
         draftKeys: Object.keys(drafts),
+        usedUrls,
+        listicleDrafts,
+        listicleDraftKeys: Object.keys(listicleDrafts),
       },
     }));
   }
@@ -476,6 +535,19 @@ export default function Home() {
       c.selectedOpp && c.writersByOpp ? (c.writersByOpp[oppKey(c.selectedOpp)] ?? null) : null
     );
     setDrafts(c.drafts || {});
+    if (Array.isArray(c.usedUrls) && c.usedUrls.length > 0) {
+      setUsedUrls((current) => {
+        const merged = [...current];
+        for (const u of c.usedUrls) {
+          const norm = normalizeUrl(u);
+          if (norm && !merged.includes(norm)) merged.push(norm);
+        }
+        return merged;
+      });
+    }
+    if (c.listicleDrafts && typeof c.listicleDrafts === "object") {
+      setListicleDrafts(c.listicleDrafts);
+    }
     setCheckedPeople([]);
     setErrOpp(null);
     setErrJourn(null);
@@ -527,7 +599,30 @@ export default function Home() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [syncErr, setSyncErr] = useState<string | null>(null);
-  const [selectedDrafts, setSelectedDrafts] = useState<string[]>([]);  // Auto-sync to the sheet after pitch writing / status changes.
+  const [selectedDrafts, setSelectedDrafts] = useState<string[]>([]);
+
+  // Remaining research budget for this person today (read-only check).
+  const [quota, setQuota] = useState<AnyObj | null>(null);
+  async function refreshQuota() {
+    try {
+      const res = await fetch("/api/analyze", { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && typeof data?.remaining === "number") setQuota(data);
+    } catch {
+      // Budget display is optional; never block the UI on it.
+    }
+  }
+  useEffect(() => {
+    void refreshQuota();
+  }, []);
+
+  function budgetAllows(count: number): boolean {
+    if (!quota || typeof quota.remaining !== "number") return true;
+    if (quota.remaining >= count) return true;
+    return window.confirm(
+      `This would use ${count} research calls but only ${quota.remaining} are left today. Continue anyway?`
+    );
+  }  // Auto-sync to the sheet after pitch writing / status changes.
   const AUTO_SYNC_KEY = "pr_autosync_v1";
   const [autoSync, setAutoSync] = useState<boolean>(() => {
     try {
@@ -1005,6 +1100,7 @@ export default function Home() {
       setErrListDraft("Run Find contact on at least one listicle first.");
       return;
     }
+    if (!budgetAllows(entries.length)) return;
     setLoadingListDraft("__all__");
     setErrListDraft(null);
     setRetryMsg(null);
@@ -1035,6 +1131,7 @@ export default function Home() {
         setErrListDraft(`Wrote ${done} of ${entries.length}. Failures: ${failures.join(" | ")}`);
       }
       if (done > 0) setListicleStep("Outreach");
+      void refreshQuota();
     } finally {
       setLoadingListDraft(null);
       setRetryMsg(null);
@@ -1391,6 +1488,7 @@ export default function Home() {
   async function researchAllAngles() {
     const angles = analysis?.pr_angles ?? [];
     if (angles.length === 0) return;
+    if (!budgetAllows(angles.length)) return;
     setLoadingOpp(true);
     setErrOpp(null);
     setRetryMsg(null);
@@ -1472,6 +1570,7 @@ export default function Home() {
   async function findWritersForAll() {
     const opps = opportunities?.opportunities ?? [];
     if (!selectedAngle || opps.length === 0) return;
+    if (!budgetAllows(opps.length)) return;
     setLoadingJourn(true);
     setErrJourn(null);
     setCheckedPeople([]);
@@ -1575,6 +1674,7 @@ export default function Home() {
   async function runPitchBatch(
     entries: Array<{ angle: AnyObj; opportunity: AnyObj; person: AnyObj }>
   ) {
+    if (!budgetAllows(entries.length)) return;
     setLoadingDraft("__all__");
     setErrDraft(null);
     setRetryMsg(null);
@@ -1607,6 +1707,7 @@ export default function Home() {
       }
       markUrlsUsed(pitchedUrls);
       if (done > 0) setDigitalStep("Outreach");
+      void refreshQuota();
     } finally {
       setLoadingDraft(null);
       setRetryMsg(null);
@@ -1829,6 +1930,16 @@ export default function Home() {
         <div>
           Search context: <strong>low</strong>
         </div>
+        {quota && typeof quota.remaining === "number" && (
+          <div>
+            Calls left today: <strong>{quota.remaining}</strong>
+          </div>
+        )}
+        {quota && quota.remaining === 0 && (
+          <div className="sidebar-note">
+            Daily research limit reached. It resets tomorrow.
+          </div>
+        )}
         <div className="sidebar-note">Vercel demo · no automatic outreach</div>
         <button
           type="button"
@@ -2012,9 +2123,9 @@ export default function Home() {
                                 </p>
                               </div>
                               {a.article_url?.startsWith("https://") && (
-                                <a className="btn-secondary" href={a.article_url} target="_blank" rel="noreferrer">
+                                <SafeA className="btn-secondary" url={a.article_url}>
                                   Open article <ExternalLink size={15} />
-                                </a>
+                                </SafeA>
                               )}
                             </div>
                             <p className="body-text">
@@ -2345,9 +2456,7 @@ export default function Home() {
                                   </p>
                                 </div>
                                 {o.article_url?.startsWith("https://") && (
-                                  <a className="btn-secondary" href={o.article_url} target="_blank" rel="noreferrer">
-                                    Open article <ExternalLink size={15} />
-                                  </a>
+                                  <SafeA className="btn-secondary" url={o.article_url}>Open article <ExternalLink size={15} /></SafeA>
                                 )}
                               </div>
                               <p className="body-text">
@@ -2546,9 +2655,7 @@ export default function Home() {
                                   </p>
                                   {j.relevant_article_url?.startsWith("https://") && (
                                     <p>
-                                      <a href={j.relevant_article_url} target="_blank" rel="noreferrer">
-                                        Open coverage <ExternalLink size={13} className="inline" />
-                                      </a>
+                                      <SafeA url={j.relevant_article_url}>Open coverage <ExternalLink size={13} className="inline" /></SafeA>
                                     </p>
                                   )}
                                   <p>
@@ -2629,14 +2736,10 @@ export default function Home() {
                                         emailByPerson[personKey(j.name)].contact_page_url !== "Unknown" && (
                                           <p className="result-copy">
                                             <strong>Contact route:</strong>{" "}
-                                            <a
-                                              href={emailByPerson[personKey(j.name)].contact_page_url}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                            >
+                                            <SafeA url={emailByPerson[personKey(j.name)].contact_page_url}>
                                               {emailByPerson[personKey(j.name)].route || "Open contact page"}{" "}
                                               <ExternalLink size={13} className="inline" />
-                                            </a>
+                                            </SafeA>
                                           </p>
                                         )}
                                       {emailByPerson[personKey(j.name)].evidence && (
@@ -2826,9 +2929,7 @@ export default function Home() {
                         {pitchOutcomes[name]?.status === "Covered" && pitchOutcomes[name]?.coverage_url?.startsWith("https://") && (
                           <p className="meta" style={{ marginTop: 8 }}>
                             Coverage:{" "}
-                            <a href={pitchOutcomes[name].coverage_url} target="_blank" rel="noreferrer">
-                              Open <ExternalLink size={12} className="inline" />
-                            </a>
+                            <SafeA url={pitchOutcomes[name].coverage_url}>Open <ExternalLink size={12} className="inline" /></SafeA>
                           </p>
                         )}
                         <p className="body-text">
@@ -3067,9 +3168,7 @@ export default function Home() {
                               </p>
                             </div>
                             {item.listicle_url?.startsWith("https://") && (
-                              <a className="btn-secondary" href={item.listicle_url} target="_blank" rel="noreferrer">
-                                Open page <ExternalLink size={15} />
-                              </a>
+                              <SafeA className="btn-secondary" url={item.listicle_url}>Open page <ExternalLink size={15} /></SafeA>
                             )}
                           </div>
                           <p className="body-text">
@@ -3173,9 +3272,7 @@ export default function Home() {
                                         <p className="result-copy">{c.why_this_contact}</p>
                                         <p className="result-meta">Confidence: {c.confidence}</p>
                                         {c.source_url && c.source_url !== "Unknown" && (
-                                          <a href={c.source_url} target="_blank" rel="noreferrer">
-                                            Open source <ExternalLink size={13} className="inline" />
-                                          </a>
+                                          <SafeA url={c.source_url}>Open source <ExternalLink size={13} className="inline" /></SafeA>
                                         )}
                                         <div className="actions" style={{ marginTop: 8 }}>
                                           <button
@@ -3241,9 +3338,7 @@ export default function Home() {
                                     </p>
                                     <p className="result-meta">Confidence: {policy.confidence}</p>
                                     {policy.policy_source_url && policy.policy_source_url !== "Unknown" && (
-                                      <a href={policy.policy_source_url} target="_blank" rel="noreferrer">
-                                        Open policy source <ExternalLink size={13} className="inline" />
-                                      </a>
+                                      <SafeA url={policy.policy_source_url}>Open policy source <ExternalLink size={13} className="inline" /></SafeA>
                                     )}
                                   </div>
                                 )}
@@ -3386,9 +3481,7 @@ export default function Home() {
                               <Download size={15} /> Download
                             </button>
                             {item.listicle_url?.startsWith("https://") && (
-                              <a className="btn-secondary" href={item.listicle_url} target="_blank" rel="noreferrer">
-                                Open listicle <ExternalLink size={15} />
-                              </a>
+                              <SafeA className="btn-secondary" url={item.listicle_url}>Open listicle <ExternalLink size={15} /></SafeA>
                             )}
                           </div>
                           <details className="plan">
@@ -3648,9 +3741,7 @@ export default function Home() {
                             {e.article_url?.startsWith("https://") && (
                               <>
                                 {" · "}
-                                <a href={e.article_url} target="_blank" rel="noreferrer">
-                                  Open <ExternalLink size={12} className="inline" />
-                                </a>
+                                <SafeA url={e.article_url}>Open <ExternalLink size={12} className="inline" /></SafeA>
                               </>
                             )}
                           </p>
@@ -3746,9 +3837,7 @@ export default function Home() {
                                 {coverage.map((u, i) => (
                                   <span key={`${u}-${i}`}>
                                     {i > 0 && " · "}
-                                    <a href={u} target="_blank" rel="noreferrer">
-                                      Link {i + 1} <ExternalLink size={12} className="inline" />
-                                    </a>
+                                    <SafeA url={u}>Link {i + 1} <ExternalLink size={12} className="inline" /></SafeA>
                                   </span>
                                 ))}
                               </p>

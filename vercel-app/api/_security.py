@@ -155,6 +155,17 @@ class _SlidingWindow:
         self._lock = threading.Lock()
         self._hits: dict[str, deque[float]] = {}
 
+    def count(self, key: str, window_seconds: int) -> int:
+        now = time.monotonic()
+        cutoff = now - window_seconds
+        with self._lock:
+            hits = self._hits.get(key)
+            if not hits:
+                return 0
+            while hits and hits[0] <= cutoff:
+                hits.popleft()
+            return len(hits)
+
     def allow(self, key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
         now = time.monotonic()
         cutoff = now - window_seconds
@@ -178,6 +189,42 @@ class _SlidingWindow:
 _ip_window = _SlidingWindow()
 _ip_day = _SlidingWindow()
 _global_day = _SlidingWindow()
+_client_day = _SlidingWindow()
+
+CLIENT_COOKIE = "pr_client"
+
+
+def _caps() -> tuple[int, int, int, int]:
+    return (
+        _int_env("DEMO_IP_REQUESTS_PER_10_MIN", 8, 1, 100),
+        _int_env("DEMO_IP_REQUESTS_PER_DAY", 25, 1, 1000),
+        _int_env("DEMO_CLIENT_REQUESTS_PER_DAY", 15, 1, 1000),
+        _int_env("DEMO_DAILY_REQUEST_CAP", 100, 1, 5000),
+    )
+
+
+def remaining_quota(request: Request) -> dict:
+    """Report what is left without consuming a call."""
+    per_window, per_day, per_client, daily_cap = _caps()
+    ip = client_ip(request)
+    client = (request.cookies.get(CLIENT_COOKIE) or "").strip()
+
+    def left(window: _SlidingWindow, key: str, limit: int) -> int:
+        used = window.count(key, 24 * 60 * 60) if window is not _ip_window else window.count(key, 10 * 60)
+        return max(0, limit - used)
+
+    return {
+        "perSession": left(_ip_window, f"ip:{ip}", per_window),
+        "perSessionLimit": per_window,
+        "perDay": left(_ip_day, f"ip:{ip}", per_day),
+        "perDayLimit": per_day,
+        "remaining": min(
+            left(_ip_window, f"ip:{ip}", per_window),
+            left(_ip_day, f"ip:{ip}", per_day),
+            left(_client_day, f"client:{client}", per_client) if client else per_client,
+            left(_global_day, "global", daily_cap),
+        ),
+    }
 
 
 def guard(request: Request) -> None:
@@ -217,15 +264,25 @@ def guard(request: Request) -> None:
         )
 
     ip = client_ip(request)
-    per_window = _int_env("DEMO_IP_REQUESTS_PER_10_MIN", 12, 1, 100)
-    per_day = _int_env("DEMO_IP_REQUESTS_PER_DAY", 60, 1, 1000)
-    daily_cap = _int_env("DEMO_DAILY_REQUEST_CAP", 200, 1, 5000)
+    per_window, per_day, per_client, daily_cap = _caps()
+    client = (request.cookies.get(CLIENT_COOKIE) or "").strip() or f"ip:{ip}"
 
     allowed, retry_after = _global_day.allow("global", daily_cap, 24 * 60 * 60)
     if not allowed:
         raise HTTPException(
             status_code=429,
-            detail="The demo has reached its daily research budget. Please try again tomorrow.",
+            detail="The research budget for today is used up. Try again tomorrow.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    allowed, retry_after = _client_day.allow(f"client:{client}", per_client, 24 * 60 * 60)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"You have used today's {per_client} research calls. "
+                "The limit resets tomorrow; ask for a higher limit if you need more."
+            ),
             headers={"Retry-After": str(retry_after)},
         )
 

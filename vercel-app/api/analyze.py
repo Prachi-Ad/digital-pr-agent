@@ -9,7 +9,7 @@ sys.path.insert(0, _HERE)
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from _security import guard, log_request
+from _security import guard, log_request, remaining_quota
 
 from agent import (
     PRAngle,
@@ -23,6 +23,7 @@ from agent import (
     draft_listicle_inclusion,
     find_opportunity_contact,
     collect_media_contacts,
+    sanitize_payload,
     research_opportunities,
     research_journalists,
     research_listicles,
@@ -183,8 +184,9 @@ def _dispatch(req: AnalyzeRequest):
 @app.get("/")
 @app.get("/analyze")
 @app.get("/api/analyze")
-def health():
-    return {"status": "ok", "service": "digital-pr-agent"}
+def health(request: Request):
+    """Health plus the caller's remaining research budget. Never bills a call."""
+    return {"status": "ok", "service": "digital-pr-agent", **remaining_quota(request)}
 
 
 @app.post("/")
@@ -192,11 +194,14 @@ def health():
 @app.post("/api/analyze")
 def handle(req: AnalyzeRequest, request: Request):
     guard(request)
-    log_request(request, (req.action or "analyze").strip().lower())
+    action = (req.action or "analyze").strip().lower()
+    log_request(request, action)
     last = None
     for attempt in range(2):
         try:
-            return _dispatch(req)
+            # Model output is untrusted: strip unsafe links, invalid emails and
+            # out-of-range scores before anything reaches the browser.
+            return sanitize_payload(_dispatch(req))
         except HTTPException:
             raise
         except Exception as e:
