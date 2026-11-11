@@ -185,6 +185,10 @@ stays a non-sending demo.
   spent), Check policy, Write inclusion request, auto-sync reported
   "Listicles: 1 added", then marking it **Covered** auto-synced
   "Listicles: 1 refreshed; Coverage: 1 added".
+- Budget safety: all requests are validated (`_precheck`) **before** a research
+  call is charged, so own-domain scans, unsafe links and missing fields return
+  400 without spending. Verified live: four rejected requests, budget
+  12 -> 12 unchanged. Covered by 20 unit tests.
 - Workflow correctness: switching angle chips clears the previous angle's
   writers/emails (no stale Journalists view); campaigns also restore email
   lookups and domain scans; "Calls left today" refreshes every minute.
