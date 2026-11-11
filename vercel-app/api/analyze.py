@@ -14,6 +14,7 @@ from dr import configured as dr_configured
 from dr import get_domain_ratings
 
 from agent import (
+    BRAND_DOMAIN as AGENT_BRAND_DOMAIN,
     PRAngle,
     PROpportunity,
     JournalistProfile,
@@ -77,6 +78,30 @@ def _competitors(values: object) -> list[str]:
     return [_text(item, 60) for item in items[:10] if str(item or "").strip()]
 
 
+def _host_of(url: str) -> str:
+    try:
+        return urlsplit(str(url or "")).hostname or ""
+    except ValueError:
+        return ""
+
+
+def drop_own_domain(payload: dict, key: str, url_field: str) -> dict:
+    """Remove candidates hosted on the brand's own site (they are not pitch targets)."""
+    if not AGENT_BRAND_DOMAIN:
+        return payload
+    items = payload.get(key)
+    if not isinstance(items, list):
+        return payload
+    kept = []
+    for item in items:
+        host = _host_of(item.get(url_field, "")).lower()
+        if host == AGENT_BRAND_DOMAIN or host.endswith("." + AGENT_BRAND_DOMAIN):
+            continue
+        kept.append(item)
+    payload[key] = kept
+    return payload
+
+
 def _check_domain(domain: str) -> str:
     domain = (domain or "").strip().lower()
     for prefix in ("https://", "http://"):
@@ -99,7 +124,8 @@ def _dispatch(req: AnalyzeRequest):
         if action == "opportunities":
             if req.angle is None:
                 raise HTTPException(status_code=400, detail="angle is required")
-            return research_opportunities(req.angle).model_dump()
+            result = research_opportunities(req.angle).model_dump()
+            return drop_own_domain(result, "opportunities", "article_url")
         if action == "draft":
             if req.opportunity is None or req.person is None:
                 raise HTTPException(
@@ -155,7 +181,7 @@ def _dispatch(req: AnalyzeRequest):
         if action == "listicles":
             if not req.search_theme.strip():
                 raise HTTPException(status_code=400, detail="search_theme is required")
-            return research_listicles(
+            result = research_listicles(
                 search_theme=_text(req.search_theme, 200),
                 related_queries=_text(req.related_queries, 300),
                 target_audience=_text(req.target_audience, 150),
@@ -163,6 +189,7 @@ def _dispatch(req: AnalyzeRequest):
                 competitors=_competitors(req.competitors) or None,
                 max_results=max(3, min(10, req.max_results)),
             ).model_dump()
+            return drop_own_domain(result, "opportunities", "listicle_url")
         if action in ("listicle-contact", "listicle_contact"):
             if req.item is None:
                 raise HTTPException(status_code=400, detail="item is required")
@@ -173,7 +200,8 @@ def _dispatch(req: AnalyzeRequest):
             return research_publisher_policy(req.item).model_dump()
         if action in ("domain-scan", "domain_scan"):
             domain = _check_domain(req.domain)
-            return scan_domain_articles(domain, _text(req.topic_hint, 200)).model_dump()
+            result = scan_domain_articles(domain, _text(req.topic_hint, 200)).model_dump()
+            return drop_own_domain(result, "articles", "article_url")
         if action in ("person-contact", "person_contact"):
             if req.person is None or req.opportunity is None:
                 raise HTTPException(

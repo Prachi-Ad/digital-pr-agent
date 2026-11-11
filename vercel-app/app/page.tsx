@@ -788,6 +788,14 @@ export default function Home() {
     return window.confirm(
       `This would use ${count} research calls but only ${quota.remaining} are left today. Continue anyway?`
     );
+  }
+
+  // Multi-call actions state their cost before spending anything.
+  function confirmBulk(label: string, count: number): boolean {
+    if (count <= 1) return true;
+    const left =
+      quota && typeof quota.remaining === "number" ? `, ${quota.remaining} left today` : "";
+    return window.confirm(`${label} will use ${count} research calls${left}. Continue?`);
   }  // Auto-sync to the sheet after pitch writing / status changes.
   const AUTO_SYNC_KEY = "pr_autosync_v1";
   const [autoSync, setAutoSync] = useState<boolean>(() => {
@@ -1267,6 +1275,7 @@ export default function Home() {
       return;
     }
     if (!budgetAllows(entries.length)) return;
+    if (!confirmBulk("Write all inclusion requests", entries.length)) return;
     setLoadingListDraft("__all__");
     setErrListDraft(null);
     setRetryMsg(null);
@@ -1449,7 +1458,7 @@ export default function Home() {
       setErrAnalyze("Add at least one article URL.");
       return;
     }
-    await analyzeUrls(urls);
+    await analyzeUrls(urls, true);
   }
 
   // Domain-scan multi-select for bulk analysis.
@@ -1710,6 +1719,7 @@ export default function Home() {
     const angles = analysis?.pr_angles ?? [];
     if (angles.length === 0) return;
     if (!budgetAllows(angles.length)) return;
+    if (!confirmBulk("Research all angles", angles.length)) return;
     setLoadingOpp(true);
     setErrOpp(null);
     setRetryMsg(null);
@@ -1792,6 +1802,7 @@ export default function Home() {
     const opps = opportunities?.opportunities ?? [];
     if (!selectedAngle || opps.length === 0) return;
     if (!budgetAllows(opps.length)) return;
+    if (!confirmBulk("Find writers for all", opps.length)) return;
     setLoadingJourn(true);
     setErrJourn(null);
     setCheckedPeople([]);
@@ -1896,6 +1907,7 @@ export default function Home() {
     entries: Array<{ angle: AnyObj; opportunity: AnyObj; person: AnyObj }>
   ) {
     if (!budgetAllows(entries.length)) return;
+    if (!confirmBulk("Write all pitches", entries.length)) return;
     setLoadingDraft("__all__");
     setErrDraft(null);
     setRetryMsg(null);

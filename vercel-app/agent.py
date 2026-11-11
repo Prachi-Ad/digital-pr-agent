@@ -151,6 +151,10 @@ MAX_TURNS = int(os.environ.get("MAX_TURNS", "3"))
 
 # Brand configuration (override to reuse this tool for any product/company)
 BRAND_NAME = (os.environ.get("BRAND_NAME") or os.environ.get("VISTA_BRAND_NAME") or "Your Brand").strip() or "Your Brand"
+BRAND_DOMAIN = (os.environ.get("BRAND_DOMAIN") or os.environ.get("VISTA_BRAND_DOMAIN") or "").strip()
+BRAND_DOMAIN = BRAND_DOMAIN.replace("https://", "").replace("http://", "").strip("/").lower()
+if BRAND_DOMAIN.startswith("www."):
+    BRAND_DOMAIN = BRAND_DOMAIN[4:]
 PRODUCT_DESCRIPTION = (os.environ.get("PRODUCT_DESCRIPTION") or os.environ.get("VISTA_PRODUCT_DESCRIPTION") or "a software product").strip() or "a software product"
 
 EXPERT_RULES = """
@@ -751,6 +755,8 @@ AEO (answer engine optimization):
 
 Rules:
 - Search the live web.
+- Never list pages on the brand's own domain ({BRAND_DOMAIN or "the brand site"}); those are
+  our own assets, not pitch targets.
 - Prefer current or reasonably recent coverage.
 - Do not invent article titles, URLs, dates, or competitor mentions.
 - Use Unknown when a date cannot be verified.
@@ -816,6 +822,7 @@ PR suitability:
 
 Rules:
 - Search the live web; prefer articles from roughly the last 12 months.
+- Skip pages on the brand's own domain ({BRAND_DOMAIN or "the brand site"}).
 - Only list articles you actually found. Do not invent titles, URLs, or dates.
 - Use Unknown when a date cannot be verified.
 - Every article URL must be on the scanned domain.
