@@ -528,7 +528,6 @@ stays a non-sending demo.
   available at the custom domain above.
 
 ## Safety hardening (2026-11-11)
-
 - Model output is untrusted. Every API response passes `sanitize_payload`:
   URLs must be public `https` hosts (no `javascript:`/`data:`, no `user@host`
   tricks, no raw IPs, no `localhost`, no punycode homographs), emails must be
@@ -550,6 +549,13 @@ stays a non-sending demo.
 - "Used" marks normalise URLs (case, `www.`, trailing slashes, query) so the
   same article cannot reappear as new, are included in campaign snapshots and
   restored on load, and legacy duplicates are merged on first read.
+- Next.js 14.2.15 -> 14.2.35 (middleware auth-bypass class of issue; API routes
+  re-check auth themselves, so this was defence in depth).
+- CSV exports prefix `'` to cells starting with `= + - @` so AI text can never
+  become a live spreadsheet formula on import.
+- Campaigns now snapshot and restore the full workspace (digital + listicle
+  state); regenerating an analysis no longer deletes written drafts (only
+  "Start new" clears them); sheet-sync failures surface in the sidebar.
 
 ## Known caveats
 
