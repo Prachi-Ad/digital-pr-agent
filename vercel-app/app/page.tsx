@@ -661,12 +661,14 @@ export default function Home() {
   // Remaining research budget for this person today (read-only check).
   const [quota, setQuota] = useState<AnyObj | null>(null);
   const [drReady, setDrReady] = useState(false);
+  const [brandDomain, setBrandDomain] = useState("");
   async function refreshQuota() {
     try {
       const res = await fetch("/api/analyze", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (res.ok && typeof data?.remaining === "number") setQuota(data);
       if (res.ok && typeof data?.dr_ready === "boolean") setDrReady(data.dr_ready);
+      if (res.ok && typeof data?.brand_domain === "string") setBrandDomain(data.brand_domain);
     } catch {
       // Budget display is optional; never block the UI on it.
     }
@@ -1596,6 +1598,13 @@ export default function Home() {
       setErrScan("Enter a domain, e.g. example.com.");
       return;
     }
+    const bare = domain.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+    if (brandDomain && (bare === brandDomain || bare.endsWith(`.${brandDomain}`))) {
+      setErrScan(
+        `${bare} is your own site. Enter a publisher domain you want coverage from, e.g. hootsuite.com.`
+      );
+      return;
+    }
     setLoadingScan(true);
     setErrScan(null);
     setScanResult(null);
@@ -2436,6 +2445,9 @@ export default function Home() {
                     </form>
                     <p className="meta" style={{ marginTop: 8 }}>
                       One research call per scan. Results rank Strong fit first.
+                      {brandDomain
+                        ? ` Your own site (${brandDomain}) is excluded — enter a publisher domain.`
+                        : ""}
                     </p>
                     {errScan && <Note tone="warn">{errScan}</Note>}
                     {scanResult && (

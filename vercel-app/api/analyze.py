@@ -113,6 +113,16 @@ def _check_domain(domain: str) -> str:
     domain = domain.split("/")[0].split("?")[0].strip().rstrip(".")
     if not domain or "." not in domain or " " in domain:
         raise HTTPException(status_code=400, detail="Enter a valid domain, e.g. example.com.")
+    if AGENT_BRAND_DOMAIN and (
+        domain == AGENT_BRAND_DOMAIN or domain.endswith("." + AGENT_BRAND_DOMAIN)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{domain} is your own site. Enter a publisher domain you want coverage from, "
+                "for example hootsuite.com."
+            ),
+        )
     return domain
 
 
@@ -254,6 +264,7 @@ def health(request: Request):
         "status": "ok",
         "service": "digital-pr-agent",
         "dr_ready": dr_configured(),
+        "brand_domain": AGENT_BRAND_DOMAIN,
         **remaining_quota(request),
     }
 
