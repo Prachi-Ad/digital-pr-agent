@@ -869,6 +869,71 @@ export default function Home() {
     setSelectedDrafts((current) => (current.length === ids.length ? [] : ids));
   }
 
+  // Workspace backup: everything this browser persists, in one JSON file.
+  const [backupMsg, setBackupMsg] = useState<string | null>(null);
+  const [backupErr, setBackupErr] = useState<string | null>(null);
+
+  function exportWorkspace() {
+    const payload = {
+      app: "vista-pr-workspace",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      usedUrls,
+      mediaLibrary,
+      pitchOutcomes,
+      campaigns,
+      autoSync,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `vista-pr-workspace-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setBackupErr(null);
+    setBackupMsg(
+      `Exported ${Object.keys(campaigns).length} campaigns, ${Object.keys(mediaLibrary).length} contacts, ${usedUrls.length} used marks.`
+    );
+  }
+
+  async function importWorkspace(file: File) {
+    setBackupMsg(null);
+    setBackupErr(null);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data || data.app !== "vista-pr-workspace") {
+        throw new Error("That is not a Vista PR workspace file.");
+      }
+      const replace = window.confirm(
+        "Replace this browser's saved campaigns, contacts, used marks and outcomes with the file? This cannot be undone."
+      );
+      if (!replace) return;
+      const normed: string[] = Array.isArray(data.usedUrls)
+        ? Array.from(
+            new Set(
+              (data.usedUrls as any[])
+                .map((u) => normalizeUrl(u))
+                .filter((u): u is string => Boolean(u))
+            )
+          )
+        : [];
+      setUsedUrls(normed);
+      setMediaLibrary(data.mediaLibrary && typeof data.mediaLibrary === "object" ? data.mediaLibrary : {});
+      setPitchOutcomes(
+        data.pitchOutcomes && typeof data.pitchOutcomes === "object" ? data.pitchOutcomes : {}
+      );
+      setCampaigns(data.campaigns && typeof data.campaigns === "object" ? data.campaigns : {});
+      if (typeof data.autoSync === "boolean") setAutoSync(data.autoSync);
+      setBackupMsg(
+        `Imported ${Object.keys(data.campaigns || {}).length} campaigns, ${Object.keys(data.mediaLibrary || {}).length} contacts, ${normed.length} used marks.`
+      );
+    } catch (err: any) {
+      setBackupErr(err?.message || "That file could not be imported.");
+    }
+  }
+
   async function postSheetTab(tab: string, rows: string[][]) {
     const res = await fetch("/api/sheet", {
       method: "POST",
@@ -4382,6 +4447,50 @@ export default function Home() {
                   )}
                   {syncErr && <Note tone="warn">{syncErr}</Note>}
                   {syncMsg && <Note>{syncMsg}</Note>}
+                </section>
+
+                <section className="card">
+                  <div className="card-head">
+                    <div>
+                      <h2 className="section-title">Backup this browser</h2>
+                      <p className="meta">
+                        Campaigns, media library, used marks and outcomes live only in this browser.
+                        Export them to a file so clearing site data or switching machines never loses work.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="setting-row">
+                    <span>Saved campaigns</span>
+                    <strong>{Object.keys(campaigns).length}</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Media library contacts</span>
+                    <strong>{Object.keys(mediaLibrary).length}</strong>
+                  </div>
+                  <div className="setting-row">
+                    <span>Used articles</span>
+                    <strong>{usedUrls.length}</strong>
+                  </div>
+                  <div className="actions">
+                    <button className="btn-primary" onClick={exportWorkspace}>
+                      <Download size={16} /> Export workspace
+                    </button>
+                    <label className="btn-secondary" style={{ cursor: "pointer" }}>
+                      Import workspace
+                      <input
+                        type="file"
+                        accept="application/json,.json"
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) void importWorkspace(file);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {backupMsg && <Note>{backupMsg}</Note>}
+                  {backupErr && <Note tone="warn">{backupErr}</Note>}
                 </section>
 
                 <section className="card">
