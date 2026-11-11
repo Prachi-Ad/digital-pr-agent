@@ -373,6 +373,14 @@ export default function Home() {
     return <span className="status-pill active">Used</span>;
   }
 
+  function csvCell(cell: any): string {
+    let text = String(cell ?? "");
+    // Spreadsheet formula injection: a leading = + - @ (or tab tricks)
+    // would turn AI-provided text into a live formula on import.
+    if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
   function sortByScore<T extends AnyObj>(items: T[]): T[] {
     const arr = [...items];
     if (!arr.some((x) => Number((x as AnyObj).pr_score) > 0)) return arr;
@@ -489,8 +497,11 @@ export default function Home() {
   }, [campaigns]);
 
   function saveCampaign() {
-    if (!analysis && Object.keys(drafts).length === 0) return;
-    const name = window.prompt("Campaign name", analysis?.article_title || "Untitled campaign");
+    if (!analysis && Object.keys(drafts).length === 0 && !listicles) return;
+    const name = window.prompt(
+      "Campaign name",
+      analysis?.article_title || (listicles ? `Listicles: ${listicles.search_theme}` : "") || "Untitled campaign"
+    );
     if (!name || !name.trim()) return;
     const id = `c${Date.now()}`;
     const today = new Date().toISOString().slice(0, 10);
@@ -500,6 +511,7 @@ export default function Home() {
         id,
         name: name.trim(),
         created: today,
+        workflow,
         urlInputs,
         analyses,
         analysis,
@@ -513,6 +525,12 @@ export default function Home() {
         usedUrls,
         listicleDrafts,
         listicleDraftKeys: Object.keys(listicleDrafts),
+        listForm,
+        listicles,
+        selectedItem,
+        contact,
+        policy,
+        contactByItem,
       },
     }));
   }
@@ -535,6 +553,20 @@ export default function Home() {
       c.selectedOpp && c.writersByOpp ? (c.writersByOpp[oppKey(c.selectedOpp)] ?? null) : null
     );
     setDrafts(c.drafts || {});
+    setListicleDrafts(c.listicleDrafts || {});
+    setListForm(c.listForm || {
+      search_theme: "",
+      related_queries: "",
+      target_audience: "All relevant audiences",
+      target_market: "Global English-language",
+      competitors: "",
+      max_results: 8,
+    });
+    setListicles(c.listicles || null);
+    setSelectedItem(c.selectedItem || null);
+    setContact(c.contact || null);
+    setPolicy(c.policy || null);
+    setContactByItem(c.contactByItem || {});
     if (Array.isArray(c.usedUrls) && c.usedUrls.length > 0) {
       setUsedUrls((current) => {
         const merged = [...current];
@@ -552,9 +584,23 @@ export default function Home() {
     setErrOpp(null);
     setErrJourn(null);
     setErrDraft(null);
+    setErrList(null);
+    setErrContact(null);
+    setErrPolicy(null);
+    setErrListDraft(null);
     setShowStart(false);
-    setWorkflow("digital");
+    setWorkflow(c.workflow === "listicles" ? "listicles" : "digital");
     setNav("Workspace");
+    if (c.workflow === "listicles") {
+      setListicleStep(
+        c.listicleDrafts && Object.keys(c.listicleDrafts).length
+          ? "Outreach"
+          : c.listicles
+            ? "Prospects"
+            : "Search"
+      );
+      return;
+    }
     setDigitalStep(
       c.drafts && Object.keys(c.drafts).length
         ? "Outreach"
@@ -1041,7 +1087,7 @@ export default function Home() {
       (e.angles ?? []).slice(-1)[0] || "", e.last_seen || "",
     ]);
     const csv = [header, ...rows]
-      .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
+      .map((row) => row.map(csvCell).join(","))
       .join("\r\n");
     const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -1193,6 +1239,7 @@ export default function Home() {
     setAnalyses([]);
     setActiveUrl("");
     resetAnalysisDownstream();
+    setDrafts({});
     setShowStart(false);
     setWorkflow("digital");
     setDigitalStep("Article");
@@ -1231,6 +1278,9 @@ export default function Home() {
   }
 
   function resetAnalysisDownstream() {
+    // NOTE: drafts and listicle drafts are intentionally kept: they are keyed
+    // by article URL, so regenerating an analysis no longer destroys pitches.
+    // Only "Start new" clears them (see startNewDigital).
     setSelectedAngle(null);
     setOpportunities(null);
     setOppByAngle({});
@@ -1239,7 +1289,6 @@ export default function Home() {
     setWritersByOpp({});
     setCheckedPeople([]);
     setEmailByPerson({});
-    setDrafts({});
     setErrOpp(null);
     setErrJourn(null);
     setErrDraft(null);
@@ -1796,7 +1845,7 @@ export default function Home() {
       }
     }
     const csv = [header, ...rows]
-      .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
+      .map((row) => row.map(csvCell).join(","))
       .join("\r\n");
     const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -1933,6 +1982,11 @@ export default function Home() {
         {quota && typeof quota.remaining === "number" && (
           <div>
             Calls left today: <strong>{quota.remaining}</strong>
+          </div>
+        )}
+        {syncErr && (
+          <div className="sidebar-note">
+            Sheet sync failed. Open Outreach or Settings to retry.
           </div>
         )}
         {quota && quota.remaining === 0 && (
