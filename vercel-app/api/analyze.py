@@ -64,6 +64,16 @@ def _check_url(url: str) -> str:
     return url
 
 
+def _text(value: object, limit: int) -> str:
+    """Cap free-text fields so pasted walls of text cannot bloat a prompt."""
+    return str(value or "").strip()[:limit]
+
+
+def _competitors(values: object) -> list[str]:
+    items = values if isinstance(values, list) else []
+    return [_text(item, 60) for item in items[:10] if str(item or "").strip()]
+
+
 def _check_domain(domain: str) -> str:
     domain = (domain or "").strip().lower()
     for prefix in ("https://", "http://"):
@@ -96,9 +106,10 @@ def _dispatch(req: AnalyzeRequest):
             return draft_journalist_pitch(
                 req.opportunity,
                 req.person,
-                angle_context=(
+                angle_context=_text(
                     req.angle_context
-                    or (req.angle.angle if req.angle is not None else "")
+                    or (req.angle.angle if req.angle is not None else ""),
+                    1000,
                 ),
             ).model_dump()
         if action == "journalists":
@@ -142,11 +153,11 @@ def _dispatch(req: AnalyzeRequest):
             if not req.search_theme.strip():
                 raise HTTPException(status_code=400, detail="search_theme is required")
             return research_listicles(
-                search_theme=req.search_theme,
-                related_queries=req.related_queries,
-                target_audience=req.target_audience,
-                target_market=req.target_market,
-                competitors=req.competitors or None,
+                search_theme=_text(req.search_theme, 200),
+                related_queries=_text(req.related_queries, 300),
+                target_audience=_text(req.target_audience, 150),
+                target_market=_text(req.target_market, 150),
+                competitors=_competitors(req.competitors) or None,
                 max_results=max(3, min(10, req.max_results)),
             ).model_dump()
         if action in ("listicle-contact", "listicle_contact"):
@@ -159,7 +170,7 @@ def _dispatch(req: AnalyzeRequest):
             return research_publisher_policy(req.item).model_dump()
         if action in ("domain-scan", "domain_scan"):
             domain = _check_domain(req.domain)
-            return scan_domain_articles(domain, req.topic_hint).model_dump()
+            return scan_domain_articles(domain, _text(req.topic_hint, 200)).model_dump()
         if action in ("person-contact", "person_contact"):
             if req.person is None or req.opportunity is None:
                 raise HTTPException(
@@ -170,7 +181,7 @@ def _dispatch(req: AnalyzeRequest):
         if action in ("collect-writers", "collect_writers"):
             if not req.query.strip():
                 raise HTTPException(status_code=400, detail="query is required")
-            return collect_media_contacts(req.query).model_dump()
+            return collect_media_contacts(_text(req.query, 300)).model_dump()
         if action in ("listicle-draft", "listicle_draft"):
             if req.item is None or req.contact is None:
                 raise HTTPException(status_code=400, detail="item and contact are required")

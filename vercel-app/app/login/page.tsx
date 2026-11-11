@@ -21,7 +21,9 @@ export default function Login() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.detail || "Sign-in failed.");
-      const next = new URLSearchParams(window.location.search).get("next") || "/";
+      const rawNext = new URLSearchParams(window.location.search).get("next") || "/";
+      // Same-origin paths only: never follow an absolute or protocol URL.
+      const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
       window.location.href = next;
     } catch (err: any) {
       setError(err?.message || "Sign-in failed.");
