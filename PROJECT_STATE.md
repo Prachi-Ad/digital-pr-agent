@@ -155,6 +155,9 @@ stays a non-sending demo.
   inclusion requests separately (listicle, outlet, placement type, contact,
   subject, body, status, live URL), and the Dashboard adds listicle counts,
   coverage rate, and a listicles-by-outlet table.
+- Listicle contact/policy research is cached per listicle: buttons show
+  **View contact ✓ / View policy ✓** and open instantly; Refresh forces a new
+  call. The policy cache is included in campaign snapshots.
 - Workflow correctness: switching angle chips clears the previous angle's
   writers/emails (no stale Journalists view); campaigns also restore email
   lookups and domain scans; "Calls left today" refreshes every minute.
