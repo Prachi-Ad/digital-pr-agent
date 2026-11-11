@@ -1808,6 +1808,7 @@ export default function Home() {
     setCheckedPeople([]);
     setRetryMsg(null);
     const failures: string[] = [];
+    const collected: Record<string, AnyObj> = {};
     try {
       for (let index = 0; index < opps.length; index += 1) {
         const opportunity = opps[index];
@@ -1818,6 +1819,7 @@ export default function Home() {
             { angle: selectedAngle, opportunity },
             (attempt) => setRetryMsg(`Finding writers ${index + 1} of ${opps.length} - retry ${attempt}/3...`)
           );
+          collected[oppKey(opportunity)] = data;
           setWritersByOpp((current) => ({ ...current, [oppKey(opportunity)]: data }));
           saveToLibrary(data?.journalists, opportunity, selectedAngle);
           if (oppKey(opportunity) === oppKey(selectedOpp)) setJournalists(data);
@@ -1828,6 +1830,13 @@ export default function Home() {
       }
       if (failures.length > 0) {
         setErrJourn(`Stopped with ${failures.length} failure(s). ${failures.join(" | ")}`);
+      }
+      // Land on real results: select an opportunity that actually has writers.
+      const firstWithWriters =
+        opps.find((o: AnyObj) => (collected[oppKey(o)]?.journalists ?? []).length > 0) ?? opps[0];
+      if (firstWithWriters) {
+        setSelectedOpp(firstWithWriters);
+        setJournalists(collected[oppKey(firstWithWriters)] ?? writersByOpp[oppKey(firstWithWriters)] ?? null);
       }
       setDigitalStep("Journalists");
     } finally {
@@ -2939,10 +2948,35 @@ export default function Home() {
                   </p>
                   {!selectedAngle || !selectedOpp ? (
                     <div className="card empty-state">
-                      <h2 className="empty-title">Pick an opportunity first</h2>
-                      <button className="btn-secondary" onClick={() => setDigitalStep("Opportunities")}>
-                        Go to Opportunities
-                      </button>
+                      <h2 className="empty-title">
+                        {selectedAngle && (opportunities?.opportunities ?? []).length > 0
+                          ? "Choose an opportunity"
+                          : "Pick an opportunity first"}
+                      </h2>
+                      {selectedAngle && (opportunities?.opportunities ?? []).length > 0 ? (
+                        <>
+                          <p className="empty-copy">
+                            Writers are kept per opportunity. Pick one to see who was found.
+                          </p>
+                          <div className="actions" style={{ justifyContent: "center" }}>
+                            {(opportunities?.opportunities ?? []).slice(0, 6).map((o: AnyObj, i: number) => (
+                              <button
+                                key={`${o.article_url}-${i}`}
+                                className="btn-secondary"
+                                onClick={() => selectOppCached(o)}
+                                title={shortText(o.article_title, 100)}
+                              >
+                                {i + 1}. {shortText(o.article_title, 28)}{" "}
+                                {writersByOpp[oppKey(o)] ? "✓" : ""}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      ) : (
+                        <button className="btn-secondary" onClick={() => setDigitalStep("Opportunities")}>
+                          Go to Opportunities
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className="stack">
