@@ -649,11 +649,13 @@ export default function Home() {
 
   // Remaining research budget for this person today (read-only check).
   const [quota, setQuota] = useState<AnyObj | null>(null);
+  const [drReady, setDrReady] = useState(false);
   async function refreshQuota() {
     try {
       const res = await fetch("/api/analyze", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (res.ok && typeof data?.remaining === "number") setQuota(data);
+      if (res.ok && typeof data?.dr_ready === "boolean") setDrReady(data.dr_ready);
     } catch {
       // Budget display is optional; never block the UI on it.
     }
@@ -661,6 +663,60 @@ export default function Home() {
   useEffect(() => {
     void refreshQuota();
   }, []);
+
+  // Ahrefs Domain Rating cache: domain -> DR number (null = lookup failed).
+  const [drByDomain, setDrByDomain] = useState<Record<string, number | null>>({});
+  const [loadingDr, setLoadingDr] = useState(false);
+  const [drOnly, setDrOnly] = useState(false);
+  const DR_CUTOFF = 50;
+
+  function domainOf(url: any): string {
+    try {
+      return new URL(String(url || "")).hostname.replace(/^www\./, "").toLowerCase();
+    } catch {
+      return "";
+    }
+  }
+
+  async function checkDr(urls: any[]) {
+    const domains = Array.from(
+      new Set(urls.map(domainOf).filter((d) => d && !(d in drByDomain)))
+    ).slice(0, 10);
+    if (domains.length === 0) return;
+    setLoadingDr(true);
+    setRetryMsg(null);
+    try {
+      const data = await callApi("site-metrics", { domains }, (a) =>
+        setRetryMsg(`Checking Domain Rating - retry ${a}/3...`)
+      );
+      setDrByDomain((current) => {
+        const next = { ...current };
+        for (const m of data?.metrics ?? []) {
+          if (m?.domain) next[m.domain] = typeof m.dr === "number" ? m.dr : null;
+        }
+        return next;
+      });
+      await refreshQuota();
+    } catch (err: any) {
+      setRetryMsg(null);
+      window.alert(err?.message || "DR check failed. Add AHREFS_API_KEY in Vercel first.");
+    } finally {
+      setLoadingDr(false);
+      setRetryMsg(null);
+    }
+  }
+
+  function DrBadge({ url }: { url: any }) {
+    const d = domainOf(url);
+    if (!d || !(d in drByDomain)) return null;
+    const dr = drByDomain[d];
+    if (dr === null || dr === undefined) return <span className="status-pill">DR ?</span>;
+    return (
+      <span className={`status-pill ${dr >= DR_CUTOFF ? "active" : ""}`} title="Domain Rating by Ahrefs">
+        DR {dr}
+      </span>
+    );
+  }
 
   function budgetAllows(count: number): boolean {
     if (!quota || typeof quota.remaining !== "number") return true;
@@ -1801,6 +1857,7 @@ export default function Home() {
       "pr_fit",
       "pr_score",
       "pr_score_reasons",
+      "dr",
       "audience_question",
       "aeo_answer",
       "aeo_format",
@@ -1837,6 +1894,15 @@ export default function Home() {
             Array.isArray(opportunity.pr_score_reasons)
               ? opportunity.pr_score_reasons.join("; ")
               : "",
+            (() => {
+              let domain = "";
+              try {
+                domain = new URL(opportunity.article_url || "").hostname.replace(/^www\./, "").toLowerCase();
+              } catch {
+                domain = "";
+              }
+              return drByDomain[domain] ?? "";
+            })(),
             opportunity.audience_question || "",
             opportunity.aeo_answer || "",
             opportunity.aeo_format || "",
@@ -2174,16 +2240,40 @@ export default function Home() {
                         <p className="step-caption">
                           {scanResult.publication_name} · {scanResult.research_summary}
                         </p>
+                        <div className="actions" style={{ marginTop: 0 }}>
+                          <button
+                            className="btn-secondary"
+                            onClick={() =>
+                              checkDr((scanResult.articles ?? []).map((a: AnyObj) => a.article_url))
+                            }
+                            disabled={loadingDr}
+                            title="Look up Ahrefs Domain Rating for these sites (1 research call)"
+                          >
+                            {loadingDr ? <Spinner /> : <BarChart3 size={16} />}
+                            {loadingDr ? "Checking DR..." : "Check DR"}
+                          </button>
+                          <label className="meta" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <input
+                              type="checkbox"
+                              checked={drOnly}
+                              onChange={(e) => setDrOnly(e.target.checked)}
+                            />
+                            DR {DR_CUTOFF}+ only
+                          </label>
+                        </div>
                         {sortByScore(
                           (scanResult.articles ?? []).filter(
-                            (a: AnyObj) => !hideUsed || !isUsed(a.article_url)
+                            (a: AnyObj) =>
+                              (!hideUsed || !isUsed(a.article_url)) &&
+                              (!drOnly || (drByDomain[domainOf(a.article_url)] ?? 0) >= DR_CUTOFF)
                           )
                         ).map((a: AnyObj, i: number) => (
                           <article className="card" key={`${a.article_url}-${i}`}>
                             <div className="card-head">
                               <div>
                                 <h2 className="card-title">
-                                  {a.article_title} {isUsed(a.article_url) && <UsedBadge />}
+                                  {a.article_title} {isUsed(a.article_url) && <UsedBadge />}{" "}
+                                  <DrBadge url={a.article_url} />
                                 </h2>
                                 <p className="meta">
                                   {a.topic} · {a.published_date}
@@ -2491,6 +2581,19 @@ export default function Home() {
                             {loadingJourn ? "Finding writers..." : "Find writers for all"}
                           </button>
                         )}
+                        {opportunities && (opportunities.opportunities ?? []).length > 0 && (
+                          <button
+                            className="btn-secondary"
+                            onClick={() =>
+                              checkDr((opportunities.opportunities ?? []).map((o: AnyObj) => o.article_url))
+                            }
+                            disabled={loadingDr}
+                            title="Look up Ahrefs Domain Rating for these sites (1 research call)"
+                          >
+                            {loadingDr ? <Spinner /> : <BarChart3 size={17} />}
+                            {loadingDr ? "Checking DR..." : "Check DR"}
+                          </button>
+                        )}
                       </div>
 
                       {errOpp && <Note tone="warn">{errOpp}</Note>}
@@ -2498,6 +2601,9 @@ export default function Home() {
                       {opportunities && (
                         <>
                           <p className="step-caption">{opportunities.research_summary}</p>
+                          {Object.keys(drByDomain).length > 0 && (
+                            <p className="meta">DR badges: Domain Rating by Ahrefs.</p>
+                          )}
                           {usedUrls.length > 0 && (
                             <label className="meta" style={{ display: "flex", gap: 8, alignItems: "center" }}>
                               <input
@@ -2508,15 +2614,26 @@ export default function Home() {
                               Hide used ({usedUrls.length} marked)
                             </label>
                           )}
+                          <label className="meta" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <input
+                              type="checkbox"
+                              checked={drOnly}
+                              onChange={(e) => setDrOnly(e.target.checked)}
+                            />
+                            DR {DR_CUTOFF}+ only
+                          </label>
                           {sortByScore(
                             (opportunities.opportunities ?? []).filter(
-                              (o: AnyObj) => !hideUsed || !isUsed(o.article_url)
+                              (o: AnyObj) =>
+                                (!hideUsed || !isUsed(o.article_url)) &&
+                                (!drOnly || (drByDomain[domainOf(o.article_url)] ?? 0) >= DR_CUTOFF)
                             )
                           ).map((o: AnyObj, i: number) => (                            <article className="card" key={`${o.article_url}-${i}`}>
                               <div className="card-head">
                                 <div>
                                   <h2 className="card-title">
-                                    {o.article_title} {isUsed(o.article_url) && <UsedBadge />}
+                                    {o.article_title} {isUsed(o.article_url) && <UsedBadge />}{" "}
+                                    <DrBadge url={o.article_url} />
                                   </h2>
                                   <p className="meta">
                                     {o.publication} · {o.published_date} · {o.opportunity_type}
@@ -3208,6 +3325,25 @@ export default function Home() {
                           </button>
                           <button
                             className="btn-secondary"
+                            onClick={() =>
+                              checkDr((listicles.opportunities ?? []).map((x: AnyObj) => x.listicle_url))
+                            }
+                            disabled={loadingDr}
+                            title="Look up Ahrefs Domain Rating for these sites (1 research call)"
+                          >
+                            {loadingDr ? <Spinner /> : <BarChart3 size={16} />}
+                            {loadingDr ? "Checking DR..." : "Check DR"}
+                          </button>
+                          <label className="meta" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <input
+                              type="checkbox"
+                              checked={drOnly}
+                              onChange={(e) => setDrOnly(e.target.checked)}
+                            />
+                            DR {DR_CUTOFF}+ only
+                          </label>
+                          <button
+                            className="btn-secondary"
                             onClick={generateListicles}
                             disabled={loadingList || !listForm.search_theme.trim()}
                           >
@@ -3222,13 +3358,18 @@ export default function Home() {
                         <strong>Write all inclusion requests</strong> — it uses every researched contact at once.
                       </Note>
                       {(listicles.opportunities ?? [])
-                        .filter((item: AnyObj) => !hideUsed || !isUsed(item.listicle_url))
+                        .filter(
+                          (item: AnyObj) =>
+                            (!hideUsed || !isUsed(item.listicle_url)) &&
+                            (!drOnly || (drByDomain[domainOf(item.listicle_url)] ?? 0) >= DR_CUTOFF)
+                        )
                         .map((item: AnyObj, i: number) => (
                         <article className="card" key={`${item.listicle_url}-${i}`}>
                           <div className="card-head">
                             <div>
                               <h2 className="card-title">
-                                {item.listicle_title} {isUsed(item.listicle_url) && <UsedBadge />}
+                                {item.listicle_title} {isUsed(item.listicle_url) && <UsedBadge />}{" "}
+                                <DrBadge url={item.listicle_url} />
                               </h2>
                               <p className="meta">
                                 {item.publication} · {item.placement_type} · {item.published_or_updated}

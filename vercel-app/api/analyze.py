@@ -10,6 +10,8 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from _security import guard, log_request, remaining_quota
+from dr import configured as dr_configured
+from dr import get_domain_ratings
 
 from agent import (
     PRAngle,
@@ -43,6 +45,7 @@ class AnalyzeRequest(BaseModel):
     domain: str = ""
     topic_hint: str = ""
     query: str = ""
+    domains: list[str] = Field(default_factory=list)
     angle: PRAngle | None = None
     opportunity: PROpportunity | None = None
     person: JournalistProfile | None = None
@@ -178,6 +181,18 @@ def _dispatch(req: AnalyzeRequest):
                     detail="person and opportunity are required",
                 )
             return research_person_contact(req.person, req.opportunity).model_dump()
+        if action in ("site-metrics", "site_metrics"):
+            cleaned: list[str] = []
+            for d in req.domains or []:
+                try:
+                    norm = _check_domain(d)
+                except HTTPException:
+                    continue
+                if norm not in cleaned:
+                    cleaned.append(norm)
+            if not cleaned:
+                raise HTTPException(status_code=400, detail="Send 1-10 valid domains.")
+            return {"metrics": get_domain_ratings(cleaned[:10]), "attribution": "Domain Rating by Ahrefs"}
         if action in ("collect-writers", "collect_writers"):
             if not req.query.strip():
                 raise HTTPException(status_code=400, detail="query is required")
@@ -198,7 +213,12 @@ def _dispatch(req: AnalyzeRequest):
 @app.get("/api/analyze")
 def health(request: Request):
     """Health plus the caller's remaining research budget. Never bills a call."""
-    return {"status": "ok", "service": "digital-pr-agent", **remaining_quota(request)}
+    return {
+        "status": "ok",
+        "service": "digital-pr-agent",
+        "dr_ready": dr_configured(),
+        **remaining_quota(request),
+    }
 
 
 @app.post("/")
