@@ -158,6 +158,10 @@ stays a non-sending demo.
 - Listicle contact/policy research is cached per listicle: buttons show
   **View contact ✓ / View policy ✓** and open instantly; Refresh forces a new
   call. The policy cache is included in campaign snapshots.
+- Prospecting honesty: the DR 50+ filter never hides unrated domains, and every
+  prospect list reports hidden counts plus a "Check DR first" hint. Domain-scan
+  results support tick-and-**Analyze selected (up to 5)**; analysis auto-advances
+  to PR angles; only the analyzing card shows progress.
 - Workflow correctness: switching angle chips clears the previous angle's
   writers/emails (no stale Journalists view); campaigns also restore email
   lookups and domain scans; "Calls left today" refreshes every minute.
