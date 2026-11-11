@@ -171,6 +171,11 @@ stays a non-sending demo.
   a dead end. Outreach also carries **Write next pitch (Name)** — it drafts the
   next un-pitched person for the current opportunity without leaving the page —
   and a **← Back to contacts** shortcut.
+- Live run fixes (2026-11-12): `api/analyze.py` was missing its `urlsplit`
+  import, so opportunities / domain-scan / listicles raised "name 'urlsplit' is
+  not defined" whenever BRAND_DOMAIN was set — fixed and verified live.
+  Internal exceptions are now logged server-side and returned as a friendly
+  500 message instead of leaking Python internals to the browser.
 - Workflow correctness: switching angle chips clears the previous angle's
   writers/emails (no stale Journalists view); campaigns also restore email
   lookups and domain scans; "Calls left today" refreshes every minute.
