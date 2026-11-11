@@ -531,6 +531,10 @@ export default function Home() {
         contact,
         policy,
         contactByItem,
+        emailByPerson,
+        domainInput,
+        topicHint,
+        scanResult,
       },
     }));
   }
@@ -567,6 +571,10 @@ export default function Home() {
     setContact(c.contact || null);
     setPolicy(c.policy || null);
     setContactByItem(c.contactByItem || {});
+    setEmailByPerson(c.emailByPerson && typeof c.emailByPerson === "object" ? c.emailByPerson : {});
+    setDomainInput(typeof c.domainInput === "string" ? c.domainInput : "");
+    setTopicHint(typeof c.topicHint === "string" ? c.topicHint : "");
+    setScanResult(c.scanResult || null);
     if (Array.isArray(c.usedUrls) && c.usedUrls.length > 0) {
       setUsedUrls((current) => {
         const merged = [...current];
@@ -662,6 +670,11 @@ export default function Home() {
   }
   useEffect(() => {
     void refreshQuota();
+    // Keep "Calls left today" fresh while working; the check costs no budget.
+    const t = setInterval(() => {
+      void refreshQuota();
+    }, 60000);
+    return () => clearInterval(t);
   }, []);
 
   // Ahrefs Domain Rating cache: domain -> DR number (null = lookup failed).
@@ -1517,7 +1530,14 @@ export default function Home() {
   function selectAngleCached(angle: AnyObj) {
     setSelectedAngle(angle);
     setOpportunities(oppByAngle[angleKey(angle)] ?? null);
+    // Drop the previous angle's selection so the Journalists step never shows
+    // writers researched for a different angle.
+    setSelectedOpp(null);
+    setJournalists(null);
+    setCheckedPeople([]);
+    setEmailByPerson({});
     setErrOpp(null);
+    setErrJourn(null);
   }
 
   function pickAngle(angle: AnyObj) {
