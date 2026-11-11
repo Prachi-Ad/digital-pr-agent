@@ -23,6 +23,7 @@ from agent import (
     draft_listicle_inclusion,
     find_opportunity_contact,
     collect_media_contacts,
+    safe_website_url,
     sanitize_payload,
     research_opportunities,
     research_journalists,
@@ -193,8 +194,14 @@ def health(request: Request):
 @app.post("/analyze")
 @app.post("/api/analyze")
 def handle(req: AnalyzeRequest, request: Request):
-    guard(request)
     action = (req.action or "analyze").strip().lower()
+    # Reject unsafe links before spending a research call.
+    if action == "analyze" and not safe_website_url(req.article_url):
+        raise HTTPException(
+            status_code=400,
+            detail="Enter a normal public https article link, like https://example.com/article.",
+        )
+    guard(request)
     log_request(request, action)
     last = None
     for attempt in range(2):
