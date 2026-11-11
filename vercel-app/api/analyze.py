@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+from urllib.parse import urlsplit
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
@@ -232,8 +233,16 @@ def _dispatch(req: AnalyzeRequest):
         raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
     except HTTPException:
         raise
+    except ValueError as e:
+        # Intentional, user-facing validation messages only.
+        raise HTTPException(status_code=400, detail=str(e)[:300])
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Log the real error, never leak internals to the browser.
+        print(f"dispatch_error action={action} error={type(e).__name__}: {str(e)[:300]}", flush=True)
+        raise HTTPException(
+            status_code=500,
+            detail="That research step failed. Try again; if it repeats, tell Prachi to check the server logs.",
+        )
 
 
 @app.get("/")
@@ -274,4 +283,8 @@ def handle(req: AnalyzeRequest, request: Request):
             last = e
             if attempt == 0:
                 time.sleep(2)
-    raise HTTPException(status_code=500, detail=str(last))
+    print(f"handler_error action={action} error={type(last).__name__}: {str(last)[:300]}", flush=True)
+    raise HTTPException(
+        status_code=500,
+        detail="That research step failed. Try again; if it repeats, tell Prachi to check the server logs.",
+    )
