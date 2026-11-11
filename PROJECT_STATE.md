@@ -544,6 +544,9 @@ stays a non-sending demo.
   (`DEMO_DAILY_REQUEST_CAP`). Limits reject before spending; GET `/api/analyze`
   reports the caller's remaining budget; the sidebar shows "Calls left today"
   and bulk actions ask before exceeding it.
+- Sign-in hardening: the `?next=` redirect only follows same-origin paths (no
+  open redirect), and `/api/login` allows 10 failures per IP per 10 minutes
+  before answering 429 (verified live).
 - "Used" marks normalise URLs (case, `www.`, trailing slashes, query) so the
   same article cannot reappear as new, are included in campaign snapshots and
   restored on load, and legacy duplicates are merged on first read.
