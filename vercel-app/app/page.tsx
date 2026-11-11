@@ -734,6 +734,54 @@ export default function Home() {
     );
   }
 
+  // Prospect-list filtering that never silently empties the list: domains with
+  // no DR rating yet always pass the DR filter, and the caller is told how
+  // many are hidden so it can prompt for a Check DR run.
+  function filterProspects<T extends AnyObj>(items: T[], getUrl: (x: T) => any) {
+    const visible: T[] = [];
+    let hiddenUsed = 0;
+    let hiddenDr = 0;
+    let drKnown = false;
+    for (const item of items) {
+      const url = getUrl(item);
+      if (hideUsed && isUsed(url)) {
+        hiddenUsed += 1;
+        continue;
+      }
+      const d = domainOf(url);
+      const dr = d ? drByDomain[d] : undefined;
+      if (dr !== undefined && dr !== null) drKnown = true;
+      if (drOnly && dr !== undefined && dr !== null && dr < DR_CUTOFF) {
+        hiddenDr += 1;
+        continue;
+      }
+      visible.push(item);
+    }
+    return { visible, hiddenUsed, hiddenDr, drKnown };
+  }
+
+  function FilterNotes({ hiddenUsed, hiddenDr, drKnown }: { hiddenUsed: number; hiddenDr: number; drKnown: boolean }) {
+    return (
+      <>
+        {hiddenUsed > 0 && (
+          <p className="meta">
+            {hiddenUsed} hidden by Hide used. Untick it to see everything.
+          </p>
+        )}
+        {hiddenDr > 0 && (
+          <p className="meta">
+            {hiddenDr} hidden by the DR {DR_CUTOFF}+ filter.
+          </p>
+        )}
+        {drOnly && !drKnown && (
+          <p className="meta">
+            No ratings yet — press <strong>Check DR</strong> first, otherwise the filter cannot judge anything.
+          </p>
+        )}
+      </>
+    );
+  }
+
   function budgetAllows(count: number): boolean {
     if (!quota || typeof quota.remaining !== "number") return true;
     if (quota.remaining >= count) return true;
@@ -1404,7 +1452,19 @@ export default function Home() {
     await analyzeUrls(urls);
   }
 
-  async function analyzeUrls(urls: string[]) {
+  // Domain-scan multi-select for bulk analysis.
+  const [selectedScan, setSelectedScan] = useState<string[]>([]);
+  // Which single URL is currently being analyzed (per-card spinner).
+  const [analyzingUrl, setAnalyzingUrl] = useState<string | null>(null);
+
+  function toggleScan(url: any) {
+    const key = String(url || "");
+    setSelectedScan((current) =>
+      current.includes(key) ? current.filter((u) => u !== key) : [...current, key]
+    );
+  }
+
+  async function analyzeUrls(urls: string[], advance = false) {
     if (urls.length > 5) {
       setErrAnalyze(`Analyze up to 5 articles at a time. You entered ${urls.length}.`);
       return;
@@ -1442,6 +1502,7 @@ export default function Home() {
       if (results.length > 0) {
         setAnalysis(results[0].analysis);
         setActiveUrl(results[0].url);
+        if (advance) setDigitalStep("PR angles");
       }
       if (failures.length > 0) {
         setErrAnalyze(
@@ -1486,7 +1547,25 @@ export default function Home() {
       return;
     }
     setUrlInputs([articleUrl]);
-    await analyzeUrls([articleUrl]);
+    setAnalyzingUrl(articleUrl);
+    try {
+      await analyzeUrls([articleUrl], true);
+    } finally {
+      setAnalyzingUrl(null);
+    }
+  }
+
+  async function analyzeSelectedScan() {
+    const urls = selectedScan.filter((u) => u.startsWith("https://")).slice(0, 5);
+    if (urls.length === 0) return;
+    setUrlInputs(urls);
+    setAnalyzingUrl("__bulk__");
+    try {
+      await analyzeUrls(urls, true);
+      setSelectedScan([]);
+    } finally {
+      setAnalyzingUrl(null);
+    }
   }
 
   async function regenerateAnalysis() {
@@ -2280,6 +2359,21 @@ export default function Home() {
                         </p>
                         <div className="actions" style={{ marginTop: 0 }}>
                           <button
+                            className="btn-primary"
+                            onClick={analyzeSelectedScan}
+                            disabled={loadingAnalyze || selectedScan.length === 0}
+                            title="Analyze every ticked article at once (up to 5)"
+                          >
+                            {loadingAnalyze && analyzingUrl === "__bulk__" ? (
+                              <Spinner />
+                            ) : (
+                              <Search size={16} />
+                            )}
+                            {selectedScan.length > 0
+                              ? `Analyze selected (${Math.min(selectedScan.length, 5)})`
+                              : "Tick articles, then analyze"}
+                          </button>
+                          <button
                             className="btn-secondary"
                             onClick={() =>
                               checkDr((scanResult.articles ?? []).map((a: AnyObj) => a.article_url))
@@ -2300,11 +2394,10 @@ export default function Home() {
                           </label>
                         </div>
                         {sortByScore(
-                          (scanResult.articles ?? []).filter(
-                            (a: AnyObj) =>
-                              (!hideUsed || !isUsed(a.article_url)) &&
-                              (!drOnly || (drByDomain[domainOf(a.article_url)] ?? 0) >= DR_CUTOFF)
-                          )
+                          filterProspects(
+                            scanResult.articles ?? [],
+                            (a: AnyObj) => a.article_url
+                          ).visible
                         ).map((a: AnyObj, i: number) => (
                           <article className="card" key={`${a.article_url}-${i}`}>
                             <div className="card-head">
@@ -2342,12 +2435,24 @@ export default function Home() {
                               <p className="meta">Signals: {a.pr_red_flags.join(" · ")}</p>
                             )}
                             <div className="actions">
+                              <label
+                                className="meta"
+                                style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedScan.includes(a.article_url)}
+                                  onChange={() => toggleScan(a.article_url)}
+                                  aria-label={`Select ${a.article_title}`}
+                                />
+                                Select
+                              </label>
                               <button
                                 className="btn-primary"
                                 onClick={() => useScannedArticle(a.article_url)}
                                 disabled={loadingAnalyze}
                               >
-                                {loadingAnalyze ? (
+                                {loadingAnalyze && analyzingUrl === a.article_url ? (
                                   <>
                                     <Spinner /> Analyzing...
                                   </>
@@ -2361,6 +2466,19 @@ export default function Home() {
                             </div>
                           </article>
                         ))}
+                        {(() => {
+                          const f = filterProspects(
+                            scanResult.articles ?? [],
+                            (a: AnyObj) => a.article_url
+                          );
+                          return (
+                            <FilterNotes
+                              hiddenUsed={f.hiddenUsed}
+                              hiddenDr={f.hiddenDr}
+                              drKnown={f.drKnown}
+                            />
+                          );
+                        })()}
                         {(!scanResult.articles || scanResult.articles.length === 0) && (
                           <Note tone="warn">No usable articles were found on this domain.</Note>
                         )}
@@ -2661,11 +2779,10 @@ export default function Home() {
                             DR {DR_CUTOFF}+ only
                           </label>
                           {sortByScore(
-                            (opportunities.opportunities ?? []).filter(
-                              (o: AnyObj) =>
-                                (!hideUsed || !isUsed(o.article_url)) &&
-                                (!drOnly || (drByDomain[domainOf(o.article_url)] ?? 0) >= DR_CUTOFF)
-                            )
+                            filterProspects(
+                              opportunities.opportunities ?? [],
+                              (o: AnyObj) => o.article_url
+                            ).visible
                           ).map((o: AnyObj, i: number) => (                            <article className="card" key={`${o.article_url}-${i}`}>
                               <div className="card-head">
                                 <div>
@@ -2780,6 +2897,19 @@ export default function Home() {
                               </div>
                             </article>
                           ))}
+                          {(() => {
+                            const f = filterProspects(
+                              opportunities.opportunities ?? [],
+                              (o: AnyObj) => o.article_url
+                            );
+                            return (
+                              <FilterNotes
+                                hiddenUsed={f.hiddenUsed}
+                                hiddenDr={f.hiddenDr}
+                                drKnown={f.drKnown}
+                              />
+                            );
+                          })()}
                           {(!opportunities.opportunities || opportunities.opportunities.length === 0) && (
                             <Note tone="warn">No suitable opportunity was verified for this angle.</Note>
                           )}
@@ -3395,13 +3525,12 @@ export default function Home() {
                         Run <strong>Find contact</strong> on the listicles you want, then{" "}
                         <strong>Write all inclusion requests</strong> — it uses every researched contact at once.
                       </Note>
-                      {(listicles.opportunities ?? [])
-                        .filter(
-                          (item: AnyObj) =>
-                            (!hideUsed || !isUsed(item.listicle_url)) &&
-                            (!drOnly || (drByDomain[domainOf(item.listicle_url)] ?? 0) >= DR_CUTOFF)
-                        )
-                        .map((item: AnyObj, i: number) => (
+                      {sortByScore(
+                        filterProspects(
+                          listicles.opportunities ?? [],
+                          (item: AnyObj) => item.listicle_url
+                        ).visible
+                      ).map((item: AnyObj, i: number) => (
                         <article className="card" key={`${item.listicle_url}-${i}`}>
                           <div className="card-head">
                             <div>
@@ -3592,6 +3721,19 @@ export default function Home() {
                             )}
                         </article>
                       ))}
+                      {(() => {
+                        const f = filterProspects(
+                          listicles.opportunities ?? [],
+                          (item: AnyObj) => item.listicle_url
+                        );
+                        return (
+                          <FilterNotes
+                            hiddenUsed={f.hiddenUsed}
+                            hiddenDr={f.hiddenDr}
+                            drKnown={f.drKnown}
+                          />
+                        );
+                      })()}
                       {(!listicles.opportunities || listicles.opportunities.length === 0) && (
                         <Note tone="warn">No listicle candidates were verified for this search.</Note>
                       )}
