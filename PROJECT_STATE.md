@@ -155,6 +155,11 @@ stays a non-sending demo.
   inclusion requests separately (listicle, outlet, placement type, contact,
   subject, body, status, live URL), and the Dashboard adds listicle counts,
   coverage rate, and a listicles-by-outlet table.
+- **Ahrefs DR check**: `site-metrics` action hits the free Domain Rating endpoint
+  (1 research call for up to 10 domains; `AHREFS_API_KEY` in Vercel). **Check DR**
+  buttons on opportunities, domain scans, and listicles; green **DR badges** at
+  50+, a **DR 50+ only** filter everywhere, a `dr` CSV column, and the required
+  "Domain Rating by Ahrefs" credit. Verified live (hubspot 93, hootsuite 91).
   Prospects now has **Write all inclusion requests (n)** for every contact
   researched so far, plus **View requests (n)**; researched contacts are cached
   per listicle so the bulk action works across the whole list.
