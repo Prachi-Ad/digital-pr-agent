@@ -176,6 +176,15 @@ stays a non-sending demo.
   not defined" whenever BRAND_DOMAIN was set — fixed and verified live.
   Internal exceptions are now logged server-side and returned as a friendly
   500 message instead of leaking Python internals to the browser.
+- **Workspace backup** (Settings): **Export workspace** downloads one JSON file
+  (campaigns, media library, used marks, outcomes, auto-sync setting) and
+  **Import workspace** restores it after a confirm. Verified both directions
+  live. This is the safety net for browser-local data.
+- Live verification (2026-11-12): listicle path clicked through end to end —
+  search, Find contact (3 contacts), instant cached **View contact** (no call
+  spent), Check policy, Write inclusion request, auto-sync reported
+  "Listicles: 1 added", then marking it **Covered** auto-synced
+  "Listicles: 1 refreshed; Coverage: 1 added".
 - Workflow correctness: switching angle chips clears the previous angle's
   writers/emails (no stale Journalists view); campaigns also restore email
   lookups and domain scans; "Calls left today" refreshes every minute.
