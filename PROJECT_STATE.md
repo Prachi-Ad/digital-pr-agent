@@ -162,6 +162,13 @@ stays a non-sending demo.
   prospect list reports hidden counts plus a "Check DR first" hint. Domain-scan
   results support tick-and-**Analyze selected (up to 5)**; analysis auto-advances
   to PR angles; only the analyzing card shows progress.
+- Prospecting walkthrough fixes (2026-11-11): pages on the brand's own domain are
+  filtered out of opportunities, domain scans and listicle searches (prompt rule
+  plus a server-side `drop_own_domain` pass); multi-call bulk buttons ask
+  "this will use N research calls" before spending; **Find writers for all** now
+  selects an opportunity that actually has writers instead of landing on an
+  empty Journalists screen, and that screen offers opportunity chips instead of
+  a dead end.
 - Workflow correctness: switching angle chips clears the previous angle's
   writers/emails (no stale Journalists view); campaigns also restore email
   lookups and domain scans; "Calls left today" refreshes every minute.
