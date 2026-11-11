@@ -269,17 +269,67 @@ def health(request: Request):
     }
 
 
+def _precheck(req: AnalyzeRequest, action: str) -> None:
+    """Validate a request before any budget is spent.
+
+    Guarding first and validating later meant a rejected request still burned a
+    research call. Everything cheap and deterministic is checked here.
+    """
+    if action == "analyze":
+        if not safe_website_url(req.article_url):
+            raise HTTPException(
+                status_code=400,
+                detail="Enter a normal public https article link, like https://example.com/article.",
+            )
+        return
+    if action == "opportunities":
+        if req.angle is None:
+            raise HTTPException(status_code=400, detail="angle is required")
+        return
+    if action == "draft":
+        if req.opportunity is None or req.person is None:
+            raise HTTPException(status_code=400, detail="opportunity and person are required")
+        return
+    if action == "journalists":
+        if req.angle is None or req.opportunity is None:
+            raise HTTPException(status_code=400, detail="angle and opportunity are required")
+        return
+    if action == "listicles":
+        if not req.search_theme.strip():
+            raise HTTPException(status_code=400, detail="search_theme is required")
+        return
+    if action in ("listicle-contact", "listicle_contact", "publisher-policy", "publisher_policy"):
+        if req.item is None:
+            raise HTTPException(status_code=400, detail="item is required")
+        return
+    if action in ("domain-scan", "domain_scan"):
+        _check_domain(req.domain)
+        return
+    if action in ("person-contact", "person_contact"):
+        if req.person is None or req.opportunity is None:
+            raise HTTPException(status_code=400, detail="person and opportunity are required")
+        return
+    if action in ("collect-writers", "collect_writers"):
+        if not req.query.strip():
+            raise HTTPException(status_code=400, detail="query is required")
+        return
+    if action in ("listicle-draft", "listicle_draft"):
+        if req.item is None or req.contact is None:
+            raise HTTPException(status_code=400, detail="item and contact are required")
+        return
+    if action in ("site-metrics", "site_metrics"):
+        if not [d for d in (req.domains or []) if str(d or "").strip()]:
+            raise HTTPException(status_code=400, detail="Send 1-10 valid domains.")
+        return
+
+
 @app.post("/")
 @app.post("/analyze")
 @app.post("/api/analyze")
 def handle(req: AnalyzeRequest, request: Request):
     action = (req.action or "analyze").strip().lower()
-    # Reject unsafe links before spending a research call.
-    if action == "analyze" and not safe_website_url(req.article_url):
-        raise HTTPException(
-            status_code=400,
-            detail="Enter a normal public https article link, like https://example.com/article.",
-        )
+    # Validate before charging the caller's research budget.
+    _precheck(req, action)
     guard(request)
     log_request(request, action)
     last = None

@@ -8,6 +8,9 @@ import os
 import sys
 import unittest
 
+# Brand domain drives the own-site guard; tests must not depend on shell env.
+os.environ.setdefault("BRAND_DOMAIN", "vistasocial.com")
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -17,7 +20,7 @@ from agent import (  # noqa: E402
     sanitize_payload,
     wrap_user_input,
 )
-from analyze import _check_domain, _competitors, _text  # noqa: E402
+from analyze import _check_domain, _competitors, _text, _precheck  # noqa: E402
 
 
 class TestSafeWebsiteUrl(unittest.TestCase):
@@ -125,6 +128,31 @@ class TestApiInputCaps(unittest.TestCase):
         for bad in ["not a domain", "x", "http:///", "", "nodot"]:
             with self.assertRaises(Exception, msg=bad):
                 _check_domain(bad)
+
+    def test_precheck_runs_before_spending(self):
+        """Rejected requests must fail validation, not consume a research call."""
+        from analyze import AnalyzeRequest
+        from fastapi import HTTPException
+
+        cases = [
+            ("analyze", {"article_url": "javascript:alert(1)"}),
+            ("opportunities", {}),
+            ("draft", {}),
+            ("journalists", {}),
+            ("listicles", {"search_theme": "   "}),
+            ("listicle-contact", {}),
+            ("publisher-policy", {}),
+            ("domain-scan", {"domain": "vistasocial.com"}),
+            ("person-contact", {}),
+            ("collect-writers", {"query": ""}),
+            ("listicle-draft", {}),
+            ("site-metrics", {"domains": []}),
+        ]
+        for action, payload in cases:
+            req = AnalyzeRequest(action=action, **payload)
+            with self.assertRaises(HTTPException, msg=action) as ctx:
+                _precheck(req, action)
+            self.assertEqual(ctx.exception.status_code, 400, action)
 
 
 if __name__ == "__main__":
