@@ -527,6 +527,27 @@ stays a non-sending demo.
 - The full tool remains the local Streamlit app. The public Vercel demo is
   available at the custom domain above.
 
+## Safety hardening (2026-11-11)
+
+- Model output is untrusted. Every API response passes `sanitize_payload`:
+  URLs must be public `https` hosts (no `javascript:`/`data:`, no `user@host`
+  tricks, no raw IPs, no `localhost`, no punycode homographs), emails must be
+  syntactically valid or they become "Not publicly found", and `pr_score` is
+  clamped to 0-100.
+- The UI renders links through `SafeA`/`safeHref`, so an unsafe link is shown as
+  "Link withheld" instead of being clickable.
+- Unsafe article links are rejected with HTTP 400 **before** a paid call runs.
+- User-typed text is fenced in `<user_input>` tags with an instruction to ignore
+  embedded commands, blocking prompt-injection through pasted text.
+- Spend control: hard per-browser daily cap (`DEMO_CLIENT_REQUESTS_PER_DAY`,
+  default 15), per-IP 25/day, 8 per 10 minutes, global 100/day
+  (`DEMO_DAILY_REQUEST_CAP`). Limits reject before spending; GET `/api/analyze`
+  reports the caller's remaining budget; the sidebar shows "Calls left today"
+  and bulk actions ask before exceeding it.
+- "Used" marks normalise URLs (case, `www.`, trailing slashes, query) so the
+  same article cannot reappear as new, are included in campaign snapshots and
+  restored on load, and legacy duplicates are merged on first read.
+
 ## Known caveats
 
 - Web search dominates cost (~$10 per 1,000 calls). Research runs only on click.
