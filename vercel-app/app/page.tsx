@@ -3174,6 +3174,36 @@ export default function Home() {
                       {Object.keys(drafts).length > 0 &&
                         ` · ${outcomeCounts["Pitched"] || 0} pitched · ${outcomeCounts["Replied"] || 0} replied · ${outcomeCounts["Covered"] || 0} covered`}
                     </p>
+                    {(() => {
+                      const people = journalists?.journalists ?? [];
+                      const nextPerson = people.find(
+                        (p: AnyObj) => !drafts[draftKey(oppKey(selectedOpp), p.name)]
+                      );
+                      if (people.length === 0) return null;
+                      return (
+                        <>
+                          {nextPerson && (
+                            <button
+                              className="btn-primary"
+                              onClick={() => writeDraft(nextPerson)}
+                              disabled={loadingDraft !== null}
+                              title={`Write the pitch for ${nextPerson.name}`}
+                            >
+                              {loadingDraft ? <Spinner /> : <ArrowRight size={16} />}
+                              {loadingDraft
+                                ? "Writing..."
+                                : `Write next pitch (${shortText(nextPerson.name, 22)})`}
+                            </button>
+                          )}
+                          <button
+                            className="btn-secondary"
+                            onClick={() => setDigitalStep("Journalists")}
+                          >
+                            ← Back to contacts
+                          </button>
+                        </>
+                      );
+                    })()}
                     {Object.keys(drafts).length > 0 && (
                       <button
                         className="btn-secondary"
