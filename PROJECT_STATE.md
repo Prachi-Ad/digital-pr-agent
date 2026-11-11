@@ -168,7 +168,9 @@ stays a non-sending demo.
   "this will use N research calls" before spending; **Find writers for all** now
   selects an opportunity that actually has writers instead of landing on an
   empty Journalists screen, and that screen offers opportunity chips instead of
-  a dead end.
+  a dead end. Outreach also carries **Write next pitch (Name)** — it drafts the
+  next un-pitched person for the current opportunity without leaving the page —
+  and a **← Back to contacts** shortcut.
 - Workflow correctness: switching angle chips clears the previous angle's
   writers/emails (no stale Journalists view); campaigns also restore email
   lookups and domain scans; "Calls left today" refreshes every minute.
