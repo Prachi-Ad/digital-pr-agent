@@ -1240,6 +1240,10 @@ export default function Home() {
     setActiveUrl("");
     resetAnalysisDownstream();
     setDrafts({});
+    setScanResult(null);
+    setDomainInput("");
+    setTopicHint("");
+    setErrScan(null);
     setShowStart(false);
     setWorkflow("digital");
     setDigitalStep("Article");
@@ -1252,6 +1256,15 @@ export default function Home() {
 
   function startNewListicles() {
     setListicles(null);
+    setSelectedItem(null);
+    setContact(null);
+    setPolicy(null);
+    setContactByItem({});
+    setListicleDrafts({});
+    setErrList(null);
+    setErrContact(null);
+    setErrPolicy(null);
+    setErrListDraft(null);
     setShowStart(false);
     setWorkflow("listicles");
     setListicleStep("Search");
