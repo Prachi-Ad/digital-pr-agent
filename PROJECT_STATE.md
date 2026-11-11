@@ -155,6 +155,9 @@ stays a non-sending demo.
   inclusion requests separately (listicle, outlet, placement type, contact,
   subject, body, status, live URL), and the Dashboard adds listicle counts,
   coverage rate, and a listicles-by-outlet table.
+- Workflow correctness: switching angle chips clears the previous angle's
+  writers/emails (no stale Journalists view); campaigns also restore email
+  lookups and domain scans; "Calls left today" refreshes every minute.
 - **Ahrefs DR check**: `site-metrics` action hits the free Domain Rating endpoint
   (1 research call for up to 10 domains; `AHREFS_API_KEY` in Vercel). **Check DR**
   buttons on opportunities, domain scans, and listicles; green **DR badges** at
