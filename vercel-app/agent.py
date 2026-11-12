@@ -4,7 +4,6 @@ import re
 import sys
 import threading
 import time
-from concurrent.futures import TimeoutError as FutureTimeoutError
 from urllib.parse import urlsplit
 
 from openai import AsyncOpenAI
@@ -518,6 +517,41 @@ class OwnPagesResults(BaseModel):
     pages: list[OwnPage] = Field(default_factory=list, description="Own pages ranked by pitch potential, strongest first.")
 
 
+class OpportunityContact(BaseModel):
+    contact_name: str = Field(
+        description=(
+            "The bylined writer or a verified content, SEO, or link-building "
+            "contact. Use 'Content team' only when no person can be verified."
+        )
+    )
+    role: str = Field(
+        description=(
+            "Verified role, such as Content Writer, Content Manager, SEO Manager, "
+            "Link Building / Outreach Manager, Editor, or Partnerships contact."
+        )
+    )
+    email: str = Field(
+        description=(
+            "A professional email only if it is explicitly published on a public "
+            "page. Otherwise use Not publicly found."
+        )
+    )
+    contact_page_url: str = Field(
+        description="Official author profile, content/SEO team page, editorial contact page, or contact form URL, or Unknown."
+    )
+    source_url: str = Field(
+        description="Exact URL of the page that supports the contact details, or Unknown."
+    )
+    evidence: str = Field(
+        description="Quote or paraphrase the published evidence tying the contact to content, SEO, or link placement."
+    )
+    confidence: str = Field(description="High, Medium, or Low.")
+    route: str = Field(
+        description="Best route: Direct email, Author profile, Content/SEO team page, Editorial contact page, or Contact form."
+    )
+
+
+
 class OutreachDraft(BaseModel):
     outreach_type: str = Field(
         description="Either 'Digital PR pitch' or 'Listicle inclusion request'."
@@ -589,6 +623,33 @@ class OutreachDraft(BaseModel):
 
 
 # =========================================================
+# JOURNALIST RESEARCH MODELS
+# =========================================================
+
+class JournalistProfile(BaseModel):
+    name: str = Field(default="", description="The journalist, writer, or editor's name. Do not guess.")
+    publication: str = Field(default="", description="The publication where the person writes or edits.")
+    current_role: str = Field(default="Unknown", description="Verified current role, or Unknown if it cannot be verified.")
+    relevant_article_title: str = Field(default="", description="A specific relevant article written by this person.")
+    relevant_article_url: str = Field(default="", description="The exact URL of that article.")
+    article_date: str = Field(default="Unknown", description="Publication date in YYYY-MM-DD format, or Unknown.")
+    topic_covered: str = Field(default="", description="The subject or beat demonstrated by their published work.")
+    why_relevant: str = Field(default="", description="Why this person's work makes them a relevant target for this exact opportunity.")
+    suggested_pitch_angle: str = Field(default="", description="A specific pitch approach linked to the verified article and the brand's contribution.")
+    author_profile_or_contact_page: str = Field(default="Unknown", description="Verified author biography or official publication contact page URL, if available; otherwise Unknown.")
+    evidence: str = Field(default="", description="What the research verified about this person and their relevance.")
+    confidence: str = Field(default="Low", description="Use High, Medium, or Low, based on the evidence.")
+
+
+class JournalistResearchResults(BaseModel):
+    selected_opportunity: str = Field(default="", description="The article/opportunity for which journalists were researched.")
+    publication: str = Field(default="", description="The publication associated with the selected opportunity.")
+    research_summary: str = Field(default="", description="Short summary of the journalist research and any limitations.")
+    journalists: list[JournalistProfile] = Field(default_factory=list, description="Up to five evidence-supported, relevant journalists or writers.")
+
+
+
+# =========================================================
 # LISTICLE RESEARCH MODELS
 # =========================================================
 
@@ -649,6 +710,53 @@ class ListicleResearchResults(BaseModel):
     )
     opportunities: list[ListicleOpportunity] = Field(
         description="Existing listicle opportunities matching the search criteria, deduplicated, up to the requested result limit."
+    )
+
+
+# =========================================================
+# LISTICLE CONTACT RESEARCH MODELS
+# =========================================================
+
+class ListicleContact(BaseModel):
+    contact_name: str = Field(
+        description="Verified public professional contact name, or Not found. Never guess."
+    )
+    current_role: str = Field(
+        description="Verified role, such as article author, editor, editorial team, affiliate manager, or partnerships contact. Use Unknown if unverified."
+    )
+    professional_email: str = Field(
+        description="A professional email only if it is explicitly published on a reliable public source. Otherwise use Not publicly found. Never infer or guess an email."
+    )
+    author_profile_url: str = Field(
+        description="Verified author or staff profile URL, or Unknown."
+    )
+    contact_page_url: str = Field(
+        description="Verified official contact page, editorial submission form, affiliate page, or partnerships page URL, or Unknown."
+    )
+    contact_method: str = Field(
+        description="Most appropriate route for this listicle: email, official form, author/contact page, affiliate program, sponsored content team, or no verified route found."
+    )
+    why_this_contact: str = Field(
+        description="Why this person or route is appropriate for requesting consideration for this specific listicle."
+    )
+    evidence: str = Field(
+        description="What the research verified and where the evidence was found."
+    )
+    source_url: str = Field(
+        description="URL of the page that supports the contact details or route, or Unknown."
+    )
+    confidence: str = Field(
+        description="High, Medium, or Low based on the quality of verification."
+    )
+
+
+class ListicleContactResearchResults(BaseModel):
+    publication: str = Field(description="Publication that hosts the listicle.")
+    listicle_title: str = Field(description="Title of the listicle being researched.")
+    listicle_url: str = Field(description="URL of the listicle.")
+    research_summary: str = Field(description="Summary of contact-finding research and limitations.")
+    contacts: list[ListicleContact] = Field(
+        description="Up to three verified contact people or official contact routes, ordered by suitability. Do not invent missing data."
     )
 
 
@@ -872,6 +980,47 @@ Return only the requested structured fields.
 
 
 # =========================================================
+# CONTENT / SEO CONTACT AGENT
+# =========================================================
+
+opportunity_contact_agent = Agent(
+    name="SEO and Content Contact Researcher",
+    instructions=f"""
+You find the best outreach contact for one specific article, on behalf of
+{BRAND_NAME}. Work from the exact article URL and publication.
+
+{EXPERT_RULES}
+
+The goal is a content or link placement, not a news pitch. Look for the people
+who own content, SEO, or link building:
+1. The bylined writer of that exact article.
+2. The content manager, content editor, or managing editor.
+3. The SEO manager or SEO lead.
+4. The link-building, outreach, or partnerships contact.
+5. The publication's official editorial or content contact page or form.
+
+Rules:
+- Only use an email that is explicitly published on a public page you visited.
+- Never guess, infer, or construct an email address.
+- Never use data-broker, scraped-email, or email-finder sites.
+- Prefer a named person with a published email. A general inbox is acceptable
+  only when it is explicitly published and no person is.
+- Use "Content team" as the contact name only when no person can be verified.
+- Use "Not publicly found" for an email that does not exist publicly, and still
+  return the best official contact page.
+- Do not contact anyone or submit anything.
+- Include the exact source URL and the published evidence.
+
+Return only the requested structured fields.
+""",
+    tools=[web_search],
+    model=MODEL,
+    model_settings=MODEL_SETTINGS,
+    output_type=OpportunityContact,
+)
+
+
+# =========================================================
 # OUTREACH DRAFT AGENT
 # =========================================================
 
@@ -928,6 +1077,55 @@ Return only the requested structured fields.
     model_settings=MODEL_SETTINGS,
     output_type=OutreachDraft,
 )
+
+
+# =========================================================
+# JOURNALIST RESEARCH AGENT
+# =========================================================
+
+journalist_agent = Agent(
+    name="Journalist Researcher",
+    instructions=f"""
+You are a journalist researcher supporting a human-led Digital PR workflow for {BRAND_NAME}.
+
+{EXPERT_RULES}
+
+Your task is to identify real writers, reporters, or editors whose published work makes
+these people relevant to one specific, human-approved PR opportunity.
+
+RESEARCH PROCESS:
+1. Start from the supplied opportunity and PR angle.
+2. Search the live web for the named publication, the article topic, and related recent articles.
+3. Verify the person has actually written or edited relevant work using a specific article,
+   an official author page, or another reliable source.
+4. Prefer people who have covered the topic recently, ideally within the last 12 months.
+   If few relevant people exist, older work can be included with the date clearly shown.
+5. Look for a direct connection between the person's beat and the contribution {BRAND_NAME} can offer.
+6. Return up to five strong contacts, and return fewer when the evidence is weak.
+
+STRICT RULES:
+- Do not invent people's names, job titles, recent articles, dates, or profile URLs.
+- Do not infer an email address from naming conventions.
+- Do not include a person merely because they work at the publication.
+- Do not assume the author of the opportunity article is the correct contact unless evidence supports it.
+- Prioritize editorial relevance over seniority or publication authority.
+- Do not research or recommend contacts for generic link insertion or SEO-only outreach.
+- Do not draft or send emails at this stage.
+- If the research cannot establish a relevant person, return an empty journalists list and explain why.
+- Use Unknown when a role, date, or profile/contact page cannot be verified.
+- Link to the actual relevant article and verified author profile/contact page where available.
+
+For every person, explain exactly why their published work makes them relevant to this opportunity
+and suggest an angle that is useful to the journalist, not just promotional for {BRAND_NAME}.
+
+Return only the requested structured fields.
+""",
+    tools=[web_search],
+    model=MODEL,
+    model_settings=MODEL_SETTINGS,
+    output_type=JournalistResearchResults,
+)
+
 
 
 # =========================================================
@@ -988,6 +1186,43 @@ Return only the requested structured fields.
     model=MODEL,
     model_settings=MODEL_SETTINGS,
     output_type=ListicleResearchResults,
+)
+
+
+# =========================================================
+# LISTICLE CONTACT RESEARCH AGENT
+# =========================================================
+
+listicle_contact_agent = Agent(
+    name="Listicle Contact Researcher",
+    instructions=f"""
+You find the most appropriate public professional contact route for a specific software listicle.
+
+Use live web search. Start with the exact listicle URL and publication name. Look for:
+1. The bylined article author and their official author profile.
+2. An editor or editorial team responsible for software/tool roundups.
+3. An official editorial submission or contact form.
+4. If the page is affiliate-driven, the official affiliate or partnerships route.
+5. If the page is sponsored/paid, the official sponsored-content or advertising route.
+6. A professional email only if it is explicitly published on a reliable public source, preferably the publication's own website or the person's official profile.
+
+Rules:
+- Never guess or infer an email address.
+- Never provide private/personal contact details unrelated to professional publishing.
+- Do not treat a generic contact page as the article author's direct email.
+- Prefer the author/editor responsible for the specific listicle, but use an official contact form when no suitable individual can be verified.
+- Return up to three options, in order of suitability.
+- Use "Not found", "Not publicly found", or "Unknown" for information that could not be verified.
+- Include URLs supporting the contact route and explain what each source verifies.
+- Do not contact anyone, submit forms, or send outreach.
+- The output is research for a human to review, not a guarantee that the person is still responsible for the page.
+
+Return only the requested structured fields.
+""",
+    tools=[web_search],
+    model=MODEL,
+    model_settings=MODEL_SETTINGS,
+    output_type=ListicleContactResearchResults,
 )
 
 
@@ -1056,20 +1291,6 @@ _AGENT_LOOP = asyncio.new_event_loop()
 _OPENAI_CLIENT_READY = False
 _OPENAI_CLIENT_LOCK = threading.Lock()
 
-# One research action must fit inside the function's 300s limit. The OpenAI
-# client timeout used to be 120s with two SDK retries (360s on its own), and the
-# request handler then retried the whole action again, so a slow model could run
-# well past the limit while still being billed.
-AGENT_TOTAL_BUDGET_SECONDS = max(
-    30,
-    min(290, int(os.environ.get("AGENT_TOTAL_BUDGET_SECONDS", "240") or 240)),
-)
-
-
-class AgentTimeout(RuntimeError):
-    """Raised when a research action runs past its time budget."""
-
-
 
 def _start_agent_loop():
     asyncio.set_event_loop(_AGENT_LOOP)
@@ -1091,9 +1312,9 @@ def _ensure_openai_client():
         return
     with _OPENAI_CLIENT_LOCK:
         if not _OPENAI_CLIENT_READY:
-            # A single attempt must finish well inside the request budget, so one
-            # stall cannot stack with SDK retries past the 300s function limit.
-            set_default_openai_client(AsyncOpenAI(timeout=90.0, max_retries=1))
+            # Fail fast (120s) on stalled calls; retry connection errors at the
+            # SDK level.
+            set_default_openai_client(AsyncOpenAI(timeout=120.0, max_retries=2))
             _OPENAI_CLIENT_READY = True
 
 
@@ -1102,29 +1323,13 @@ async def _run_agent_async(agent_to_run, prompt: str):
     return await Runner.run(agent_to_run, prompt, max_turns=MAX_TURNS)
 
 
-def _run_agent_in_worker(agent_to_run, prompt: str, deadline: float | None = None):
-    """Run an async agent on the shared event loop, bounded by a deadline."""
-    if deadline is not None:
-        remaining = deadline - time.monotonic()
-        if remaining <= 5:
-            raise AgentTimeout(
-                "That research step ran out of time before it could finish. "
-                "Try a narrower request, or try again."
-            )
+def _run_agent_in_worker(agent_to_run, prompt: str):
+    """Run an async agent on the shared event loop."""
     future = asyncio.run_coroutine_threadsafe(
         _run_agent_async(agent_to_run, prompt),
         _AGENT_LOOP,
     )
-    timeout = None if deadline is None else max(5.0, deadline - time.monotonic())
-    try:
-        return future.result(timeout=timeout).final_output
-    except FutureTimeoutError:
-        # The request stops waiting; the SDK's own timeout ends the orphaned call.
-        future.cancel()
-        raise AgentTimeout(
-            "That research step is taking too long and was stopped so it would not "
-            "fail after you had waited. Try again, or narrow the request."
-        )
+    return future.result().final_output
 
 
 _SCHEMA_HINTS = (
@@ -1148,15 +1353,9 @@ def run_agent_safely(agent_to_run, prompt: str):
     one bad reply look like a broken workflow. A single repair attempt with an
     explicit schema reminder fixes nearly all of them, and tolerant models catch
     the rest.
-
-    Both attempts share one deadline, so the repair cannot push the action past
-    the function limit.
     """
-    deadline = time.monotonic() + AGENT_TOTAL_BUDGET_SECONDS
     try:
-        return _run_agent_in_worker(agent_to_run, prompt, deadline)
-    except AgentTimeout:
-        raise
+        return _run_agent_in_worker(agent_to_run, prompt)
     except Exception as exc:  # noqa: BLE001 - re-raised below when unrelated
         if not _looks_like_schema_error(exc):
             raise
@@ -1167,7 +1366,7 @@ def run_agent_safely(agent_to_run, prompt: str):
             "using \"Unknown\" or an empty list where the research found nothing. Do not "
             "omit keys and do not wrap the object in prose."
         )
-        return _run_agent_in_worker(agent_to_run, repair, deadline)
+        return _run_agent_in_worker(agent_to_run, repair)
 
 
 # =========================================================
@@ -1362,6 +1561,132 @@ def _safe_optional_hint(value: object) -> str:
     return text[:200]
 
 
+def research_journalists(
+    angle: PRAngle,
+    opportunity: PROpportunity,
+) -> JournalistResearchResults:
+    """Find evidence-supported journalists for an approved PR opportunity."""
+
+    prompt = f"""
+Research relevant journalists or writers for this HUMAN-APPROVED {BRAND_NAME} PR opportunity.
+
+PR ANGLE:
+{angle.angle}
+
+STORY HYPOTHESIS:
+{angle.story_hypothesis}
+
+BRAND CONTRIBUTION:
+{angle.brand_contribution}
+
+APPROVED OPPORTUNITY:
+Publication: {opportunity.publication}
+Article title: {opportunity.article_title}
+Article URL: {opportunity.article_url}
+Published date: {opportunity.published_date}
+Topic: {opportunity.topic}
+Opportunity type: {opportunity.opportunity_type}
+Why relevant: {opportunity.why_relevant}
+Recommended action: {opportunity.recommended_action}
+Evidence: {opportunity.evidence}
+
+Find up to five real people whose verified published work is relevant to this topic.
+Start with exact-angle matches, then widen to the publication's editor, content
+manager, SEO lead, link-building contact, or official editorial contact route.
+Never invent a person, email, or byline. Return an empty list only if neither a
+relevant person nor an official contact route can be verified.
+"""
+
+    return run_agent_safely(journalist_agent, prompt)
+
+
+def collect_media_contacts(query: str) -> JournalistResearchResults:
+    """Collect writers from the live web for a beat, outlet, or topic."""
+    query = (query or "").strip()[:300]
+    fenced = wrap_user_input(query, 300)
+    prompt = f"""
+{INJECTION_NOTE}
+
+Collect writers and editors from the live web matching this request. This is
+for building a media contact library for {BRAND_NAME} ({PRODUCT_DESCRIPTION}).
+Do not pitch, draft, or contact anyone.
+
+REQUEST:
+{fenced}
+
+Treat this as the human-approved research focus:
+- Selected opportunity: media contacts covering the requested beat or outlet.
+- Research summary context: writers, reporters, or editors with recent,
+  verifiable coverage relevant to that request, usable for future {BRAND_NAME}
+  pitches (expert commentary, original data, or customer stories).
+
+Research process:
+1. Search the live web for the beat, outlet, or topic plus writer bylines.
+2. Verify each person through a specific recent article, official author page,
+   or another reliable source, ideally within the last 12 months.
+3. Return up to 8 strong contacts, and fewer when the evidence is weak.
+
+Strict rules: no invented names, titles, articles, dates, or profile URLs; no
+inferred emails; Unknown when unverifiable; relevance over seniority. Explain
+for each person exactly why their published work makes them relevant.
+"""
+    return run_agent_safely(journalist_agent, prompt)
+
+
+def find_opportunity_contact(opportunity: PROpportunity) -> OpportunityContact:
+    """Find a content/SEO/link-building contact for one article."""
+    prompt = f"""
+Find the best content, SEO, or link-building contact for this exact article.
+
+PUBLICATION: {opportunity.publication}
+ARTICLE TITLE: {opportunity.article_title}
+ARTICLE URL: {opportunity.article_url}
+PUBLISHED: {opportunity.published_date}
+TOPIC: {opportunity.topic}
+WHY IT MATTERS: {opportunity.why_relevant}
+
+Start with the exact article URL and identify the bylined writer. Then check the
+author profile, about/team page, contributor guidelines, and contact page. Look
+for a content manager, SEO manager, link-building/outreach manager, or
+partnerships contact. Prefer a named person with a published email; otherwise
+return the official content or editorial contact page or form. Never guess an
+email. Include the source URL and evidence.
+"""
+
+    return run_agent_safely(opportunity_contact_agent, prompt)
+
+
+def research_person_contact(
+    person: JournalistProfile,
+    opportunity: PROpportunity,
+) -> OpportunityContact:
+    """Find the public email or official contact route for one named person."""
+    prompt = f"""
+Find the public contact details for this specific person, for a PR pitch about
+the article below. This is for human review; do not contact anyone.
+
+PERSON: {person.name}
+PUBLICATION: {person.publication}
+VERIFIED ROLE: {person.current_role}
+THEIR RELEVANT ARTICLE: {person.relevant_article_title}
+ARTICLE URL: {person.relevant_article_url}
+KNOWN PROFILE OR CONTACT PAGE: {person.author_profile_or_contact_page}
+
+TARGET ARTICLE FOR THE PITCH: {opportunity.article_title}
+TARGET URL: {opportunity.article_url}
+
+Start from their author profile page and the publication's team/contact pages.
+Return their professional email ONLY if it is explicitly published on a public
+page you visited, with the exact source URL and quoted evidence. Otherwise use
+"Not publicly found" and return the best official contact route instead (author
+profile, team page, editorial contact page, or contact form). Never guess,
+infer, or construct an email address. Never use data-broker, scraped-email, or
+email-finder sites.
+"""
+
+    return run_agent_safely(opportunity_contact_agent, prompt)
+
+
 def _trim_to_words(text: str, limit: int = 150) -> str:
     """Hard word cap: cut whole sentences so the body never exceeds limit."""
     text = (
@@ -1472,10 +1797,6 @@ def enforce_email_rules(draft: OutreachDraft, sender_name: str, sender_role: str
 
     draft.subject_line = subject
     draft.message_body = body
-    # The tool no longer researches people, so never let a model-supplied name
-    # or role reach the UI, the export, or the sheet.
-    draft.recipient_name = "Editorial team"
-    draft.recipient_role = "Editorial"
     if not draft.facts_to_verify:
         draft.facts_to_verify = []
     return draft
@@ -1483,6 +1804,7 @@ def enforce_email_rules(draft: OutreachDraft, sender_name: str, sender_role: str
 
 def draft_journalist_pitch(
     opportunity: PROpportunity,
+    person: JournalistProfile,
     angle_context: str = "",
     sender_name: str = "Prachi",
     sender_role: str = "SEO Specialist",
@@ -1490,7 +1812,7 @@ def draft_journalist_pitch(
     previous_subject: str = "",
     previous_body: str = "",
 ) -> OutreachDraft:
-    """Draft a Digital PR pitch for human review. Never sends."""
+    """Draft a personalized Digital PR pitch for human review. Never sends."""
     prompt = f"""
 Write a Digital PR pitch draft for human review. Do not send anything.
 
@@ -1502,7 +1824,20 @@ PRODUCT: {PRODUCT_DESCRIPTION}
 PR ANGLE:
 {angle_context or opportunity.why_relevant}
 
-TARGET PUBLICATION AND ARTICLE:
+TARGET WRITER / CONTACT:
+Name: {person.name}
+Publication: {person.publication}
+Verified role: {person.current_role}
+Topic covered: {person.topic_covered}
+Relevant published article: {person.relevant_article_title}
+Article URL: {person.relevant_article_url}
+Article date: {person.article_date}
+Why relevant: {person.why_relevant}
+Suggested angle from research: {person.suggested_pitch_angle}
+Research evidence: {person.evidence}
+Known public profile or contact page: {person.author_profile_or_contact_page}
+
+TARGET OPPORTUNITY:
 Publication: {opportunity.publication}
 Article: {opportunity.article_title}
 URL: {opportunity.article_url}
@@ -1512,17 +1847,13 @@ Why this article matters: {opportunity.why_relevant}
 Credible brand contribution: {opportunity.brand_contribution}
 Research evidence: {opportunity.evidence}
 
-Write a concise pitch to the publication's editorial team. Reference the article
-itself (its argument, gap, or data) and offer the brand's contribution in natural
-sentences, using only the verified facts above.
-
-Do not address a named person: this tool does not research people, so never invent
-or imply a recipient name, title, or email address. Write to the editorial team and
-keep the channel generic.
-
-Use the sender name and role exactly. Do NOT include any AEO section, question, or
-answer paragraph in the message body, and leave aeo_question and aeo_answer empty.
-Put any missing detail in [verify: ...] placeholders and list it in facts_to_verify.
+Write a concise pitch that references the person's specific work and offers the
+brand's contribution in natural sentences. Use only the verified facts above.
+Use the sender name and role exactly. Do NOT include any AEO section, question,
+or answer paragraph in the message body, and leave aeo_question and aeo_answer
+empty. Put any missing detail in [verify: ...] placeholders and list it in
+facts_to_verify. If the person or route is Unknown, use 'Official publication
+contact route' as the channel and note that the route must be verified.
 """
 
     if variant > 0:
@@ -1539,11 +1870,12 @@ PREVIOUS BODY (avoid reusing its wording):
 
     draft = run_agent_safely(outreach_draft_agent, prompt)
     draft.message_body = _trim_to_words(draft.message_body)
-    return enforce_email_rules(draft, sender_name, sender_role)
+    return enforce_email_rules(draft, sender_name, sender_role, person.name)
 
 
 def draft_listicle_inclusion(
     item: ListicleOpportunity,
+    contact: ListicleContact,
     variant: int = 0,
     previous_subject: str = "",
     previous_body: str = "",
@@ -1569,9 +1901,13 @@ Inclusion gap: {item.inclusion_gap}
 Documented contact route: {item.contact_route}
 Evidence: {item.evidence}
 
-Do not address a named person: this tool does not research people, so never invent
-or imply a recipient name, title, or email address. Write to the editorial team and
-keep the channel to the documented route above.
+CONTACT:
+Name: {contact.contact_name}
+Role: {contact.current_role}
+Email: {contact.professional_email}
+Route: {contact.contact_method}
+Why this contact: {contact.why_this_contact}
+Evidence: {contact.evidence}
 
 STYLE:
 - 80-130 words, max 3 short paragraphs.
@@ -1607,7 +1943,7 @@ PREVIOUS BODY (avoid reusing its wording):
 """
     draft = run_agent_safely(outreach_draft_agent, prompt)
     draft.message_body = _trim_to_words(draft.message_body, 130)
-    return enforce_email_rules(draft, "Prachi", "SEO Specialist")
+    return enforce_email_rules(draft, "Prachi", "SEO Specialist", contact.contact_name)
 
 
 def research_listicles(
@@ -1665,6 +2001,36 @@ enough credible matches. Provide a clear research summary and evidence for every
 """
 
     return run_agent_safely(listicle_agent, prompt)
+
+
+def research_listicle_contact(
+    item: ListicleOpportunity,
+) -> ListicleContactResearchResults:
+    """Find verified public professional contact routes for a specific listicle."""
+
+    prompt = f"""
+Find the best public professional contact route for this existing listicle.
+
+PUBLICATION: {item.publication}
+LISTICLE TITLE: {item.listicle_title}
+LISTICLE URL: {item.listicle_url}
+PUBLISHED OR UPDATED: {item.published_or_updated}
+PLACEMENT TYPE: {item.placement_type}
+CURRENT CONTACT ROUTE FROM INITIAL RESEARCH: {item.contact_route}
+RECOMMENDED ACTION: {item.recommended_action}
+
+Research the exact article and official publication pages. Find the bylined author,
+relevant editor, official submission/contact page, or the official affiliate or sponsored
+content route if applicable. Prefer the contact responsible for tool roundups and inclusion.
+
+Return up to three suitable, verified routes. Include a professional email only if it is
+explicitly published on a reliable public page. Do not guess email addresses. If a direct
+contact cannot be verified, return the best official contact form/page and explain the limit.
+Do not contact the publisher.
+"""
+
+    return run_agent_safely(listicle_contact_agent, prompt)
+
 
 
 def research_publisher_policy(

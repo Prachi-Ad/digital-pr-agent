@@ -12,6 +12,10 @@ const HEADER_MAP: Record<string, string[]> = {
     "used", "pr_fit", "pr_score", "contact_name", "contact_role", "email",
     "subject", "body", "status", "coverage_url",
   ],
+  Contacts: [
+    "key", "name", "publication", "role", "beat", "email", "contact_page",
+    "profile_url", "source_article", "source_url", "last_angle", "last_seen", "status",
+  ],
   Coverage: [
     "key", "date", "contact_name", "publication", "article_title", "article_url",
     "subject", "coverage_url", "status",
@@ -62,46 +66,17 @@ async function ensureTab(api: any, sheetId: string, tab: string, headers: string
   }
 }
 
-export async function GET(request: Request) {
+export async function GET() {
   const webhook = (process.env.SHEET_WEBHOOK_URL || "").trim();
   const client = webhook ? null : await sheets();
-  const probe = new URL(request.url).searchParams.get("probe") === "1";
-  const headers = { "Cache-Control": "no-store" };
-
-  let reachable: boolean | null = null;
-  let probeStatus: number | null = null;
-  let probeError = "";
-  if (probe) {
-    if (!webhook) {
-      probeError = "No webhook URL is configured for this deployment.";
-    } else {
-      // Env vars only prove a URL exists. This asks the deployment whether it
-      // answers at all, which is what "connected" is supposed to mean.
-      try {
-        const res = await fetch(webhook, {
-          method: "GET",
-          redirect: "manual",
-          cache: "no-store",
-          signal: AbortSignal.timeout(8000),
-        });
-        probeStatus = res.status;
-        reachable = res.status < 400;
-      } catch (err: any) {
-        reachable = false;
-        probeError = String(err?.message || err).slice(0, 200);
-      }
-    }
-  }
-
   return Response.json(
     {
       configured: !!webhook || !!client,
       mode: webhook ? "webhook" : "service-account",
       tab: TAB,
       columns: HEADERS.filter((h) => h !== "key"),
-      ...(probe ? { reachable, probeStatus, probeError } : {}),
     },
-    { headers }
+    { headers: { "Cache-Control": "no-store" } }
   );
 }
 
@@ -121,70 +96,19 @@ async function syncViaWebhook(tab: string, rows: any[][]) {
   return data;
 }
 
-async function clearViaWebhook(tab: string) {
-  const url = (process.env.SHEET_WEBHOOK_URL || "").trim();
-  const token = (process.env.SHEET_WEBHOOK_TOKEN || "").trim();
-  if (!url || !token) return null;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token, tab, action: "clear" }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.detail || `Clear failed (${res.status}).`);
-  return data;
-}
-
 export async function POST(req: Request) {
   if (!isAuthenticated(req.headers.get("cookie"))) {
     return Response.json({ detail: "Sign in required." }, { status: 401 });
   }
   let rows: any[][] = [];
   let tab = TAB;
-  let action = "sync";
-  let requestedTab = "";
   try {
     const body = await req.json();
     rows = Array.isArray(body?.rows) ? body.rows : [];
-    if (typeof body?.tab === "string") requestedTab = body.tab;
-    if (HEADER_MAP[requestedTab]) tab = requestedTab;
-    if (body?.action === "clear") action = "clear";
+    if (typeof body?.tab === "string" && HEADER_MAP[body.tab]) tab = body.tab;
   } catch {
     rows = [];
   }
-
-  if (action === "clear") {
-    // Clearing must never fall back to another tab: an unknown name would
-    // otherwise wipe Pitches instead of refusing.
-    if (!HEADER_MAP[requestedTab]) {
-      return Response.json(
-        { detail: `Unknown tab "${requestedTab}".` },
-        { status: 400 }
-      );
-    }
-    tab = requestedTab;
-    // Only the webhook path can clear; the service-account path would need an
-    // explicit range delete and is not configured here.
-    if (!(process.env.SHEET_WEBHOOK_URL || "").trim()) {
-      return Response.json(
-        { detail: "Clearing is only available with the Apps Script webhook." },
-        { status: 503 }
-      );
-    }
-    try {
-      const data = await clearViaWebhook(tab);
-      if (!data) throw new Error("Webhook not configured.");
-      if (typeof data.cleared !== "number") {
-        throw new Error(
-          "The deployed Apps Script does not support clearing yet. Copy the setup script again, paste it in Apps Script, then Deploy → Manage deployments → New version."
-        );
-      }
-      return Response.json({ ok: true, tab, cleared: data.cleared }, { status: 200 });
-    } catch (err: any) {
-      return Response.json({ detail: String(err?.message || err).slice(0, 300) }, { status: 502 });
-    }
-  }
-
   const headers = HEADER_MAP[tab];
   rows = rows.filter((r) => Array.isArray(r) && r.length === headers.length);
   if (rows.length === 0) {

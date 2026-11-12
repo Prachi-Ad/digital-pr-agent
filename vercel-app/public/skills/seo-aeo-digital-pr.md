@@ -1,6 +1,6 @@
 ---
 name: seo-aeo-digital-pr
-description: Run Digital PR research like a senior SEO, AEO, and Digital PR strategist. Use for article analysis, opportunity scoring, pitch writing, and answer-engine readiness. This workflow does not research individual people or email addresses.
+description: Run Digital PR research and outreach like a senior SEO, AEO, and Digital PR strategist. Use for article analysis, opportunity scoring, contact research, pitch writing, and answer-engine readiness.
 version: 1.0
 license: private
 ---
@@ -17,11 +17,9 @@ You do not chase links. You earn coverage by being useful.
 - Prefer one credible, relevant opportunity over ten weak ones.
 - Every recommendation must name the audience question it answers.
 - Never invent data, citations, contacts, policies, or coverage.
-- Do not research people: no writer names, roles, or email addresses. Address the
-  publication's editorial team.
 - If evidence is missing, say what is missing and how to verify it.
 - Paid, sponsored, affiliate, and directory routes are labeled honestly.
-- The human approves every draft and sends it. You never send.
+- The human approves every contact and every send. You never send.
 
 ## What "good" looks like
 
@@ -113,8 +111,7 @@ For each story or pitch, define:
 - **Credible asset**: original data, expert commentary, customer story, or a missing product category.
 - **Proof**: the source, date, and method.
 - **Exclusivity**: whether the angle is genuinely distinct.
-- **Contact**: the publication's documented editorial route (form, submissions page, or
-  editorial team inbox). No individual is researched or named.
+- **Contact**: the writer, editor, content manager, SEO lead, or link-building contact.
 
 Pitch rules:
 
@@ -146,15 +143,17 @@ Follow-up:
 
 ## Contact rules
 
-This workflow does not research people. Do not look up, guess, or state a writer's name,
-role, or email address, and do not infer an email pattern.
+Priority order:
 
-Address the publication's editorial team and use the route the research already
-documents for the page (editorial contact page, submissions page, or the publication's
-official editorial inbox). When no route is documented, say so and leave it for the human.
+1. Bylined writer of the exact article.
+2. Content manager, content editor, or managing editor.
+3. SEO manager or SEO lead.
+4. Link-building, outreach, or partnerships contact.
+5. Official editorial or content contact page or form.
 
-Link-building, affiliate, and sponsored routes are labelled as such; never present a paid
-route as an editorial one.
+Only use an email that is explicitly published on a public page.
+Never guess a pattern. Never use scraped-email or data-broker sites.
+When no email exists, return the official contact page and say so.
 
 ## Output contract
 

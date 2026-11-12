@@ -3,25 +3,26 @@ const TOKEN = "PASTE_YOUR_TOKEN_HERE";
 const TABS = {
   Pitches: ["key","date","angle","publication","site_domain","article_title","article_url","used","pr_fit","pr_score","contact_name","contact_role","email","subject","body","status","coverage_url"],
   Listicles: ["key","date","publication","listicle_title","listicle_url","placement_type","contact_name","contact_role","email","subject","body","status","coverage_url"],
+  Contacts: ["key","name","publication","role","beat","email","contact_page","profile_url","source_article","source_url","last_angle","last_seen","status"],
   Coverage: ["key","date","contact_name","publication","article_title","article_url","subject","coverage_url","status"]
 };
 
 const WIDTHS = {
   Pitches: [90,90,180,150,120,220,240,55,100,70,140,130,190,230,420,110,220],
   Listicles: [120,90,150,240,240,110,150,130,190,230,420,110,240],
+  Contacts: [120,150,150,130,150,190,190,190,220,240,180,90,110],
   Coverage: [90,90,150,150,220,240,230,230,100]
 };
 
-const STATUS_COL = { Pitches: 16, Listicles: 12, Coverage: 9 };
+const STATUS_COL = { Pitches: 16, Listicles: 12, Contacts: 13, Coverage: 9 };
 
 const DASH = "Dashboard";
 const INDIGO = "#5b5bd6";
 const INDIGO_DARK = "#4646c6";
 const SOFT = "#eeefff";
-const PAPER = "#faf8f1";
-const INK = "#16122c";
+const INK = "#17182b";
 const MUTED = "#5f6278";
-const LINE = "#dcd8ca";
+const LINE = "#e4e6f0";
 
 const STATUS_COLORS = {
   "Covered": ["#e8f7ee", "#047857"],
@@ -51,26 +52,20 @@ function styleTab(name, sh) {
 
   sh.setFrozenRows(1);
   sh.setFrozenColumns(1);
-  sh.setTabColor(INK);
 
-  // Header band: ink on paper, matching the tool's own type.
   sh.getRange(1, 1, 1, n)
-    .setBackground(INK)
-    .setFontColor(PAPER)
-    .setFontFamily("Inter")
+    .setBackground(INDIGO_DARK)
+    .setFontColor("#ffffff")
     .setFontWeight("bold")
-    .setFontSize(11)
+    .setFontSize(10)
     .setVerticalAlignment("middle")
-    .setHorizontalAlignment("center")
-    .setWrap(true);
-  sh.setRowHeight(1, 40);
+    .setWrap(false);
+  sh.setRowHeight(1, 34);
 
   for (let i = 1; i <= n; i++) sh.setColumnWidth(i, WIDTHS[name][i - 1] || 140);
 
   if (lastRow > 1) {
     sh.getRange(2, 1, lastRow - 1, n)
-      .setBackground(PAPER)
-      .setFontFamily("Inter")
       .setVerticalAlignment("top")
       .setFontSize(10)
       .setFontColor(INK)
@@ -87,15 +82,12 @@ function styleTab(name, sh) {
       sh.getRange(2, 10, lastRow - 1, 1).setWrap(true);
       sh.getRange(2, 2, lastRow - 1, 1).setNumberFormat("yyyy-mm-dd");
     }
+    if (name === "Contacts") sh.getRange(2, 12, lastRow - 1, 1).setNumberFormat("yyyy-mm-dd");
     if (name === "Coverage") sh.getRange(2, 2, lastRow - 1, 1).setNumberFormat("yyyy-mm-dd");
   }
 
   try { const f = sh.getFilter(); if (f) f.remove(); } catch (e) {}
   try { sh.getRange(1, 1, Math.max(lastRow, 2), n).createFilter(); } catch (e) {}
-
-  // Hard rule under the header, the way the tool draws its 2px borders.
-  sh.getRange(1, 1, 1, n)
-    .setBorder(null, null, true, null, null, null, INK, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
 
   const statusCol = STATUS_COL[name];
   const rules = [];
@@ -194,9 +186,17 @@ function ensureDashboard() {
   put("Listicle coverage rate", '=IFERROR(COUNTIF(Listicles!L2:L,"Covered")/COUNTA(Listicles!A2:A),0)');
   blockEndMark("percent");
   blockStartMark();
+  put("Emails found", '=COUNTA(Pitches!M2:M)&" of "&COUNTA(Pitches!A2:A)');
   put("Average PR score", '=IFERROR(ROUND(AVERAGE(Pitches!J2:J),0),0)');
   put("Strong-fit targets", '=COUNTIF(Pitches!I2:I,"Strong fit")');
   put("Used articles", '=COUNTIF(Pitches!H2:H,"yes")');
+  blockEndMark("int");
+
+  section("MEDIA LIBRARY");
+  blockStartMark();
+  put("Saved contacts", '=IFERROR(COUNTA(Contacts!B2:B),0)');
+  put("Contacts with email", '=IFERROR(COUNTA(Contacts!F2:F),0)');
+  put("Outlets covered", '=IFERROR(COUNTA(UNIQUE(FILTER(Contacts!C2:C,Contacts!C2:C<>""))),0)');
   blockEndMark("int");
 
   section("PITCHES BY PUBLICATION");
@@ -208,12 +208,10 @@ function ensureDashboard() {
   put('=IFERROR(QUERY(Listicles!A2:M,"select C, count(A) where C is not null group by C order by count(A) desc label C \'Outlet\', count(A) \'Requests\'",0),"No data yet")');
 
   sh.getRange(1, 1, rows.length, 3).setValues(rows.map(function (r) { return [r[0], r[1], r[2]]; }));
-  sh.getRange(1, 1, Math.max(rows.length, 1), 6).setBackground(PAPER).setFontFamily("Inter");
-  sh.setTabColor(INDIGO_DARK);
 
   sh.getRange("A1:C1").merge()
-    .setBackground(INK)
-    .setFontColor(PAPER)
+    .setBackground(INDIGO_DARK)
+    .setFontColor("#ffffff")
     .setFontSize(16)
     .setFontWeight("bold")
     .setVerticalAlignment("middle")
@@ -227,7 +225,7 @@ function ensureDashboard() {
       .setBackground(SOFT)
       .setFontColor(INDIGO_DARK)
       .setFontWeight("bold")
-      .setFontSize(11)
+      .setFontSize(10)
       .setVerticalAlignment("middle");
     sh.setRowHeight(r, 30);
   });
@@ -275,20 +273,6 @@ function doPost(e) {
     if (!TABS[tab]) return out({ detail: "Unknown tab." });
 
     const headers = TABS[tab];
-
-    // Explicit clear: deletes data rows, keeps the header row and the
-    // formatting. Only ever runs when the app sends action:"clear".
-    if (body.action === "clear") {
-      const sh = getTab(tab);
-      const last = sh.getLastRow();
-      const cleared = last > 1 ? last - 1 : 0;
-      if (cleared > 0) {
-        sh.getRange(2, 1, cleared, Math.max(sh.getLastColumn(), headers.length)).clearContent();
-      }
-      ensureDashboard();
-      return out({ ok: true, cleared: cleared, tab: tab });
-    }
-
     const incoming = Array.isArray(body.rows) ? body.rows : [];
     if (!incoming.length) return out({ detail: "No rows." });
 
@@ -334,6 +318,7 @@ function doPost(e) {
         sh.getRange(last + 1, 10, toAppend.length, 1).setWrap(true);
         sh.getRange(last + 1, 2, toAppend.length, 1).setNumberFormat("yyyy-mm-dd");
       }
+      if (tab === "Contacts") sh.getRange(last + 1, 12, toAppend.length, 1).setNumberFormat("yyyy-mm-dd");
       if (tab === "Coverage") sh.getRange(last + 1, 2, toAppend.length, 1).setNumberFormat("yyyy-mm-dd");
     }
 

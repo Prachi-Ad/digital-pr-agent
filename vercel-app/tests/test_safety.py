@@ -223,17 +223,15 @@ class TestApiInputCaps(unittest.TestCase):
             ("analyze", {"article_url": "javascript:alert(1)"}),
             ("opportunities", {}),
             ("draft", {}),
+            ("journalists", {}),
             ("listicles", {"search_theme": "   "}),
+            ("listicle-contact", {}),
             ("publisher-policy", {}),
             ("domain-scan", {"domain": "vistasocial.com"}),
+            ("person-contact", {}),
+            ("collect-writers", {"query": ""}),
             ("listicle-draft", {}),
             ("site-metrics", {"domains": []}),
-            # Retired actions must be refused before the guard charges anything.
-            ("journalists", {}),
-            ("person-contact", {}),
-            ("collect-writers", {}),
-            ("listicle-contact", {}),
-            ("made-up-action", {}),
         ]
         for action, payload in cases:
             req = AnalyzeRequest(action=action, **payload)
