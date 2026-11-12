@@ -204,6 +204,16 @@ stays a non-sending demo.
 - **DR 50+ is strict** once any rating is loaded: under-50 and unknown are
   hidden, and unrated sites are counted separately with a "press Check DR"
   hint. Check DR now rates up to 25 sites per click.
+- **Regenerate drafts**: each pitch and listicle request has **Regenerate**. It
+  sends the previous subject/body plus a revision number, so the model writes a
+  clearly different version (new subject, new opening, different framing) instead
+  of repeating itself. Outreach also shows the contact's email with **Check
+  again** to re-run the lookup.
+- **Voice**: pitches are written in simple US English, conversational, with
+  contractions and short sentences, and explicitly avoid AI/template phrasing
+  ("leverage", "seamless", "data-driven", "I hope this email finds you well",
+  "furthermore", etc.). Verified live: two drafts differed in subject and body
+  with zero banned phrases.
 - Research budget raised: 150 calls/day per browser, 300/day per IP, 30 per 10
   minutes, 800/day global.
 - Budget safety: all requests are validated (`_precheck`) **before** a research
