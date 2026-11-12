@@ -23,6 +23,7 @@ from agent import (
     ListicleOpportunity,
     ListicleContact,
     analyze_article,
+    audit_own_pages,
     draft_journalist_pitch,
     draft_listicle_inclusion,
     find_opportunity_contact,
@@ -103,16 +104,22 @@ def drop_own_domain(payload: dict, key: str, url_field: str) -> dict:
     return payload
 
 
-def _check_domain(domain: str) -> str:
-    domain = (domain or "").strip().lower()
+def _bare_domain(domain: str) -> str:
+    """Normalise a domain without judging whether it is the brand's own site."""
+    value = (domain or "").strip().lower()
     for prefix in ("https://", "http://"):
-        if domain.startswith(prefix):
-            domain = domain[len(prefix):]
-    if domain.startswith("www."):
-        domain = domain[4:]
-    domain = domain.split("/")[0].split("?")[0].strip().rstrip(".")
-    if not domain or "." not in domain or " " in domain:
+        if value.startswith(prefix):
+            value = value[len(prefix):]
+    if value.startswith("www."):
+        value = value[4:]
+    value = value.split("/")[0].split("?")[0].strip().rstrip(".")
+    if not value or "." not in value or " " in value:
         raise HTTPException(status_code=400, detail="Enter a valid domain, e.g. example.com.")
+    return value
+
+
+def _check_domain(domain: str) -> str:
+    domain = _bare_domain(domain)
     if AGENT_BRAND_DOMAIN and (
         domain == AGENT_BRAND_DOMAIN or domain.endswith("." + AGENT_BRAND_DOMAIN)
     ):
@@ -213,6 +220,16 @@ def _dispatch(req: AnalyzeRequest):
             domain = _check_domain(req.domain)
             result = scan_domain_articles(domain, _text(req.topic_hint, 200)).model_dump()
             return drop_own_domain(result, "articles", "article_url")
+        if action in ("own-pages", "own_pages"):
+            domain = _bare_domain(req.domain)
+            if AGENT_BRAND_DOMAIN and not (
+                domain == AGENT_BRAND_DOMAIN or domain.endswith("." + AGENT_BRAND_DOMAIN)
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="That is not your brand domain. Use Find publisher targets for other sites.",
+                )
+            return audit_own_pages(domain, _text(req.topic_hint, 200)).model_dump()
         if action in ("person-contact", "person_contact"):
             if req.person is None or req.opportunity is None:
                 raise HTTPException(
@@ -304,6 +321,9 @@ def _precheck(req: AnalyzeRequest, action: str) -> None:
         return
     if action in ("domain-scan", "domain_scan"):
         _check_domain(req.domain)
+        return
+    if action in ("own-pages", "own_pages"):
+        _bare_domain(req.domain)
         return
     if action in ("person-contact", "person_contact"):
         if req.person is None or req.opportunity is None:

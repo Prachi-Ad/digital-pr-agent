@@ -347,6 +347,27 @@ class DomainScanResults(BaseModel):
     articles: list[DomainArticle] = Field(description="Recent articles ranked by PR-pitch suitability.")
 
 
+class OwnPage(BaseModel):
+    article_title: str = Field(description="Title of the article on the brand's own site.")
+    article_url: str = Field(description="Exact URL of the article on the brand's own site.")
+    published_date: str = Field(description="Publication date, or Unknown if unverified.")
+    topic: str = Field(description="The article's main topic.")
+    pitch_potential: str = Field(description="High, Medium, or Low pitch potential.")
+    why: str = Field(description="Why a journalist would care about this page's story or data.")
+    suggested_angle: str = Field(description="The angle to pitch to a journalist using this page.")
+    evidence: str = Field(description="The original data, statistic, example, or expert view in the page.")
+    journalist_beats: list[str] = Field(
+        default_factory=list,
+        description="Journalist beats or publication types to pitch this to.",
+    )
+
+
+class OwnPagesResults(BaseModel):
+    domain: str = Field(description="The brand domain that was audited.")
+    summary: str = Field(description="Short summary of the audit and its limitations.")
+    pages: list[OwnPage] = Field(description="Own pages ranked by pitch potential, strongest first.")
+
+
 class OpportunityContact(BaseModel):
     contact_name: str = Field(
         description=(
@@ -1207,8 +1228,48 @@ def _run_agent_in_worker(agent_to_run, prompt: str):
 
 
 # =========================================================
-# PUBLIC FUNCTIONS USED BY app.py
+# OWN PAGES AUDIT AGENT
 # =========================================================
+
+own_pages_agent = Agent(
+    name="Own Page Pitch Scout",
+    instructions=f"""
+You audit {BRAND_NAME}'s own website to find pages worth pitching to journalists.
+
+{EXPERT_RULES}
+
+This is the opposite of prospecting: the pages you list are OUR assets, and the
+goal is to pick the ones a journalist could build a story around.
+
+Research process:
+1. Search the brand's own domain (site: queries, blog index, resources, research
+   and press pages, 2-3 topic variations).
+2. Collect specific published pages: articles, original research, data studies,
+   surveys, guides with proprietary numbers, expert commentary pieces.
+3. Judge each page on pitch potential:
+   - High: original data or research, a surprising number, a strong expert
+     point of view, or a timely topic a journalist could cover now.
+   - Medium: useful practical content with a credible angle but no unique data.
+   - Low: product updates, feature announcements, generic how-tos, sales pages.
+4. Name the specific evidence inside the page (the statistic, dataset, quote, or
+   example) that makes it pitchable. Never invent numbers.
+5. Suggest the angle to pitch and the journalist beats it suits.
+6. Return up to 8 pages, strongest first.
+
+Rules:
+- Only list pages on the brand's own domain.
+- Do not invent titles, URLs, dates, statistics, or research findings.
+- Use Unknown when a date cannot be verified.
+- Product announcements and pricing pages are Low at best.
+- Do not pitch anyone; this is research only.
+
+Return only the requested structured fields.
+""",
+    tools=[web_search],
+    model=MODEL,
+    model_settings=MODEL_SETTINGS,
+    output_type=OwnPagesResults,
+)
 
 def analyze_article(article_url: str) -> AssetAnalysis:
     """Analyze an article and return structured asset intelligence."""
@@ -1292,6 +1353,37 @@ Find the domain's recent articles, judge each one's suitability as a PR pitch
 target, and rank the strongest first. Return up to 8.
 """
     return _run_agent_in_worker(domain_agent, prompt)
+
+
+def audit_own_pages(domain: str, topic_hint: str = "") -> OwnPagesResults:
+    """Audit the brand's own site for pages worth pitching to journalists."""
+    domain = (domain or "").strip().lower()
+    domain = domain.removeprefix("https://").removeprefix("http://").removeprefix("www.")
+    domain = domain.split("/")[0]
+    hint = _safe_optional_hint(topic_hint)
+    prompt = f"""
+{INJECTION_NOTE}
+
+Audit our own site for pages worth pitching. Domain:
+{wrap_user_input(domain, 200)}
+
+Brand: {BRAND_NAME} ({PRODUCT_DESCRIPTION})
+"""
+    if hint:
+        prompt += f"""
+Prefer pages about this topic, but include other strong candidates:
+{wrap_user_input(hint, 200)}
+"""
+    prompt += """
+List up to 8 pages, ranked by pitch potential. For each, name the evidence inside
+the page (data, research, expert view) and the angle a journalist could cover.
+"""
+    return _run_agent_in_worker(own_pages_agent, prompt)
+
+
+def _safe_optional_hint(value: object) -> str:
+    text = str(value or "").strip()
+    return text[:200]
 
 
 def research_journalists(

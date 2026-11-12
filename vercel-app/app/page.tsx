@@ -307,6 +307,7 @@ export default function Home() {
   const [topicHint, setTopicHint] = useState("");
   const [loadingScan, setLoadingScan] = useState(false);
   const [scanResult, setScanResult] = useState<AnyObj | null>(null);
+  const [ownPages, setOwnPages] = useState<AnyObj | null>(null);
   const [errScan, setErrScan] = useState<string | null>(null);
 
   // Already-used articles (persisted in this browser so pitched targets are not repeated)
@@ -1599,23 +1600,29 @@ export default function Home() {
       return;
     }
     const bare = domain.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
-    if (brandDomain && (bare === brandDomain || bare.endsWith(`.${brandDomain}`))) {
-      setErrScan(
-        `${bare} is your own site. Enter a publisher domain you want coverage from, e.g. hootsuite.com.`
-      );
-      return;
-    }
+    const isOwn = !!brandDomain && (bare === brandDomain || bare.endsWith(`.${brandDomain}`));
     setLoadingScan(true);
     setErrScan(null);
     setScanResult(null);
+    setOwnPages(null);
     setRetryMsg(null);
     try {
-      const data = await callApi(
-        "domain-scan",
-        { domain, topic_hint: topicHint.trim() },
-        (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
-      );
-      setScanResult(data);
+      if (isOwn) {
+        setRetryMsg("Auditing your own pages for pitch potential...");
+        const data = await callApi(
+          "own-pages",
+          { domain: bare, topic_hint: topicHint.trim() },
+          (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
+        );
+        setOwnPages(data);
+      } else {
+        const data = await callApi(
+          "domain-scan",
+          { domain: bare, topic_hint: topicHint.trim() },
+          (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
+        );
+        setScanResult(data);
+      }
     } catch (err: any) {
       setErrScan(err?.message || "Something went wrong");
     } finally {
@@ -2444,12 +2451,76 @@ export default function Home() {
                       </div>
                     </form>
                     <p className="meta" style={{ marginTop: 8 }}>
-                      One research call per scan. Results rank Strong fit first.
-                      {brandDomain
-                        ? ` Your own site (${brandDomain}) is excluded — enter a publisher domain.`
-                        : ""}
+                      One research call per scan. Publisher domains return pages to pitch to;{" "}
+                      {brandDomain ? `your own site (${brandDomain})` : "your own site"} returns your pages ranked by
+                      pitch potential.
                     </p>
                     {errScan && <Note tone="warn">{errScan}</Note>}
+                    {ownPages && (
+                      <div className="stack-sm" style={{ marginTop: 14 }}>
+                        <p className="step-caption">
+                          <strong>Your pitchable pages</strong> · {ownPages.summary}
+                        </p>
+                        {(ownPages.pages ?? []).map((p: AnyObj, i: number) => (
+                          <article className="card" key={`${p.article_url}-${i}`}>
+                            <div className="card-head">
+                              <div>
+                                <h2 className="card-title">
+                                  {p.article_title}{" "}
+                                  <span
+                                    className={`status-pill ${
+                                      p.pitch_potential === "High" ? "active" : ""
+                                    }`}
+                                  >
+                                    {p.pitch_potential} pitch potential
+                                  </span>
+                                </h2>
+                                <p className="meta">
+                                  {p.topic} · {p.published_date}
+                                </p>
+                              </div>
+                              {p.article_url?.startsWith("https://") && (
+                                <SafeA className="btn-secondary" url={p.article_url}>
+                                  Open page <ExternalLink size={15} />
+                                </SafeA>
+                              )}
+                            </div>
+                            <p className="body-text">
+                              <strong>Why a journalist cares:</strong> {shortText(p.why)}
+                            </p>
+                            <p className="body-text">
+                              <strong>Angle to pitch:</strong> {shortText(p.suggested_angle)}
+                            </p>
+                            {p.evidence && (
+                              <p className="meta">Evidence: {shortText(p.evidence, 220)}</p>
+                            )}
+                            {Array.isArray(p.journalist_beats) && p.journalist_beats.length > 0 && (
+                              <p className="meta">Beats: {p.journalist_beats.join(" · ")}</p>
+                            )}
+                            <div className="actions">
+                              <button
+                                className="btn-primary"
+                                onClick={() => useScannedArticle(p.article_url)}
+                                disabled={loadingAnalyze}
+                              >
+                                {loadingAnalyze && analyzingUrl === p.article_url ? (
+                                  <>
+                                    <Spinner /> Analyzing...
+                                  </>
+                                ) : (
+                                  <>
+                                    Use as pitch asset <ArrowRight size={16} />
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </article>
+                        ))}
+                        {(!ownPages.pages || ownPages.pages.length === 0) && (
+                          <Note tone="warn">No pitchable pages were found. Try a topic focus.</Note>
+                        )}
+                      </div>
+                    )}
                     {scanResult && (
                       <div className="stack-sm" style={{ marginTop: 14 }}>
                         <p className="step-caption">
