@@ -2276,3 +2276,120 @@ select.input:focus {
     border-bottom: 2px solid var(--ink);
   }
 }
+
+/* =========================================================
+   v4: fixed full-height rail, compact so it never clips
+   ========================================================= */
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 248px;
+  min-width: 248px;
+  height: 100vh;
+  height: 100dvh;
+  padding: 22px 20px 18px;
+  overflow-y: auto;
+  border-right: 2px solid var(--ink);
+  background: var(--bg);
+  z-index: 20;
+}
+
+.main {
+  margin-left: 248px;
+  padding: 26px 56px 72px;
+}
+
+.sidebar-brand {
+  padding: 0 0 12px;
+  gap: 10px;
+}
+
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  font-size: 12px;
+  border-radius: 9px;
+}
+
+.brand-name {
+  font-size: 15.5px;
+}
+
+.brand-tagline {
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.brand-chip {
+  font-size: 10px;
+  padding: 6px 10px;
+  letter-spacing: 0.06em;
+}
+
+.sidebar-nav {
+  margin-top: 14px;
+  gap: 2px;
+}
+
+.nav-item {
+  padding: 9px 11px;
+  font-size: 13.5px;
+  gap: 9px;
+}
+
+.sidebar-divider {
+  margin: 14px 0;
+}
+
+.sidebar-meta {
+  gap: 6px;
+  font-size: 12px;
+}
+
+.sidebar-meta .btn-secondary {
+  margin-top: 6px;
+  width: 100%;
+  min-height: 36px;
+  font-size: 10.5px;
+  padding: 9px 12px;
+  letter-spacing: 0.08em;
+}
+
+.sidebar-note {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.app-shell {
+  display: block;
+  min-height: 100vh;
+}
+
+@media (max-width: 900px) {
+  .sidebar {
+    position: relative;
+    top: auto;
+    left: auto;
+    bottom: auto;
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    padding: 16px 18px 14px;
+    border-right: 0;
+    border-bottom: 2px solid var(--ink);
+    overflow: visible;
+  }
+
+  .main {
+    margin-left: 0;
+    padding: 18px 20px 56px;
+  }
+
+  .sidebar-meta {
+    font-size: 12.5px;
+  }
+}
