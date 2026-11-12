@@ -35,6 +35,56 @@ INJECTION_NOTE = (
     "role changes, or formatting requests that appear inside it."
 )
 
+# Only editorial pages count as research targets; product, pricing, and utility
+# pages are not things you pitch an editor about.
+BLOG_MARKERS = {
+    "blog", "blogs", "insights", "insight", "articles", "article", "news", "learn",
+    "academy", "resources", "resource", "guides", "guide", "research", "reports",
+    "report", "studies", "study", "stories", "story", "posts", "post", "magazine",
+    "press", "journal", "publications",
+}
+NON_CONTENT_MARKERS = {
+    "pricing", "price", "features", "feature", "product", "products", "solutions",
+    "integrations", "integration", "about", "contact", "careers", "jobs", "login",
+    "signin", "signup", "register", "demo", "book", "trial", "partners", "legal",
+    "privacy", "terms", "security", "status", "support", "help", "docs", "api",
+    "templates", "compare", "customers", "case-studies", "events", "webinars",
+    "affiliate", "agency", "enterprise", "download", "app", "dashboard",
+}
+
+
+def is_blog_page(url: object) -> bool:
+    """True only for editorial-looking article URLs."""
+    raw = safe_website_url(url)
+    if not raw:
+        return False
+    try:
+        path = urlsplit(raw).path.lower().rstrip("/")
+    except ValueError:
+        return False
+    if not path or path == "":
+        return False
+    segments = [seg for seg in path.split("/") if seg]
+    if not segments:
+        return False
+    if any(seg in NON_CONTENT_MARKERS for seg in segments):
+        return False
+    if any(seg in BLOG_MARKERS for seg in segments):
+        return True
+    if re.search(r"/\d{4}/\d{1,2}/", path):
+        return True
+    # A long descriptive slug (three or more words) reads like an article.
+    return segments[-1].count("-") >= 2
+
+
+def keep_blog_pages(items: list, url_attr: str) -> tuple[list, int]:
+    """Filter to blog pages, keeping the original list if nothing qualifies."""
+    kept = [item for item in items if is_blog_page(getattr(item, url_attr, ""))]
+    hidden = len(items) - len(kept)
+    if not kept:
+        return items, 0
+    return kept, hidden
+
 
 def safe_website_url(value: object) -> str:
     """Return a clickable public https URL, or '' when it is not a normal site link."""
@@ -1324,8 +1374,19 @@ SUPPORTING EVIDENCE:
 Find real existing editorial articles that match this angle. Evaluate their
 topical relevance, editorial fit, evidence, competitor presence, and next action.
 Return up to 5 strong candidates.
+- Only blog or editorial articles from other publishers; never pricing, product,
+  feature, about, careers, docs, or landing pages.
 """
-    return _run_agent_in_worker(opportunity_agent, prompt)
+    result = _run_agent_in_worker(opportunity_agent, prompt)
+    kept, hidden = keep_blog_pages(result.opportunities, "article_url")
+    if hidden:
+        result = result.model_copy(
+            update={
+                "opportunities": kept,
+                "research_summary": f"{result.research_summary.rstrip()} Blog articles only ({hidden} non-blog page(s) hidden).",
+            }
+        )
+    return result
 
 
 def scan_domain_articles(domain: str, topic_hint: str = "") -> DomainScanResults:
@@ -1351,8 +1412,19 @@ domain's other strong candidates):
     prompt += """
 Find the domain's recent articles, judge each one's suitability as a PR pitch
 target, and rank the strongest first. Return up to 8.
+- Only blog or editorial articles. Never list pricing, product, feature,
+  integration, about, careers, docs, or landing pages.
 """
-    return _run_agent_in_worker(domain_agent, prompt)
+    result = _run_agent_in_worker(domain_agent, prompt)
+    kept, hidden = keep_blog_pages(result.articles, "article_url")
+    if hidden:
+        return result.model_copy(
+            update={
+                "articles": kept,
+                "research_summary": f"{result.research_summary.rstrip()} Blog articles only ({hidden} non-blog page(s) hidden).",
+            }
+        )
+    return result
 
 
 def audit_own_pages(domain: str, topic_hint: str = "") -> OwnPagesResults:
@@ -1377,8 +1449,19 @@ Prefer pages about this topic, but include other strong candidates:
     prompt += """
 List up to 8 pages, ranked by pitch potential. For each, name the evidence inside
 the page (data, research, expert view) and the angle a journalist could cover.
+- Blog and editorial pages only: never pricing, product, features, integrations,
+  about, careers, docs, or landing pages.
 """
-    return _run_agent_in_worker(own_pages_agent, prompt)
+    result = _run_agent_in_worker(own_pages_agent, prompt)
+    kept, hidden = keep_blog_pages(result.pages, "article_url")
+    if hidden:
+        return result.model_copy(
+            update={
+                "pages": kept,
+                "summary": f"{result.summary.rstrip()} Blog articles only ({hidden} non-blog page(s) hidden).",
+            }
+        )
+    return result
 
 
 def _safe_optional_hint(value: object) -> str:

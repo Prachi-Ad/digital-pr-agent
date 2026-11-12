@@ -112,6 +112,32 @@ class TestWrapUserInput(unittest.TestCase):
         self.assertLessEqual(len(wrap_user_input("x" * 5000, 600)), 650)
 
 
+class TestBlogOnlyFilter(unittest.TestCase):
+    def test_accepts_editorial_pages(self):
+        from agent import is_blog_page
+
+        for url in [
+            "https://martech.org/how-to-tell-if-you-have-too-many-tools-in-your-stack/",
+            "https://vistasocial.com/insights/social-media-analytics",
+            "https://blog.hootsuite.com/social-media-analytics/",
+            "https://example.com/2026/10/some-post",
+        ]:
+            self.assertTrue(is_blog_page(url), url)
+
+    def test_rejects_product_and_utility_pages(self):
+        from agent import is_blog_page
+
+        for url in [
+            "https://vistasocial.com/",
+            "https://vistasocial.com/pricing",
+            "https://vistasocial.com/features",
+            "https://vistasocial.com/about",
+            "https://vistasocial.com/integrations/hootsuite",
+            "https://vistasocial.com/demo",
+        ]:
+            self.assertFalse(is_blog_page(url), url)
+
+
 class TestApiInputCaps(unittest.TestCase):
     def test_text_cap(self):
         self.assertEqual(_text("  abc  ", 2), "ab")
