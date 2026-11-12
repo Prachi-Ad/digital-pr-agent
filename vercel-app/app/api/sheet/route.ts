@@ -125,19 +125,59 @@ async function syncViaWebhook(tab: string, rows: any[][]) {
   return data;
 }
 
+async function clearViaWebhook(tab: string) {
+  const url = (process.env.SHEET_WEBHOOK_URL || "").trim();
+  const token = (process.env.SHEET_WEBHOOK_TOKEN || "").trim();
+  if (!url || !token) return null;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, tab, action: "clear" }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.detail || `Clear failed (${res.status}).`);
+  return data;
+}
+
 export async function POST(req: Request) {
   if (!isAuthenticated(req.headers.get("cookie"))) {
     return Response.json({ detail: "Sign in required." }, { status: 401 });
   }
   let rows: any[][] = [];
   let tab = TAB;
+  let action = "sync";
   try {
     const body = await req.json();
     rows = Array.isArray(body?.rows) ? body.rows : [];
     if (typeof body?.tab === "string" && HEADER_MAP[body.tab]) tab = body.tab;
+    if (body?.action === "clear") action = "clear";
   } catch {
     rows = [];
   }
+
+  if (action === "clear") {
+    // Only the webhook path can clear; the service-account path would need an
+    // explicit range delete and is not configured here.
+    if (!(process.env.SHEET_WEBHOOK_URL || "").trim()) {
+      return Response.json(
+        { detail: "Clearing is only available with the Apps Script webhook." },
+        { status: 503 }
+      );
+    }
+    try {
+      const data = await clearViaWebhook(tab);
+      if (!data) throw new Error("Webhook not configured.");
+      if (typeof data.cleared !== "number") {
+        throw new Error(
+          "The deployed Apps Script does not support clearing yet. Copy the setup script again, paste it in Apps Script, then Deploy → Manage deployments → New version."
+        );
+      }
+      return Response.json({ ok: true, tab, cleared: data.cleared }, { status: 200 });
+    } catch (err: any) {
+      return Response.json({ detail: String(err?.message || err).slice(0, 300) }, { status: 502 });
+    }
+  }
+
   const headers = HEADER_MAP[tab];
   rows = rows.filter((r) => Array.isArray(r) && r.length === headers.length);
   if (rows.length === 0) {

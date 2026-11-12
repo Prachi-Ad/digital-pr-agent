@@ -30,7 +30,7 @@ publicly published address) is research and stays.
 | --- | --- | --- |
 | Sign-in | `/login` | Shared password gate, signed `pr_auth` cookie |
 | App | `/` | Workspace → Research Library → Settings |
-| Sheet sync | `/api/sheet` | Apps Script webhook; upsert by key. `GET ?probe=1` checks that the deployment answers (it does not test the token). |
+| Sheet sync | `/api/sheet` | Apps Script webhook; upsert by key. Manual only — nothing is written unless a Sync button is pressed. `POST {action:"clear", tab}` deletes data rows in one tab. `GET ?probe=1` checks that the deployment answers (it does not test the token). |
 | Token | `/api/token` | Short-lived HMAC for the Python API |
 | Model API | `/api/analyze` | `action`-based; also `GET` = health + budget |
 | LLM/markdown | `/llm`, `/llms.txt`, `/skills/seo-aeo-digital-pr.md` | Public, no login |
@@ -112,6 +112,15 @@ Script source lives at `vercel-app/apps-script/pitch-sheet.gs` (token redacted) 
 served at `/apps-script/pitch-sheet.js` for the "Copy setup script" button.
 Rule: every Apps Script change needs **Deploy → Manage deployments → New version**, and
 a *new deployment* yields a **new `/exec` URL** that must be re-entered in Vercel.
+
+**Writes are manual only.** There is no auto-sync: nothing reaches the sheet on load, after
+a draft, or after a status change. Pitches/Listicles/Coverage go out from a Sync button in
+Outreach or Settings; Contacts from Research Library → Sync contacts.
+
+**Clearing** is per tab: Settings → Google Sheet sync → pick a tab → Clear. The Apps Script
+must be the version that understands `{action:"clear"}` (it deletes data rows, keeps the
+header rows and formatting). An older deployment answers `No rows.`, which the app reports
+as "does not support clearing yet" — update the script and deploy a new version.
 
 ## 8. Behaviour rules now enforced
 

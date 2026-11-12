@@ -273,6 +273,19 @@ function doPost(e) {
     if (!TABS[tab]) return out({ detail: "Unknown tab." });
 
     const headers = TABS[tab];
+
+    // Explicit clear: deletes data rows, keeps the two header rows and the
+    // formatting. Only ever runs when the app sends action:"clear".
+    if (body.action === "clear") {
+      const sh = getTab(tab);
+      const last = sh.getLastRow();
+      const cleared = last > 2 ? last - 2 : 0;
+      if (cleared > 0) {
+        sh.getRange(3, 1, cleared, Math.max(sh.getLastColumn(), headers.length)).clearContent();
+      }
+      return out({ ok: true, cleared: cleared, tab: tab });
+    }
+
     const incoming = Array.isArray(body.rows) ? body.rows : [];
     if (!incoming.length) return out({ detail: "No rows." });
 

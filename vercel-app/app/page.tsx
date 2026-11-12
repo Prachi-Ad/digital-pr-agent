@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   ArrowRight,
@@ -912,30 +912,50 @@ export default function Home() {
     const left =
       quota && typeof quota.remaining === "number" ? `, ${quota.remaining} can run right now` : "";
     return window.confirm(`${label} will use ${count} research calls${left}. Continue?`);
-  }  // Auto-sync to the sheet after pitch writing / status changes.
-  const AUTO_SYNC_KEY = "pr_autosync_v1";
-  const [autoSync, setAutoSync] = useState<boolean>(() => {
-    try {
-      const raw = typeof window !== "undefined" ? window.localStorage.getItem(AUTO_SYNC_KEY) : null;
-      return raw === null ? true : raw === "1";
-    } catch {
-      return true;
-    }
-  });
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(AUTO_SYNC_KEY, autoSync ? "1" : "0");
-    } catch {
-      // ignore
-    }
-  }, [autoSync]);
+  }
 
-  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Sheet sync happens only when you press a Sync button. Nothing is written to
+  // the sheet automatically, on load, or after a status change.
 
   // Sheet connection status
   const [sheetStatus, setSheetStatus] = useState<AnyObj | null>(null);
   const [sheetProbe, setSheetProbe] = useState<{ ok: boolean; text: string } | null>(null);
   const [checkingSheet, setCheckingSheet] = useState(false);
+  const [clearTab, setClearTab] = useState("Pitches");
+  const [clearing, setClearing] = useState(false);
+
+  async function clearSheetTab() {
+    const target = clearTab;
+    if (
+      !window.confirm(
+        `Delete every data row in the ${target} tab? Headers and formatting stay. This cannot be undone from the app.`
+      )
+    ) {
+      return;
+    }
+    setClearing(true);
+    setSyncMsg(null);
+    setSyncErr(null);
+    try {
+      const res = await fetch("/api/sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear", tab: target }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.detail || `Clear failed (${res.status}).`);
+      if (typeof data?.cleared !== "number") {
+        throw new Error(
+          "The deployed Apps Script does not support clearing yet. Copy the setup script again, paste it in Apps Script, then Deploy → Manage deployments → New version."
+        );
+      }
+      setSyncMsg(`Cleared ${data.cleared} row(s) from ${target}.`);
+    } catch (err: any) {
+      setSyncErr(err?.message || "Clear failed.");
+    } finally {
+      setClearing(false);
+    }
+  }
   async function testSheetConnection() {
     setCheckingSheet(true);
     try {
@@ -1058,7 +1078,6 @@ export default function Home() {
       mediaLibrary,
       pitchOutcomes,
       campaigns,
-      autoSync,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1113,7 +1132,6 @@ export default function Home() {
         data.pitchOutcomes && typeof data.pitchOutcomes === "object" ? data.pitchOutcomes : {}
       );
       setCampaigns(data.campaigns && typeof data.campaigns === "object" ? data.campaigns : {});
-      if (typeof data.autoSync === "boolean") setAutoSync(data.autoSync);
       setBackupMsg(
         `Imported ${Object.keys(data.campaigns || {}).length} campaigns, ${Object.keys(data.mediaLibrary || {}).length} contacts, ${normed.length} used marks, ${
           Array.isArray(data.blockedDomains) ? data.blockedDomains.length : 0
@@ -1302,16 +1320,7 @@ export default function Home() {
     }
   }
 
-  // Auto-sync: state-driven so it always sees the latest drafts.
-  useEffect(() => {
-    if (!autoSync) return;
-    if (Object.keys(drafts).length === 0 && Object.keys(listicleDrafts).length === 0) return;
-    const t = setTimeout(() => {
-      void syncToSheet(true);
-    }, 2000);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drafts, listicleDrafts, pitchOutcomes, autoSync]);
+  // Auto-sync removed: the sheet is written only by an explicit Sync action.
 
   function buildListicleCoverageRows(): string[][] {
     const rows: string[][] = [];
@@ -3678,14 +3687,6 @@ export default function Home() {
                         {syncing ? "Syncing..." : "Sync to Google Sheet"}
                       </button>
                     )}
-                    <label className="meta" style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <input
-                        type="checkbox"
-                        checked={autoSync}
-                        onChange={(e) => setAutoSync(e.target.checked)}
-                      />
-                      Auto-sync
-                    </label>
                   </div>
 
                   {Object.keys(drafts).length > 0 && (
@@ -4855,8 +4856,8 @@ export default function Home() {
                   )}
                   {sheetProbe && <Note tone={sheetProbe.ok ? "info" : "warn"}>{sheetProbe.text}</Note>}
                   <div className="setting-row">
-                    <span>Auto-sync after pitches and status changes</span>
-                    <strong>{autoSync ? "On" : "Off"}</strong>
+                    <span>Writes to the sheet</span>
+                    <strong>Only when you press Sync</strong>
                   </div>
                   <div className="actions">
                     <button className="btn-secondary" onClick={probeSheetConnection} disabled={checkingSheet}>
@@ -4869,6 +4870,29 @@ export default function Home() {
                     <button className="btn-secondary" onClick={() => syncToSheet()} disabled={syncing}>
                       {syncing ? <Spinner /> : <Server size={16} />}
                       Sync now
+                    </button>
+                  </div>
+                  <div className="divider" />
+                  <div className="actions">
+                    <label className="meta" htmlFor="clear-tab" style={{ alignSelf: "center" }}>
+                      Clear a tab
+                    </label>
+                    <select
+                      id="clear-tab"
+                      className="input"
+                      style={{ maxWidth: 170 }}
+                      value={clearTab}
+                      onChange={(e) => setClearTab(e.target.value)}
+                    >
+                      {["Pitches", "Listicles", "Contacts", "Coverage"].map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    <button className="btn-secondary" onClick={clearSheetTab} disabled={clearing}>
+                      {clearing ? <Spinner /> : <X size={16} />}
+                      Clear {clearTab}
                     </button>
                   </div>
                   {!sheetStatus?.configured && sheetStatus !== null && (
