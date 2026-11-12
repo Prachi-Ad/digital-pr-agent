@@ -505,6 +505,7 @@ export default function Home() {
 
   const [loadingDraft, setLoadingDraft] = useState<string | null>(null);
   const [errDraft, setErrDraft] = useState<string | null>(null);
+  const [draftVariants, setDraftVariants] = useState<Record<string, number>>({});
   const [checkedPeople, setCheckedPeople] = useState<string[]>([]);
   const [emailByPerson, setEmailByPerson] = useState<Record<string, AnyObj>>({});
   const [loadingEmail, setLoadingEmail] = useState<string | null>(null);
@@ -1541,18 +1542,30 @@ export default function Home() {
 
   async function writeListicleDraft(item: AnyObj, person: AnyObj) {
     const key = listDraftKey(item.listicle_url, person.contact_name);
+    const existing = listicleDrafts[key];
+    const variant = existing ? (draftVariants[key] || 0) + 1 : draftVariants[key] || 0;
     setLoadingListDraft(key);
     setErrListDraft(null);
     setRetryMsg(null);
     try {
       const data = await callApi(
         "listicle-draft",
-        { item, contact: person },
+        {
+          item,
+          contact: person,
+          variant,
+          previous_subject: existing?.subject_line || "",
+          previous_body: existing?.message_body || "",
+        },
         (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
       );
-      setListicleDrafts((current) => ({ ...current, [key]: { ...data, __item: item } }));
+      setListicleDrafts((current) => ({
+        ...current,
+        [key]: { ...data, __item: item, __contact: person },
+      }));
+      setDraftVariants((current) => ({ ...current, [key]: variant }));
       markUrlsUsed([item.listicle_url]);
-      setListicleStep("Outreach");
+      if (!existing) setListicleStep("Outreach");
     } catch (err: any) {
       setErrListDraft(err?.message || "Draft generation failed");
     } finally {
@@ -1887,15 +1900,16 @@ export default function Home() {
     setErrJourn(null);
   }
 
-  async function findEmailFor(person: AnyObj) {
-    if (!selectedOpp) return;
-    const key = personKey(person.name);
+  async function findEmailFor(person: AnyObj, opportunity?: AnyObj | null) {
+    const opp = opportunity ?? selectedOpp;
+    if (!opp) return;
+    const key = draftKey(oppKey(opp), person.name);
     setLoadingEmail(key);
     setRetryMsg(null);
     try {
       const data = await callApi(
         "person-contact",
-        { person, opportunity: selectedOpp },
+        { person, opportunity: opp },
         (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
       );
       setEmailByPerson((current) => ({ ...current, [key]: data }));
@@ -2098,21 +2112,36 @@ export default function Home() {
     });
   }
 
-  async function writeDraft(person: AnyObj) {
-    if (!selectedAngle || !selectedOpp) return;
-    const key = draftKey(oppKey(selectedOpp), person.name);
+  async function writeDraft(person: AnyObj, opportunity?: AnyObj | null, angle?: AnyObj | null) {
+    const opp = opportunity ?? selectedOpp;
+    const ang = angle ?? selectedAngle;
+    if (!ang || !opp) return;
+    const key = draftKey(oppKey(opp), person.name);
+    const existing = drafts[key];
+    const variant = existing ? (draftVariants[key] || 0) + 1 : draftVariants[key] || 0;
     setLoadingDraft(key);
     setErrDraft(null);
     setRetryMsg(null);
     try {
       const data = await callApi(
         "draft",
-        { angle: selectedAngle, opportunity: selectedOpp, person },
+        {
+          angle: ang,
+          opportunity: opp,
+          person,
+          variant,
+          previous_subject: existing?.subject_line || "",
+          previous_body: existing?.message_body || "",
+        },
         (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
       );
-      setDrafts((current) => ({ ...current, [key]: data }));
-      markUrlsUsed([oppKey(selectedOpp)]);
-      setDigitalStep("Outreach");
+      setDrafts((current) => ({
+        ...current,
+        [key]: { ...data, __person: person, __opp: opp, __angle: ang },
+      }));
+      setDraftVariants((current) => ({ ...current, [key]: variant }));
+      markUrlsUsed([oppKey(opp)]);
+      if (!existing) setDigitalStep("Outreach");
     } catch (err: any) {
       setErrDraft(err?.message || "Draft generation failed");
     } finally {
@@ -3690,6 +3719,34 @@ export default function Home() {
                         <p className="body-text">
                           <strong>Subject:</strong> {draft.subject_line}
                         </p>
+                        {(() => {
+                          const person = draft.__person;
+                          const opp = draft.__opp;
+                          if (!person || !opp) return null;
+                          const emailRec = emailByPerson[draftKey(oppKey(opp), person.name)];
+                          return (
+                            <p className="meta" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                              <span>
+                                <strong>Email:</strong>{" "}
+                                {emailRec && !emailRec.__error
+                                  ? emailRec.email || "Not publicly found"
+                                  : "not checked"}
+                              </span>
+                              <button
+                                className="btn-ghost"
+                                onClick={() => findEmailFor(person, opp)}
+                                disabled={loadingEmail === draftKey(oppKey(opp), person.name)}
+                              >
+                                {loadingEmail === draftKey(oppKey(opp), person.name) ? (
+                                  <Spinner />
+                                ) : (
+                                  <Mail size={14} />
+                                )}
+                                {emailRec ? "Check again" : "Find email"}
+                              </button>
+                            </p>
+                          );
+                        })()}
                         <div className="draft-body">{draft.message_body}</div>
                         {Array.isArray(draft.pitch_checks) && draft.pitch_checks.length > 0 && (
                           <details className="plan" open>
@@ -3723,6 +3780,17 @@ export default function Home() {
                           >
                             <Download size={15} /> Download
                           </button>
+                          {draft.__person && draft.__opp && draft.__angle && (
+                            <button
+                              className="btn-primary"
+                              onClick={() => writeDraft(draft.__person, draft.__opp, draft.__angle)}
+                              disabled={loadingDraft === name}
+                              title="Write a different version of this pitch"
+                            >
+                              {loadingDraft === name ? <Spinner /> : <RefreshCw size={15} />}
+                              {loadingDraft === name ? "Rewriting..." : "Regenerate"}
+                            </button>
+                          )}
                         </div>
                         <details className="plan">
                           <summary>Facts to verify</summary>
@@ -4278,6 +4346,17 @@ export default function Home() {
                             </button>
                             {item.listicle_url?.startsWith("https://") && (
                               <SafeA className="btn-secondary" url={item.listicle_url}>Open listicle <ExternalLink size={15} /></SafeA>
+                            )}
+                            {d.__contact && (
+                              <button
+                                className="btn-primary"
+                                onClick={() => writeListicleDraft(item, d.__contact)}
+                                disabled={loadingListDraft === key}
+                                title="Write a different version of this request"
+                              >
+                                {loadingListDraft === key ? <Spinner /> : <RefreshCw size={15} />}
+                                {loadingListDraft === key ? "Rewriting..." : "Regenerate"}
+                              </button>
                             )}
                           </div>
                           <details className="plan">

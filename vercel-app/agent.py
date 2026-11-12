@@ -1019,13 +1019,22 @@ DIGITAL PR PITCH RULES:
   or leave it out.
 
 STYLE:
-- Plain, professional, specific, and human. No hype or fake urgency.
-- Short sentences and plain verbs. Never repeat a word or phrase (no "host a
-  hosted", "cap and expand capacity" style doubling). Cut filler such as
-  "data-driven", "plug-and-play", "actionable", "I hope this finds you well".
-- Subject line under 60 characters and specific to the target article.
-- The body is the email only: greeting, paragraphs, sign-off. No headings,
-  labels, or commentary about the pitch itself.
+- Write in simple US English, like one person emailing another. Conversational,
+  not corporate. Use contractions (I'm, we'd, it's) and short sentences.
+- Never sound like AI or a template. Avoid: "I hope this email finds you well",
+  "I wanted to reach out", "I'm reaching out to propose", "leverage", "seamless",
+  "robust", "cutting-edge", "data-driven", "actionable", "unlock", "elevate",
+  "delve", "landscape", "in today's fast-paced world", "game-changer", "synergy",
+  "empower", "streamline" (unless it's the plain best word), "furthermore",
+  "moreover", "additionally" at sentence start, and em-dash-heavy clauses.
+- Sound like a real person: one clear idea per sentence, everyday words, no
+  stacked clauses, no buzzwords, no exclamation marks.
+- Do not repeat a word or phrase in the same sentence ("host a hosted", "cap and
+  expand capacity").
+- Subject line under 60 characters, specific to the target article, written like
+  a person would type it.
+- The body is the email only: greeting, 2-3 short paragraphs, sign-off. No
+  headings, labels, bullet lists, or commentary about the pitch itself.
 - Use the supplied sender name and role exactly.
 - If a necessary fact is missing, leave a clear [verify: ...] placeholder and list it
   in facts_to_verify.
@@ -1637,6 +1646,9 @@ def draft_journalist_pitch(
     angle_context: str = "",
     sender_name: str = "Prachi",
     sender_role: str = "SEO Specialist",
+    variant: int = 0,
+    previous_subject: str = "",
+    previous_body: str = "",
 ) -> OutreachDraft:
     """Draft a personalized Digital PR pitch for human review. Never sends."""
     prompt = f"""
@@ -1682,6 +1694,18 @@ facts_to_verify. If the person or route is Unknown, use 'Official publication
 contact route' as the channel and note that the route must be verified.
 """
 
+    if variant > 0:
+        prompt += f"""
+REVISION {variant}: the human did not like the previous draft. Write a clearly
+different version: a different subject line, a different opening sentence, and a
+different way of framing the offer (for example lead with the data, the reader
+question, or the practical example instead). Do not copy phrases from it.
+
+PREVIOUS SUBJECT (avoid): {wrap_user_input(previous_subject, 200)}
+PREVIOUS BODY (avoid reusing its wording):
+{wrap_user_input(previous_body, 1200)}
+"""
+
     draft = _run_agent_in_worker(outreach_draft_agent, prompt)
     draft.message_body = _trim_to_words(draft.message_body)
     return draft
@@ -1690,6 +1714,9 @@ contact route' as the channel and note that the route must be verified.
 def draft_listicle_inclusion(
     item: ListicleOpportunity,
     contact: ListicleContact,
+    variant: int = 0,
+    previous_subject: str = "",
+    previous_body: str = "",
 ) -> OutreachDraft:
     """Draft a listicle inclusion request for human review. Never sends."""
     prompt = f"""
@@ -1720,8 +1747,20 @@ Route: {contact.contact_method}
 Why this contact: {contact.why_this_contact}
 Evidence: {contact.evidence}
 
-Rules:
-- 80-130 words in the message body, max 3 short paragraphs, subject under 60 characters.
+STYLE:
+- 80-130 words, max 3 short paragraphs.
+- Write in simple US English, like one person emailing another. Conversational,
+  not corporate. Use contractions and short sentences.
+- Never sound like AI or a template. Avoid: "I hope this email finds you well",
+  "I wanted to reach out", "leverage", "seamless", "robust", "cutting-edge",
+  "data-driven", "actionable", "unlock", "elevate", "delve", "landscape",
+  "game-changer", "synergy", "empower", "furthermore", "moreover", and starting
+  sentences with "Additionally".
+- Subject line under 60 characters, written like a person would type it.
+- The body is the email only: greeting, 2-3 short paragraphs, sign-off. No
+  headings, labels, or bullet lists.
+- Use the supplied sender name and role exactly.
+- If a necessary fact is missing, use a [verify: ...] placeholder and list it.
 - Name the exact listicle, say specifically where the brand would sit, and offer one
   useful verified detail (a product fact, data point, or resource).
 - Respect the documented route: if it is a form, affiliate, or sponsored route, write
@@ -1730,12 +1769,23 @@ Rules:
 - Use [verify: ...] for anything unconfirmed and list it in facts_to_verify.
 - outreach_type must be "Listicle inclusion request".
 """
+
+    if variant > 0:
+        prompt += f"""
+REVISION {variant}: the human did not like the previous request. Write a clearly
+different version with a different subject line and opening. Do not copy phrases.
+
+PREVIOUS SUBJECT (avoid): {wrap_user_input(previous_subject, 200)}
+PREVIOUS BODY (avoid reusing its wording):
+{wrap_user_input(previous_body, 1000)}
+"""
     draft = _run_agent_in_worker(outreach_draft_agent, prompt)
     draft.message_body = _trim_to_words(draft.message_body, 130)
     return draft
 
 
-def research_listicles(    search_theme: str,
+def research_listicles(
+    search_theme: str,
     related_queries: str = "",
     target_audience: str = "All relevant audiences",
     target_market: str = "Global English-language",

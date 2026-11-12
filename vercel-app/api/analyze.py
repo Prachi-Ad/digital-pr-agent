@@ -61,6 +61,9 @@ class AnalyzeRequest(BaseModel):
     max_results: int = 15
     item: ListicleOpportunity | None = None
     contact: ListicleContact | None = None
+    variant: int = 0
+    previous_subject: str = ""
+    previous_body: str = ""
 
 
 def _check_url(url: str) -> str:
@@ -158,6 +161,9 @@ def _dispatch(req: AnalyzeRequest):
                     or (req.angle.angle if req.angle is not None else ""),
                     1000,
                 ),
+                variant=max(0, min(9, int(req.variant or 0))),
+                previous_subject=_text(req.previous_subject, 200),
+                previous_body=_text(req.previous_body, 1200),
             ).model_dump()
         if action == "journalists":
             if req.angle is None or req.opportunity is None:
@@ -256,7 +262,13 @@ def _dispatch(req: AnalyzeRequest):
         if action in ("listicle-draft", "listicle_draft"):
             if req.item is None or req.contact is None:
                 raise HTTPException(status_code=400, detail="item and contact are required")
-            return draft_listicle_inclusion(req.item, req.contact).model_dump()
+            return draft_listicle_inclusion(
+                req.item,
+                req.contact,
+                variant=max(0, min(9, int(req.variant or 0))),
+                previous_subject=_text(req.previous_subject, 200),
+                previous_body=_text(req.previous_body, 1200),
+            ).model_dump()
         raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
     except HTTPException:
         raise
