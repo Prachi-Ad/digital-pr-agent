@@ -336,6 +336,54 @@ export default function Home() {
   });
   const [hideUsed, setHideUsed] = useState(false);
 
+  // Rejected sites are never suggested again (persisted in this browser).
+  const BLOCKED_KEY = "pr_blocked_domains_v1";
+  const [blockedDomains, setBlockedDomains] = useState<string[]>(() => {
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(BLOCKED_KEY) : null;
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter((d) => typeof d === "string") : [];
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(BLOCKED_KEY, JSON.stringify(blockedDomains));
+    } catch {
+      // Private-mode storage may be unavailable; the in-memory list still works.
+    }
+  }, [blockedDomains]);
+  const [blockedMsg, setBlockedMsg] = useState<string | null>(null);
+
+  function domainOfRaw(url: any): string {
+    try {
+      return new URL(String(url || "")).hostname.replace(/^www\./, "").toLowerCase();
+    } catch {
+      return "";
+    }
+  }
+
+  function isSiteBlocked(url: any): boolean {
+    const d = domainOfRaw(url);
+    if (!d) return false;
+    return blockedDomains.some((b) => d === b || d.endsWith(`.${b}`));
+  }
+
+  function blockSite(url: any, label?: string) {
+    const d = domainOfRaw(url);
+    if (!d) return;
+    if (!window.confirm(`Never suggest ${d} again?`)) return;
+    setBlockedDomains((current) => (current.includes(d) ? current : [...current, d].sort()));
+    setBlockedMsg(`${d} rejected — it will not be suggested again.`);
+  }
+
+  function unblockSite(domain: string) {
+    setBlockedDomains((current) => current.filter((d) => d !== domain));
+  }
+
+
+
   useEffect(() => {
     try {
       window.localStorage.setItem(USED_URLS_KEY, JSON.stringify(usedUrls));
@@ -411,6 +459,21 @@ export default function Home() {
         title={used ? "Remove the Used mark" : "Mark as already used so it is skipped next time"}
       >
         {used ? "✓ Used" : "Mark used"}
+      </button>
+    );
+  }
+
+  function RejectSiteButton({ url }: { url: any }) {
+    const domain = domainOfRaw(url);
+    if (!domain) return null;
+    return (
+      <button
+        type="button"
+        className="btn-ghost"
+        onClick={() => blockSite(url)}
+        title={`Reject ${domain}: it will never be suggested again`}
+      >
+        <X size={14} /> Reject site
       </button>
     );
   }
@@ -744,23 +807,37 @@ export default function Home() {
     const visible: T[] = [];
     let hiddenUsed = 0;
     let hiddenDr = 0;
-    let drKnown = false;
+    let hiddenBlocked = 0;
+    // With no ratings at all there is nothing to judge, so the list stays
+    // visible and the UI asks for Check DR. Once any rating exists the filter is
+    // strict: unrated, unknown, and below-cutoff sites are all hidden.
+    const anyRating = items.some((item) => {
+      const d = domainOf(getUrl(item));
+      const dr = d ? drByDomain[d] : undefined;
+      return dr !== undefined && dr !== null;
+    });
+    let drKnown = anyRating;
     for (const item of items) {
       const url = getUrl(item);
+      if (isSiteBlocked(url)) {
+        hiddenBlocked += 1;
+        continue;
+      }
       if (hideUsed && isUsed(url)) {
         hiddenUsed += 1;
         continue;
       }
       const d = domainOf(url);
       const dr = d ? drByDomain[d] : undefined;
-      if (dr !== undefined && dr !== null) drKnown = true;
-      if (drOnly && dr !== undefined && dr !== null && dr < DR_CUTOFF) {
-        hiddenDr += 1;
-        continue;
+      if (drOnly && anyRating) {
+        if (dr === undefined || dr === null || dr < DR_CUTOFF) {
+          hiddenDr += 1;
+          continue;
+        }
       }
       visible.push(item);
     }
-    return { visible, hiddenUsed, hiddenDr, drKnown };
+    return { visible, hiddenUsed, hiddenDr, hiddenBlocked, drKnown };
   }
 
   // One prospect per site: keeps the highest-scoring page and reports the rest.
@@ -798,9 +875,24 @@ export default function Home() {
     );
   }
 
-  function FilterNotes({ hiddenUsed, hiddenDr, drKnown }: { hiddenUsed: number; hiddenDr: number; drKnown: boolean }) {
+  function FilterNotes({
+    hiddenUsed,
+    hiddenDr,
+    hiddenBlocked = 0,
+    drKnown,
+  }: {
+    hiddenUsed: number;
+    hiddenDr: number;
+    hiddenBlocked?: number;
+    drKnown: boolean;
+  }) {
     return (
       <>
+        {hiddenBlocked > 0 && (
+          <p className="meta">
+            {hiddenBlocked} rejected site{hiddenBlocked === 1 ? "" : "s"} hidden. Manage them in Settings.
+          </p>
+        )}
         {hiddenUsed > 0 && (
           <p className="meta">
             {hiddenUsed} hidden by Hide used. Untick it to see everything.
@@ -917,6 +1009,7 @@ export default function Home() {
       version: 1,
       exportedAt: new Date().toISOString(),
       usedUrls,
+      blockedDomains,
       mediaLibrary,
       pitchOutcomes,
       campaigns,
@@ -931,7 +1024,7 @@ export default function Home() {
     URL.revokeObjectURL(url);
     setBackupErr(null);
     setBackupMsg(
-      `Exported ${Object.keys(campaigns).length} campaigns, ${Object.keys(mediaLibrary).length} contacts, ${usedUrls.length} used marks.`
+      `Exported ${Object.keys(campaigns).length} campaigns, ${Object.keys(mediaLibrary).length} contacts, ${usedUrls.length} used marks, ${blockedDomains.length} rejected sites.`
     );
   }
 
@@ -958,6 +1051,17 @@ export default function Home() {
           )
         : [];
       setUsedUrls(normed);
+      setBlockedDomains(
+        Array.isArray(data.blockedDomains)
+          ? Array.from(
+              new Set(
+                (data.blockedDomains as any[])
+                  .map((d) => String(d || "").trim().toLowerCase())
+                  .filter((d): d is string => Boolean(d))
+              )
+            )
+          : []
+      );
       setMediaLibrary(data.mediaLibrary && typeof data.mediaLibrary === "object" ? data.mediaLibrary : {});
       setPitchOutcomes(
         data.pitchOutcomes && typeof data.pitchOutcomes === "object" ? data.pitchOutcomes : {}
@@ -965,7 +1069,9 @@ export default function Home() {
       setCampaigns(data.campaigns && typeof data.campaigns === "object" ? data.campaigns : {});
       if (typeof data.autoSync === "boolean") setAutoSync(data.autoSync);
       setBackupMsg(
-        `Imported ${Object.keys(data.campaigns || {}).length} campaigns, ${Object.keys(data.mediaLibrary || {}).length} contacts, ${normed.length} used marks.`
+        `Imported ${Object.keys(data.campaigns || {}).length} campaigns, ${Object.keys(data.mediaLibrary || {}).length} contacts, ${normed.length} used marks, ${
+          Array.isArray(data.blockedDomains) ? data.blockedDomains.length : 0
+        } rejected sites.`
       );
     } catch (err: any) {
       setBackupErr(err?.message || "That file could not be imported.");
@@ -2671,6 +2777,7 @@ export default function Home() {
                                 )}
                               </button>
                               <UsedToggle url={a.article_url} />
+                              <RejectSiteButton url={a.article_url} />
                             </div>
                           </article>
                         ))}
@@ -3109,6 +3216,7 @@ export default function Home() {
                                   )}
                                 </button>
                                 <UsedToggle url={o.article_url} />
+                                <RejectSiteButton url={o.article_url} />
                               </div>
                             </article>
                           ))}
@@ -3124,6 +3232,7 @@ export default function Home() {
                                 <FilterNotes
                                   hiddenUsed={f.hiddenUsed}
                                   hiddenDr={f.hiddenDr}
+                                  hiddenBlocked={f.hiddenBlocked}
                                   drKnown={f.drKnown}
                                 />
                               </>
@@ -3879,6 +3988,7 @@ export default function Home() {
                               {policyByItem[item.listicle_url] ? "View policy ✓" : "Check policy"}
                             </button>
                             <UsedToggle url={item.listicle_url} />
+                            <RejectSiteButton url={item.listicle_url} />
                           </div>
 
                           {selectedItem === item &&
@@ -4010,6 +4120,7 @@ export default function Home() {
                             <FilterNotes
                               hiddenUsed={f.hiddenUsed}
                               hiddenDr={f.hiddenDr}
+                              hiddenBlocked={f.hiddenBlocked}
                               drKnown={f.drKnown}
                             />
                           </>
@@ -4587,6 +4698,34 @@ export default function Home() {
                   )}
                   {syncErr && <Note tone="warn">{syncErr}</Note>}
                   {syncMsg && <Note>{syncMsg}</Note>}
+                </section>
+
+                <section className="card">
+                  <div className="card-head">
+                    <div>
+                      <h2 className="section-title">Rejected sites</h2>
+                      <p className="meta">
+                        Sites you rejected are never suggested again in any list. Remove one to allow it back.
+                      </p>
+                    </div>
+                    <span className={`status-pill ${blockedDomains.length ? "active" : ""}`}>
+                      {blockedDomains.length} blocked
+                    </span>
+                  </div>
+                  {blockedDomains.length === 0 ? (
+                    <p className="meta">No sites rejected yet. Use Reject site on any prospect card.</p>
+                  ) : (
+                    <div className="stack-sm" style={{ marginTop: 8 }}>
+                      {blockedDomains.map((d) => (
+                        <div className="setting-row" key={d}>
+                          <span>{d}</span>
+                          <button className="btn-ghost" onClick={() => unblockSite(d)}>
+                            Allow again
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
 
                 <section className="card">
