@@ -451,9 +451,9 @@ class PROpportunity(BaseModel):
 
 
 class PRResearchResults(BaseModel):
-    selected_angle: str = Field(description="The PR angle being researched.")
-    research_summary: str = Field(description="A concise summary of the research findings.")
-    opportunities: list[PROpportunity] = Field(description="The strongest relevant editorial candidates.")
+    selected_angle: str = Field(default="", description="The PR angle being researched.")
+    research_summary: str = Field(default="", description="A concise summary of the research findings.")
+    opportunities: list[PROpportunity] = Field(default_factory=list, description="The strongest relevant editorial candidates.")
 
 
 class DomainArticle(BaseModel):
@@ -490,10 +490,10 @@ class DomainArticle(BaseModel):
 
 
 class DomainScanResults(BaseModel):
-    domain: str = Field(description="The domain that was scanned.")
-    publication_name: str = Field(description="Publication or website name behind the domain.")
-    research_summary: str = Field(description="A concise summary of what the scan found.")
-    articles: list[DomainArticle] = Field(description="Recent articles ranked by PR-pitch suitability.")
+    domain: str = Field(default="", description="The domain that was scanned.")
+    publication_name: str = Field(default="", description="Publication or website name behind the domain.")
+    research_summary: str = Field(default="", description="A concise summary of what the scan found.")
+    articles: list[DomainArticle] = Field(default_factory=list, description="Recent articles ranked by PR-pitch suitability.")
 
 
 class OwnPage(BaseModel):
@@ -512,9 +512,9 @@ class OwnPage(BaseModel):
 
 
 class OwnPagesResults(BaseModel):
-    domain: str = Field(description="The brand domain that was audited.")
-    summary: str = Field(description="Short summary of the audit and its limitations.")
-    pages: list[OwnPage] = Field(description="Own pages ranked by pitch potential, strongest first.")
+    domain: str = Field(default="", description="The brand domain that was audited.")
+    summary: str = Field(default="", description="Short summary of the audit and its limitations.")
+    pages: list[OwnPage] = Field(default_factory=list, description="Own pages ranked by pitch potential, strongest first.")
 
 
 class OpportunityContact(BaseModel):
@@ -627,57 +627,25 @@ class OutreachDraft(BaseModel):
 # =========================================================
 
 class JournalistProfile(BaseModel):
-    name: str = Field(
-        description="The journalist, writer, or editor's name. Do not guess."
-    )
-    publication: str = Field(
-        description="The publication where the person writes or edits."
-    )
-    current_role: str = Field(
-        description="Verified current role, or Unknown if it cannot be verified."
-    )
-    relevant_article_title: str = Field(
-        description="A specific relevant article written by this person."
-    )
-    relevant_article_url: str = Field(
-        description="The exact URL of that article."
-    )
-    article_date: str = Field(
-        description="Publication date in YYYY-MM-DD format, or Unknown."
-    )
-    topic_covered: str = Field(
-        description="The subject or beat demonstrated by their published work."
-    )
-    why_relevant: str = Field(
-        description="Why this person's work makes them a relevant target for this exact opportunity."
-    )
-    suggested_pitch_angle: str = Field(
-        description="A specific pitch approach linked to the verified article and the brand's contribution."
-    )
-    author_profile_or_contact_page: str = Field(
-        description="Verified author biography or official publication contact page URL, if available; otherwise Unknown."
-    )
-    evidence: str = Field(
-        description="What the research verified about this person and their relevance."
-    )
-    confidence: str = Field(
-        description="Use High, Medium, or Low, based on the evidence."
-    )
+    name: str = Field(default="", description="The journalist, writer, or editor's name. Do not guess.")
+    publication: str = Field(default="", description="The publication where the person writes or edits.")
+    current_role: str = Field(default="Unknown", description="Verified current role, or Unknown if it cannot be verified.")
+    relevant_article_title: str = Field(default="", description="A specific relevant article written by this person.")
+    relevant_article_url: str = Field(default="", description="The exact URL of that article.")
+    article_date: str = Field(default="Unknown", description="Publication date in YYYY-MM-DD format, or Unknown.")
+    topic_covered: str = Field(default="", description="The subject or beat demonstrated by their published work.")
+    why_relevant: str = Field(default="", description="Why this person's work makes them a relevant target for this exact opportunity.")
+    suggested_pitch_angle: str = Field(default="", description="A specific pitch approach linked to the verified article and the brand's contribution.")
+    author_profile_or_contact_page: str = Field(default="Unknown", description="Verified author biography or official publication contact page URL, if available; otherwise Unknown.")
+    evidence: str = Field(default="", description="What the research verified about this person and their relevance.")
+    confidence: str = Field(default="Low", description="Use High, Medium, or Low, based on the evidence.")
 
 
 class JournalistResearchResults(BaseModel):
-    selected_opportunity: str = Field(
-        description="The article/opportunity for which journalists were researched."
-    )
-    publication: str = Field(
-        description="The publication associated with the selected opportunity."
-    )
-    research_summary: str = Field(
-        description="Short summary of the journalist research and any limitations."
-    )
-    journalists: list[JournalistProfile] = Field(
-        description="Up to five evidence-supported, relevant journalists or writers."
-    )
+    selected_opportunity: str = Field(default="", description="The article/opportunity for which journalists were researched.")
+    publication: str = Field(default="", description="The publication associated with the selected opportunity.")
+    research_summary: str = Field(default="", description="Short summary of the journalist research and any limitations.")
+    journalists: list[JournalistProfile] = Field(default_factory=list, description="Up to five evidence-supported, relevant journalists or writers.")
 
 
 
@@ -1364,6 +1332,43 @@ def _run_agent_in_worker(agent_to_run, prompt: str):
     return future.result().final_output
 
 
+_SCHEMA_HINTS = (
+    "validation error",
+    "field required",
+    "invalid json",
+    "did not match schema",
+    "missing",
+)
+
+
+def _looks_like_schema_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(h in text for h in _SCHEMA_HINTS)
+
+
+def run_agent_safely(agent_to_run, prompt: str):
+    """Run an agent; retry once when the model's reply fails schema validation.
+
+    Structured-output failures were surfacing as hard 500s mid-batch, which made
+    one bad reply look like a broken workflow. A single repair attempt with an
+    explicit schema reminder fixes nearly all of them, and tolerant models catch
+    the rest.
+    """
+    try:
+        return _run_agent_in_worker(agent_to_run, prompt)
+    except Exception as exc:  # noqa: BLE001 - re-raised below when unrelated
+        if not _looks_like_schema_error(exc):
+            raise
+        repair = (
+            prompt
+            + "\n\nYour previous reply was rejected because it did not match the required "
+            "schema. Reply again as a single JSON object that includes EVERY required field, "
+            "using \"Unknown\" or an empty list where the research found nothing. Do not "
+            "omit keys and do not wrap the object in prose."
+        )
+        return _run_agent_in_worker(agent_to_run, repair)
+
+
 # =========================================================
 # OWN PAGES AUDIT AGENT
 # =========================================================
@@ -1423,7 +1428,7 @@ Analyze this exact {BRAND_NAME} article:
 Research the article first, then identify its content, evidence, data
 provenance, useful assets, and actionable PR angles.
 """
-    return _run_agent_in_worker(asset_agent, prompt)
+    return run_agent_safely(asset_agent, prompt)
 
 
 def research_opportunities(angle: PRAngle) -> PRResearchResults:
@@ -1464,7 +1469,7 @@ Return up to 5 strong candidates.
 - Only blog or editorial articles from other publishers; never pricing, product,
   feature, about, careers, docs, or landing pages.
 """
-    result = _run_agent_in_worker(opportunity_agent, prompt)
+    result = run_agent_safely(opportunity_agent, prompt)
     kept, hidden, fallback = keep_blog_pages(result.opportunities, "article_url")
     if hidden or fallback:
         result = result.model_copy(
@@ -1502,7 +1507,7 @@ target, and rank the strongest first. Return up to 8.
 - Only blog or editorial articles. Never list pricing, product, feature,
   integration, about, careers, docs, or landing pages.
 """
-    result = _run_agent_in_worker(domain_agent, prompt)
+    result = run_agent_safely(domain_agent, prompt)
     kept, hidden, fallback = keep_blog_pages(result.articles, "article_url")
     if hidden or fallback:
         return result.model_copy(
@@ -1539,7 +1544,7 @@ the page (data, research, expert view) and the angle a journalist could cover.
 - Blog and editorial pages only: never pricing, product, features, integrations,
   about, careers, docs, or landing pages.
 """
-    result = _run_agent_in_worker(own_pages_agent, prompt)
+    result = run_agent_safely(own_pages_agent, prompt)
     kept, hidden, fallback = keep_blog_pages(result.pages, "article_url")
     if hidden or fallback:
         return result.model_copy(
@@ -1592,7 +1597,7 @@ Never invent a person, email, or byline. Return an empty list only if neither a
 relevant person nor an official contact route can be verified.
 """
 
-    return _run_agent_in_worker(journalist_agent, prompt)
+    return run_agent_safely(journalist_agent, prompt)
 
 
 def collect_media_contacts(query: str) -> JournalistResearchResults:
@@ -1625,7 +1630,7 @@ Strict rules: no invented names, titles, articles, dates, or profile URLs; no
 inferred emails; Unknown when unverifiable; relevance over seniority. Explain
 for each person exactly why their published work makes them relevant.
 """
-    return _run_agent_in_worker(journalist_agent, prompt)
+    return run_agent_safely(journalist_agent, prompt)
 
 
 def find_opportunity_contact(opportunity: PROpportunity) -> OpportunityContact:
@@ -1648,7 +1653,7 @@ return the official content or editorial contact page or form. Never guess an
 email. Include the source URL and evidence.
 """
 
-    return _run_agent_in_worker(opportunity_contact_agent, prompt)
+    return run_agent_safely(opportunity_contact_agent, prompt)
 
 
 def research_person_contact(
@@ -1679,7 +1684,7 @@ infer, or construct an email address. Never use data-broker, scraped-email, or
 email-finder sites.
 """
 
-    return _run_agent_in_worker(opportunity_contact_agent, prompt)
+    return run_agent_safely(opportunity_contact_agent, prompt)
 
 
 def _trim_to_words(text: str, limit: int = 150) -> str:
@@ -1863,7 +1868,7 @@ PREVIOUS BODY (avoid reusing its wording):
 {wrap_user_input(previous_body, 1200)}
 """
 
-    draft = _run_agent_in_worker(outreach_draft_agent, prompt)
+    draft = run_agent_safely(outreach_draft_agent, prompt)
     draft.message_body = _trim_to_words(draft.message_body)
     return enforce_email_rules(draft, sender_name, sender_role, person.name)
 
@@ -1936,7 +1941,7 @@ PREVIOUS SUBJECT (avoid): {wrap_user_input(previous_subject, 200)}
 PREVIOUS BODY (avoid reusing its wording):
 {wrap_user_input(previous_body, 1000)}
 """
-    draft = _run_agent_in_worker(outreach_draft_agent, prompt)
+    draft = run_agent_safely(outreach_draft_agent, prompt)
     draft.message_body = _trim_to_words(draft.message_body, 130)
     return enforce_email_rules(draft, "Prachi", "SEO Specialist", contact.contact_name)
 
@@ -1995,7 +2000,7 @@ Return a deduplicated shortlist, up to the stated limit. Include fewer results i
 enough credible matches. Provide a clear research summary and evidence for every candidate.
 """
 
-    return _run_agent_in_worker(listicle_agent, prompt)
+    return run_agent_safely(listicle_agent, prompt)
 
 
 def research_listicle_contact(
@@ -2024,7 +2029,7 @@ contact cannot be verified, return the best official contact form/page and expla
 Do not contact the publisher.
 """
 
-    return _run_agent_in_worker(listicle_contact_agent, prompt)
+    return run_agent_safely(listicle_contact_agent, prompt)
 
 
 
@@ -2055,5 +2060,5 @@ the official vendor listing process if verified. If {BRAND_NAME} is already list
 Return the specific policy source URL and factual evidence. Never contact the publisher or submit forms.
 """
 
-    return _run_agent_in_worker(publisher_policy_agent, prompt)
+    return run_agent_safely(publisher_policy_agent, prompt)
 
