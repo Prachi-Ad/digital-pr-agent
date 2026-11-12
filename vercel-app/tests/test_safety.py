@@ -148,6 +148,41 @@ class TestBlogOnlyFilter(unittest.TestCase):
             self.assertFalse(is_blog_page(url), url)
 
 
+class TestEmailRules(unittest.TestCase):
+    def _draft(self, subject, body):
+        from agent import OutreachDraft
+
+        return OutreachDraft(
+            outreach_type="Digital PR pitch", channel="email", recipient_name="Alex",
+            recipient_role="Writer", publication="Test", target_title="T",
+            target_url="https://example.com/t", subject_line=subject, message_body=body,
+            personalization_evidence="x", asset_used="y", call_to_action="z",
+            facts_to_verify=[], compliance_notes="", confidence="Medium",
+        )
+
+    def test_rewrites_violations(self):
+        from agent import enforce_email_rules
+
+        draft = self._draft(
+            "I wanted to reach out about leveraging seamless synergies!",
+            "I hope this email finds you well.\n\n- We leverage data-driven insights.\n"
+            "- Robust and actionable results!\n\nFurthermore, we empower teams.\n\nThanks",
+        )
+        out = enforce_email_rules(draft, "Prachi", "SEO Specialist", "Alex Borden")
+        low = out.message_body.lower()
+        for banned in [
+            "leverage", "seamless", "robust", "data-driven", "actionable",
+            "empower", "furthermore", "i hope this email", "i wanted to reach out",
+        ]:
+            self.assertNotIn(banned, low + out.subject_line.lower(), banned)
+        self.assertTrue(out.message_body.startswith("Hi Alex,"))
+        self.assertEqual(out.message_body.count("Best,"), 1)
+        self.assertTrue(out.message_body.rstrip().endswith("SEO Specialist"))
+        self.assertLessEqual(len(out.subject_line), 60)
+        self.assertLessEqual(len(out.message_body.split()), 150)
+        self.assertNotIn("-", "\n".join(l[:1] for l in out.message_body.split("\n")))
+
+
 class TestApiInputCaps(unittest.TestCase):
     def test_text_cap(self):
         self.assertEqual(_text("  abc  ", 2), "ab")

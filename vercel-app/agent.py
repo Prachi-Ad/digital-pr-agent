@@ -221,8 +221,7 @@ if BRAND_DOMAIN.startswith("www."):
     BRAND_DOMAIN = BRAND_DOMAIN[4:]
 PRODUCT_DESCRIPTION = (os.environ.get("PRODUCT_DESCRIPTION") or os.environ.get("VISTA_PRODUCT_DESCRIPTION") or "a software product").strip() or "a software product"
 
-EXPERT_RULES = """
-Think like a senior SEO, AEO, and Digital PR strategist.
+EXPERT_RULES = """Think like a senior SEO, AEO, and Digital PR strategist.
 
 - Judge every opportunity on search intent, topical/entity fit, E-E-A-T, and
   answer-engine extractability, not on Domain Rating.
@@ -241,6 +240,92 @@ Think like a senior SEO, AEO, and Digital PR strategist.
 - Only use emails explicitly published on public pages. Never guess patterns.
 - Never invent statistics, citations, contacts, policies, or coverage.
 """
+
+# =========================================================
+# LOCKED EMAIL RULES
+# =========================================================
+# Every draft — first attempt, bulk, or regenerate — is written against these and
+# then checked by enforce_email_rules(). They are not style suggestions.
+
+BANNED_PHRASES = {
+    "i hope this email finds you well": "hi",
+    "i hope this finds you well": "hi",
+    "i hope you are well": "hi",
+    "i wanted to reach out": "I'm writing",
+    "i am reaching out": "I'm writing",
+    "i'm reaching out": "I'm writing",
+    "reach out": "get in touch",
+    "circle back": "follow up",
+    "touch base": "talk",
+    "leverage": "use",
+    "leveraging": "using",
+    "leverages": "uses",
+    "leveraged": "used",
+    "seamless": "simple",
+    "seamlessly": "simply",
+    "robust": "solid",
+    "cutting-edge": "new",
+    "cutting edge": "new",
+    "data-driven": "based on data",
+    "actionable": "practical",
+    "unlock": "get",
+    "elevate": "improve",
+    "delve into": "look at",
+    "delve": "dig",
+    "landscape": "space",
+    "game-changer": "big change",
+    "game changer": "big change",
+    "synergy": "teamwork",
+    "empower": "help",
+    "utilize": "use",
+    "utilise": "use",
+    "furthermore": "also",
+    "moreover": "also",
+    "additionally,": "Also,",
+    "in today's fast-paced world": "",
+    "best-in-class": "strong",
+    "world-class": "strong",
+    "holistic": "complete",
+    "streamline": "simplify",
+}
+
+EMAIL_RULES = """
+STRICT EMAIL RULES — every one of these must be true in the final text:
+
+1. Language: simple US English. Conversational, the way one person emails another.
+2. Use contractions (I'm, we'd, it's). Short sentences. One idea per sentence.
+3. Body length: 70-150 words. Never longer.
+4. Exactly one greeting, at the start, using the recipient's first name if known.
+   Otherwise use "Hi there,".
+5. Two or three short paragraphs. No bullet points, numbered lists, or headings.
+6. Exactly one clear ask, in the last paragraph, phrased as a low-pressure question.
+7. End with a sign-off and the sender name on its own line, then the sender role.
+8. Subject line: under 60 characters, plain language, no ALL CAPS, no emoji, no
+   exclamation marks, no clickbait.
+9. No AEO/SEO jargon, no "AEO", no answer-engine talk, no schema talk, no Domain
+   Rating talk, no link requests, no payment or sponsorship offers.
+10. Never invent facts, numbers, names, coverage, or customers. Use only supplied
+    research. Anything unconfirmed goes in [verify: ...] and facts_to_verify.
+11. Banned words and phrases (rewrite them, do not keep them): "I hope this email
+    finds you well", "I wanted to reach out", leverage, seamless, robust,
+    cutting-edge, data-driven, actionable, unlock, elevate, delve, landscape,
+    game-changer, synergy, empower, utilize, furthermore, moreover, additionally,
+    best-in-class, world-class, holistic, streamline, circle back, touch base.
+12. No em-dash piles, no semicolon-heavy sentences, no three-item lists inside a
+    sentence ("faster, cheaper, and better").
+13. Sound like a specific person who read their article, not a template.
+"""
+
+EMAIL_RULE_CHECKLIST = [
+    "length 70-150 words",
+    "two or three paragraphs",
+    "no bullets or headings",
+    "one clear ask",
+    "sign-off with name and role",
+    "subject under 60 characters",
+    "no banned phrases",
+    "no invented facts",
+]
 
 
 # =========================================================
@@ -978,6 +1063,8 @@ You prepare outreach drafts for a human to review and send manually on behalf of
 
 {EXPERT_RULES}
 
+{EMAIL_RULES}
+
 You never send anything. You never claim that a message was sent, a relationship exists,
 or a publisher has agreed to anything. The human remains responsible for every send.
 
@@ -986,51 +1073,28 @@ names, coverage, awards, partnerships, product capabilities, email addresses, re
 names, roles, contact routes, policies, deadlines, or commitments.
 
 DIGITAL PR PITCH RULES:
-- Hard limit: 150 words max in the message body, max 3 short paragraphs. Count
-  the words before returning; if over, cut whole sentences until it fits.
+- Body length 70-150 words, two or three short paragraphs. Count before returning.
 - Paragraph 1: one line on the recipient's specific article and what it covers well.
 - Paragraph 2: the single concrete thing the brand offers (data, expert comment,
   example, template). One offer only.
 - Paragraph 3: one low-pressure close with a single next step.
 - Every pitch must contain at least one verifiable proof: a cited statistic with
-  source and date, or a concrete named example. Vague claims ("data-driven",
-  "proven", "leading") without the underlying number or name are forbidden. If
-  no proof is verified, put a [verify: ...] placeholder where it belongs and
-  list it FIRST in facts_to_verify.
+  source and date, or a concrete named example. If no proof is verified, put a
+  [verify: ...] placeholder where it belongs and list it FIRST in facts_to_verify.
 - Reference the journalist's actual published work when supplied.
 - Do not ask for a link, mention Domain Rating, or offer payment.
 - The three-question test (answer all three before finishing):
-  1. Is this actually a story? Lead with the story, never the company. Name
-     what the audience learns that is new or surprising.
-  2. Why this journalist? Show relevance to their beat fast: cite their
-     specific recent work and why you thought of them in particular. Generic
-     mass-mail phrasing fails this test.
-  3. Why now? Give the timeliness hook: new research, breaking news, a seasonal
-     trend, or the larger industry conversation this connects to. No hook, no send.
-- Make credibility easy to evaluate: who was surveyed or observed, how many,
-  when the research was conducted, and who is available for interview. Use
-  [verify: ...] for anything unconfirmed.
+  1. Is this actually a story? Lead with the story, never the company.
+  2. Why this journalist? Cite their specific recent work.
+  3. Why now? Give the timeliness hook.
 - After writing, fill pitch_checks with one verdict line per question above.
 - Never include an AEO section: no "AEO core offer", no audience question, no
-  answer paragraph, no schema or format talk. The pitch must read like a normal
-  human email.
-- Never use labeled meta paragraphs such as "Asset:", "why it helps readers:",
-  or "Answer the brand can own:". Fold that information into natural sentences
-  or leave it out.
+  answer paragraph, no schema or format talk.
+- Never use labeled meta paragraphs such as "Asset:" or "Answer the brand can own:".
 
 STYLE:
-- Write in simple US English, like one person emailing another. Conversational,
-  not corporate. Use contractions (I'm, we'd, it's) and short sentences.
-- Never sound like AI or a template. Avoid: "I hope this email finds you well",
-  "I wanted to reach out", "I'm reaching out to propose", "leverage", "seamless",
-  "robust", "cutting-edge", "data-driven", "actionable", "unlock", "elevate",
-  "delve", "landscape", "in today's fast-paced world", "game-changer", "synergy",
-  "empower", "streamline" (unless it's the plain best word), "furthermore",
-  "moreover", "additionally" at sentence start, and em-dash-heavy clauses.
-- Sound like a real person: one clear idea per sentence, everyday words, no
-  stacked clauses, no buzzwords, no exclamation marks.
-- Do not repeat a word or phrase in the same sentence ("host a hosted", "cap and
-  expand capacity").
+- Follow the STRICT EMAIL RULES above exactly. They are checks, not preferences.
+- Do not repeat a word or phrase in the same sentence ("host a hosted").
 - Subject line under 60 characters, specific to the target article, written like
   a person would type it.
 - The body is the email only: greeting, 2-3 short paragraphs, sign-off. No
@@ -1640,6 +1704,90 @@ def _trim_to_words(text: str, limit: int = 150) -> str:
     return cut.rstrip() + "…"
 
 
+def enforce_email_rules(draft: OutreachDraft, sender_name: str, sender_role: str, recipient: str = "") -> OutreachDraft:
+    """Make a draft satisfy EMAIL_RULES mechanically.
+
+    The prompt asks for the rules; this function guarantees them, so a bad model
+    response can never ship a rambling, buzzwordy, bullet-pointed email.
+    """
+    body = (draft.message_body or "").replace("\r\n", "\n")
+
+    # 1. Flatten bullets, numbered lists, and markdown headings.
+    lines = []
+    for line in body.split("\n"):
+        stripped = line.strip()
+        if re.match(r"^(#{1,6}\s|[-*•]\s|\d+[.)]\s)", stripped):
+            stripped = re.sub(r"^(#{1,6}\s|[-*•]\s|\d+[.)]\s)", "", stripped)
+        lines.append(stripped)
+    body = "\n".join(lines)
+
+    # 2. Remove opener clichés, then replace banned words with plain ones.
+    body = re.sub(
+        r"^\s*(i hope this (email|message) finds you well|i hope you('| a)re well|i wanted to reach out|i'm reaching out)[.,!]?\s*",
+        "",
+        body,
+        flags=re.IGNORECASE,
+    )
+    for phrase, replacement in BANNED_PHRASES.items():
+        body = re.sub(re.escape(phrase), replacement, body, flags=re.IGNORECASE)
+    body = body.replace("use based on data", "use real data")
+    body = body.replace("based on data insights", "data insights")
+
+    # 3. Drop exclamation marks, tidy spacing and blank lines.
+    body = body.replace("!", ".")
+    body = re.sub(r"[ \t]{2,}", " ", body)
+    body = re.sub(r"\n{3,}", "\n\n", body).strip()
+    # Capitalise sentence and paragraph openings after flattening.
+    body = re.sub(r"(^|\n|\. )([a-z])", lambda m: m.group(1) + m.group(2).upper(), body)
+
+    # 4. Exactly one greeting at the top, using the recipient's first name.
+    body = re.sub(
+        r"^\s*(hi|hello|hey|dear)[^,\n]*,?\s*\n+",
+        "",
+        body,
+        flags=re.IGNORECASE,
+    )
+    first_name = ""
+    if recipient:
+        cleaned = re.sub(r"[^A-Za-z' -]", "", recipient).strip()
+        if cleaned and cleaned.lower() not in {"unknown", "not found", "editorial team"}:
+            first_name = cleaned.split()[0]
+    greeting = f"Hi {first_name}," if first_name else "Hi there,"
+    body = f"{greeting}\n\n{body}"
+
+    # 5. Exactly one sign-off, ending with the fixed sender identity.
+    body = re.sub(
+        r"\n+\s*(best|thanks|thank you|cheers|regards|best regards|all the best)\b[^\n]*$",
+        "",
+        body,
+        flags=re.IGNORECASE,
+    )
+    body = re.sub(rf"\n+\s*{re.escape(sender_name)}[^\n]*$", "", body, flags=re.IGNORECASE)
+    body = body.rstrip()
+    body = f"{body}\n\nBest,\n{sender_name}\n{sender_role}"
+
+    # 6. Hard length limit (paragraph-aware).
+    body = _trim_to_words(body, 150)
+
+    # 7. Subject: plain words, no shouting, no banned phrases, under 60 chars.
+    subject = re.sub(r"\s+", " ", (draft.subject_line or "")).strip()
+    for phrase, replacement in BANNED_PHRASES.items():
+        subject = re.sub(re.escape(phrase), replacement, subject, flags=re.IGNORECASE)
+    subject = re.sub(r"^(i'm writing|i am writing)\s+(about\s+)?", "", subject, flags=re.IGNORECASE)
+    subject = subject.replace("!", "").replace("…", "").strip(" .:-")
+    if len(subject) > 60:
+        cut = subject[:60]
+        subject = cut[: cut.rfind(" ")] if " " in cut else cut
+    if not subject:
+        subject = "A quick idea for your next piece"
+
+    draft.subject_line = subject
+    draft.message_body = body
+    if not draft.facts_to_verify:
+        draft.facts_to_verify = []
+    return draft
+
+
 def draft_journalist_pitch(
     opportunity: PROpportunity,
     person: JournalistProfile,
@@ -1708,7 +1856,7 @@ PREVIOUS BODY (avoid reusing its wording):
 
     draft = _run_agent_in_worker(outreach_draft_agent, prompt)
     draft.message_body = _trim_to_words(draft.message_body)
-    return draft
+    return enforce_email_rules(draft, sender_name, sender_role, person.name)
 
 
 def draft_listicle_inclusion(
@@ -1781,7 +1929,7 @@ PREVIOUS BODY (avoid reusing its wording):
 """
     draft = _run_agent_in_worker(outreach_draft_agent, prompt)
     draft.message_body = _trim_to_words(draft.message_body, 130)
-    return draft
+    return enforce_email_rules(draft, "Prachi", "SEO Specialist", contact.contact_name)
 
 
 def research_listicles(
