@@ -197,6 +197,13 @@ stays a non-sending demo.
   about, careers, docs and landing pages are dropped, with a note in the summary
   when any were hidden. Applies to opportunity research, publisher scans and the
   own-page audit.
+- **Reject site**: every prospect card (PR opportunities, publisher scans,
+  listicles) has **Reject site**. It blocks the whole domain in this browser,
+  hides every existing and future result from it, and is managed (allow again)
+  in Settings → Rejected sites. Included in workspace export/import.
+- **DR 50+ is strict**: once any rating is loaded, sub-50 *and* unrated sites are
+  hidden (previously unrated domains slipped through, which is how a DR 16 site
+  appeared). With no ratings at all the list stays visible and asks for Check DR.
 - Research budget raised: 150 calls/day per browser, 300/day per IP, 30 per 10
   minutes, 800/day global.
 - Budget safety: all requests are validated (`_precheck`) **before** a research
