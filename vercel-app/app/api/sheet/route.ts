@@ -66,17 +66,46 @@ async function ensureTab(api: any, sheetId: string, tab: string, headers: string
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const webhook = (process.env.SHEET_WEBHOOK_URL || "").trim();
   const client = webhook ? null : await sheets();
+  const probe = new URL(request.url).searchParams.get("probe") === "1";
+  const headers = { "Cache-Control": "no-store" };
+
+  let reachable: boolean | null = null;
+  let probeStatus: number | null = null;
+  let probeError = "";
+  if (probe) {
+    if (!webhook) {
+      probeError = "No webhook URL is configured for this deployment.";
+    } else {
+      // Env vars only prove a URL exists. This asks the deployment whether it
+      // answers at all, which is what "connected" is supposed to mean.
+      try {
+        const res = await fetch(webhook, {
+          method: "GET",
+          redirect: "manual",
+          cache: "no-store",
+          signal: AbortSignal.timeout(8000),
+        });
+        probeStatus = res.status;
+        reachable = res.status < 400;
+      } catch (err: any) {
+        reachable = false;
+        probeError = String(err?.message || err).slice(0, 200);
+      }
+    }
+  }
+
   return Response.json(
     {
       configured: !!webhook || !!client,
       mode: webhook ? "webhook" : "service-account",
       tab: TAB,
       columns: HEADERS.filter((h) => h !== "key"),
+      ...(probe ? { reachable, probeStatus, probeError } : {}),
     },
-    { headers: { "Cache-Control": "no-store" } }
+    { headers }
   );
 }
 

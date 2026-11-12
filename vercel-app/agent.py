@@ -4,6 +4,7 @@ import re
 import sys
 import threading
 import time
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from urllib.parse import urlsplit
 
 from openai import AsyncOpenAI
@@ -1291,6 +1292,20 @@ _AGENT_LOOP = asyncio.new_event_loop()
 _OPENAI_CLIENT_READY = False
 _OPENAI_CLIENT_LOCK = threading.Lock()
 
+# One research action must fit inside the function's 300s limit. The OpenAI
+# client timeout used to be 120s with two SDK retries (360s on its own), and the
+# request handler then retried the whole action again, so a slow model could run
+# well past the limit while still being billed.
+AGENT_TOTAL_BUDGET_SECONDS = max(
+    30,
+    min(290, int(os.environ.get("AGENT_TOTAL_BUDGET_SECONDS", "240") or 240)),
+)
+
+
+class AgentTimeout(RuntimeError):
+    """Raised when a research action runs past its time budget."""
+
+
 
 def _start_agent_loop():
     asyncio.set_event_loop(_AGENT_LOOP)
@@ -1312,9 +1327,9 @@ def _ensure_openai_client():
         return
     with _OPENAI_CLIENT_LOCK:
         if not _OPENAI_CLIENT_READY:
-            # Fail fast (120s) on stalled calls; retry connection errors at the
-            # SDK level.
-            set_default_openai_client(AsyncOpenAI(timeout=120.0, max_retries=2))
+            # A single attempt must finish well inside the request budget, so one
+            # stall cannot stack with SDK retries past the 300s function limit.
+            set_default_openai_client(AsyncOpenAI(timeout=90.0, max_retries=1))
             _OPENAI_CLIENT_READY = True
 
 
@@ -1323,13 +1338,29 @@ async def _run_agent_async(agent_to_run, prompt: str):
     return await Runner.run(agent_to_run, prompt, max_turns=MAX_TURNS)
 
 
-def _run_agent_in_worker(agent_to_run, prompt: str):
-    """Run an async agent on the shared event loop."""
+def _run_agent_in_worker(agent_to_run, prompt: str, deadline: float | None = None):
+    """Run an async agent on the shared event loop, bounded by a deadline."""
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 5:
+            raise AgentTimeout(
+                "That research step ran out of time before it could finish. "
+                "Try a narrower request, or try again."
+            )
     future = asyncio.run_coroutine_threadsafe(
         _run_agent_async(agent_to_run, prompt),
         _AGENT_LOOP,
     )
-    return future.result().final_output
+    timeout = None if deadline is None else max(5.0, deadline - time.monotonic())
+    try:
+        return future.result(timeout=timeout).final_output
+    except FutureTimeoutError:
+        # The request stops waiting; the SDK's own timeout ends the orphaned call.
+        future.cancel()
+        raise AgentTimeout(
+            "That research step is taking too long and was stopped so it would not "
+            "fail after you had waited. Try again, or narrow the request."
+        )
 
 
 _SCHEMA_HINTS = (
@@ -1353,9 +1384,15 @@ def run_agent_safely(agent_to_run, prompt: str):
     one bad reply look like a broken workflow. A single repair attempt with an
     explicit schema reminder fixes nearly all of them, and tolerant models catch
     the rest.
+
+    Both attempts share one deadline, so the repair cannot push the action past
+    the function limit.
     """
+    deadline = time.monotonic() + AGENT_TOTAL_BUDGET_SECONDS
     try:
-        return _run_agent_in_worker(agent_to_run, prompt)
+        return _run_agent_in_worker(agent_to_run, prompt, deadline)
+    except AgentTimeout:
+        raise
     except Exception as exc:  # noqa: BLE001 - re-raised below when unrelated
         if not _looks_like_schema_error(exc):
             raise
@@ -1366,7 +1403,7 @@ def run_agent_safely(agent_to_run, prompt: str):
             "using \"Unknown\" or an empty list where the research found nothing. Do not "
             "omit keys and do not wrap the object in prose."
         )
-        return _run_agent_in_worker(agent_to_run, repair)
+        return _run_agent_in_worker(agent_to_run, repair, deadline)
 
 
 # =========================================================

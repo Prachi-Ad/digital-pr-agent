@@ -1,6 +1,5 @@
 import os
 import sys
-import time
 from urllib.parse import urlsplit
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -8,6 +7,7 @@ sys.path.insert(0, os.path.dirname(_HERE))
 sys.path.insert(0, _HERE)
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from _security import guard, log_request, remaining_quota
@@ -15,6 +15,7 @@ from dr import configured as dr_configured
 from dr import get_domain_ratings
 
 from agent import (
+    AgentTimeout,
     BRAND_DOMAIN as AGENT_BRAND_DOMAIN,
     PRAngle,
     PROpportunity,
@@ -272,6 +273,8 @@ def _dispatch(req: AnalyzeRequest):
         raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
     except HTTPException:
         raise
+    except AgentTimeout as e:
+        raise HTTPException(status_code=504, detail=str(e))
     except ValueError as e:
         # Intentional, user-facing validation messages only.
         raise HTTPException(status_code=400, detail=str(e)[:300])
@@ -289,13 +292,17 @@ def _dispatch(req: AnalyzeRequest):
 @app.get("/api/analyze")
 def health(request: Request):
     """Health plus the caller's remaining research budget. Never bills a call."""
-    return {
-        "status": "ok",
-        "service": "digital-pr-agent",
-        "dr_ready": dr_configured(),
-        "brand_domain": AGENT_BRAND_DOMAIN,
-        **remaining_quota(request),
-    }
+    return JSONResponse(
+        content={
+            "status": "ok",
+            "service": "digital-pr-agent",
+            "dr_ready": dr_configured(),
+            "brand_domain": AGENT_BRAND_DOMAIN,
+            **remaining_quota(request),
+        },
+        # Per-caller numbers must never be reused by a proxy or shared cache.
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _precheck(req: AnalyzeRequest, action: str) -> None:
@@ -371,20 +378,18 @@ def handle(req: AnalyzeRequest, request: Request):
     _precheck(req, action)
     guard(request)
     log_request(request, action)
-    last = None
-    for attempt in range(2):
-        try:
-            # Model output is untrusted: strip unsafe links, invalid emails and
-            # out-of-range scores before anything reaches the browser.
-            return sanitize_payload(_dispatch(req))
-        except HTTPException:
-            raise
-        except Exception as e:
-            last = e
-            if attempt == 0:
-                time.sleep(2)
-    print(f"handler_error action={action} error={type(last).__name__}: {str(last)[:300]}", flush=True)
-    raise HTTPException(
-        status_code=500,
-        detail="That research step failed. Try again; if it repeats, tell Prachi to check the server logs.",
-    )
+    try:
+        # Model output is untrusted: strip unsafe links, invalid emails and
+        # out-of-range scores before anything reaches the browser.
+        return sanitize_payload(_dispatch(req))
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(
+            f"handler_error action={action} error={type(e).__name__}: {str(e)[:300]}",
+            flush=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="That research step failed. Try again; if it repeats, tell Prachi to check the server logs.",
+        )

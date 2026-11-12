@@ -155,6 +155,15 @@ class _SlidingWindow:
         self._lock = threading.Lock()
         self._hits: dict[str, deque[float]] = {}
 
+    def retry_after(self, key: str, window_seconds: int) -> int:
+        """Seconds until the oldest hit leaves the window (0 when empty)."""
+        now = time.monotonic()
+        with self._lock:
+            hits = self._hits.get(key)
+            if not hits:
+                return 0
+            return max(1, int(hits[0] + window_seconds - now) + 1)
+
     def count(self, key: str, window_seconds: int) -> int:
         now = time.monotonic()
         cutoff = now - window_seconds
@@ -192,6 +201,8 @@ _global_day = _SlidingWindow()
 _client_day = _SlidingWindow()
 
 CLIENT_COOKIE = "pr_client"
+WINDOW_SECONDS = 10 * 60
+DAY_SECONDS = 24 * 60 * 60
 
 
 def _caps() -> tuple[int, int, int, int]:
@@ -204,26 +215,41 @@ def _caps() -> tuple[int, int, int, int]:
 
 
 def remaining_quota(request: Request) -> dict:
-    """Report what is left without consuming a call."""
+    """Report what is left without consuming a call.
+
+    Two numbers matter and they used to be conflated: the 10-minute window
+    (how many calls are left right now) and the daily ceilings. The UI showed
+    the smallest of them as "calls left today", so a 10-minute window looked
+    like a daily limit and climbed back up after ten idle minutes.
+    """
     per_window, per_day, per_client, daily_cap = _caps()
     ip = client_ip(request)
     client = (request.cookies.get(CLIENT_COOKIE) or "").strip()
 
-    def left(window: _SlidingWindow, key: str, limit: int) -> int:
-        used = window.count(key, 24 * 60 * 60) if window is not _ip_window else window.count(key, 10 * 60)
-        return max(0, limit - used)
+    def left(window: _SlidingWindow, key: str, limit: int, span: int) -> int:
+        return max(0, limit - window.count(key, span))
+
+    short_term = left(_ip_window, f"ip:{ip}", per_window, WINDOW_SECONDS)
+    ip_day = left(_ip_day, f"ip:{ip}", per_day, DAY_SECONDS)
+    client_day = (
+        left(_client_day, f"client:{client}", per_client, DAY_SECONDS)
+        if client
+        else per_client
+    )
+    global_day = left(_global_day, "global", daily_cap, DAY_SECONDS)
 
     return {
-        "perSession": left(_ip_window, f"ip:{ip}", per_window),
+        "perSession": short_term,
         "perSessionLimit": per_window,
-        "perDay": left(_ip_day, f"ip:{ip}", per_day),
+        "perDay": ip_day,
         "perDayLimit": per_day,
-        "remaining": min(
-            left(_ip_window, f"ip:{ip}", per_window),
-            left(_ip_day, f"ip:{ip}", per_day),
-            left(_client_day, f"client:{client}", per_client) if client else per_client,
-            left(_global_day, "global", daily_cap),
-        ),
+        "perClientDay": client_day,
+        "perClientDayLimit": per_client,
+        "globalDay": global_day,
+        "globalDayLimit": daily_cap,
+        # What one more click can actually use, and what is left today.
+        "remaining": min(short_term, ip_day, client_day, global_day),
+        "today": min(ip_day, client_day, global_day),
     }
 
 
@@ -267,40 +293,57 @@ def guard(request: Request) -> None:
     per_window, per_day, per_client, daily_cap = _caps()
     client = (request.cookies.get(CLIENT_COOKIE) or "").strip() or f"ip:{ip}"
 
-    allowed, retry_after = _global_day.allow("global", daily_cap, 24 * 60 * 60)
-    if not allowed:
+    limits = (
+        (
+            _global_day,
+            "global",
+            daily_cap,
+            DAY_SECONDS,
+            "The research budget for today is used up. Try again tomorrow.",
+        ),
+        (
+            _client_day,
+            f"client:{client}",
+            per_client,
+            DAY_SECONDS,
+            f"You have used today's {per_client} research calls. "
+            "The limit resets tomorrow; ask for a higher limit if you need more.",
+        ),
+        (
+            _ip_window,
+            f"ip:{ip}",
+            per_window,
+            WINDOW_SECONDS,
+            "Too many research requests from this connection. "
+            "Try again in {retry} seconds.",
+        ),
+        (
+            _ip_day,
+            f"ip:{ip}",
+            per_day,
+            DAY_SECONDS,
+            "This connection has reached its daily research limit. "
+            "Please try again tomorrow.",
+        ),
+    )
+
+    def refuse(detail: str, retry_after: int) -> None:
         raise HTTPException(
             status_code=429,
-            detail="The research budget for today is used up. Try again tomorrow.",
+            detail=detail.format(retry=retry_after) if "{retry}" in detail else detail,
             headers={"Retry-After": str(retry_after)},
         )
 
-    allowed, retry_after = _client_day.allow(f"client:{client}", per_client, 24 * 60 * 60)
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail=(
-                f"You have used today's {per_client} research calls. "
-                "The limit resets tomorrow; ask for a higher limit if you need more."
-            ),
-            headers={"Retry-After": str(retry_after)},
-        )
+    # Check every limit before charging any of them. Charging as we went meant a
+    # request rejected for its IP was still counted against the global budget.
+    for window, key, limit, span, detail in limits:
+        if window.count(key, span) >= limit:
+            refuse(detail, window.retry_after(key, span))
 
-    allowed, retry_after = _ip_window.allow(f"ip:{ip}", per_window, 10 * 60)
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Too many research requests from this connection. Try again in {retry_after} seconds.",
-            headers={"Retry-After": str(retry_after)},
-        )
-
-    allowed, retry_after = _ip_day.allow(f"ip:{ip}", per_day, 24 * 60 * 60)
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail="This connection has reached its daily research limit. Please try again tomorrow.",
-            headers={"Retry-After": str(retry_after)},
-        )
+    for window, key, limit, span, detail in limits:
+        allowed, retry_after = window.allow(key, limit, span)
+        if not allowed:
+            refuse(detail, retry_after)
 
 
 def log_request(request: Request, action: str) -> None:

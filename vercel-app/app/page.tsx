@@ -10,7 +10,6 @@ import {
   Download,
   ExternalLink,
   FileText,
-  KeyRound,
   LayoutGrid,
   List,
   Loader2,
@@ -101,7 +100,7 @@ const firstStepOfListiclePhase: Record<ListiclePhase, ListicleStep> = {
 const phaseCopy: Record<string, string> = {
   Research: "Analyze the article and pick the angle. The evidence stays on screen.",
   Prospects: "Review the editorial openings. Writers appear for each approved one.",
-  Outreach: "Draft and approve. The public demo never sends email.",
+  Outreach: "Draft and approve. Nothing is sent from this app.",
   "Find & review": "Find pages worth pursuing, then review fit, contact route, and policy.",
 };
 
@@ -119,61 +118,6 @@ function shortText(value: any, limit = 260) {
 type Nav = "Workspace" | "Research Library" | "Settings";
 type Workflow = "digital" | "listicles";
 type AnalyzedArticle = { url: string; analysis: AnyObj };
-type DemoEmailMethod = "app-password" | "oauth" | "smtp";
-
-const emailMethodOptions: {
-  id: DemoEmailMethod;
-  label: string;
-  status: "Active locally" | "Optional";
-  description: string;
-  facts: Array<[string, string]>;
-  note: string;
-  icon: ReactNode;
-}[] = [
-  {
-    id: "app-password",
-    label: "Google app password",
-    status: "Active locally",
-    description: "Personal Gmail app password. This is the method configured in the local sender.",
-    facts: [
-      ["From account", "Personal Gmail (configured locally)"],
-      ["SMTP", "smtp.gmail.com · port 587 · STARTTLS"],
-      ["Credentials", "Local, gitignored storage only"],
-      ["Login check", "Configured locally · verify in the local app"],
-    ],
-    note: "A 16-character Google app password is used. A normal Google account password will not work.",
-    icon: <KeyRound size={18} />,
-  },
-  {
-    id: "oauth",
-    label: "Google Workspace sign-in (OAuth)",
-    status: "Optional",
-    description: "For Workspace accounts where app passwords are blocked. Requires a Google Cloud client.",
-    facts: [
-      ["Connection", "Not connected"],
-      ["OAuth client", "Not configured"],
-      ["Redirect URI", "http://localhost:8501/"],
-      ["Scopes", "openid · email · mail.google.com"],
-    ],
-    note: "A Workspace admin may block the OAuth client or scope. The app reports the error rather than bypassing admin policy.",
-    icon: <Shield size={18} />,
-  },
-  {
-    id: "smtp",
-    label: "Custom SMTP / designated email",
-    status: "Optional",
-    description: "For another mailbox with provider-supplied SMTP credentials.",
-    facts: [
-      ["Connection", "Not configured"],
-      ["Security", "STARTTLS or SSL/TLS"],
-      ["From address", "Set by the designated mailbox"],
-      ["Credentials", "Local, gitignored storage only"],
-    ],
-    note: "Use this when the mailbox is not Google Workspace or the provider supplies SMTP login details.",
-    icon: <Server size={18} />,
-  },
-];
-
 let demoToken: { token: string; expiresAt: number } | null = null;
 
 async function getDemoToken(force = false): Promise<string> {
@@ -203,7 +147,11 @@ async function getDemoToken(force = false): Promise<string> {
 }
 
 async function callApi(action: string, body: any = {}, onRetry?: (attempt: number) => void) {
-  const maxAttempts = 3;
+  // One retry, and only for a lost session or a dropped connection. A 5xx means
+  // the paid research call already ran: repeating it silently spends another
+  // call, then the server may redo it again, and you wait twice as long for the
+  // same failure.
+  const maxAttempts = 2;
   let lastErr: any = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -223,9 +171,9 @@ async function callApi(action: string, body: any = {}, onRetry?: (attempt: numbe
       if (res.status === 401 || res.status === 403) {
         demoToken = null;
       }
-      // Retry auth failures and server faults only. A 400 or 429 will not
-      // succeed on a retry, and hammering the endpoint makes rate limits worse.
-      const retryable = res.status === 401 || res.status === 403 || res.status >= 500;
+      // Retry only lost sessions. A 4xx or 429 will not succeed, and a 5xx
+      // already cost a research call.
+      const retryable = res.status === 401 || res.status === 403;
       if (!retryable) throw Object.assign(new Error(message), { fatal: true });
       throw new Error(message);
     } catch (err: any) {
@@ -233,7 +181,7 @@ async function callApi(action: string, body: any = {}, onRetry?: (attempt: numbe
       if (err?.fatal) throw err;
       if (attempt < maxAttempts) {
         if (onRetry) onRetry(attempt + 1);
-        await new Promise((r) => setTimeout(r, 1500 * attempt));
+        await new Promise((r) => setTimeout(r, 1200));
       }
     }
   }
@@ -290,9 +238,6 @@ export default function Home() {
   const [digitalStep, setDigitalStep] = useState<DigitalStep>("Article");
   const [listicleStep, setListicleStep] = useState<ListicleStep>("Search");
   const [retryMsg, setRetryMsg] = useState<string | null>(null);
-  const [demoEmailMethod, setDemoEmailMethod] = useState<DemoEmailMethod>("app-password");
-  const selectedEmailMethod =
-    emailMethodOptions.find((method) => method.id === demoEmailMethod) ?? emailMethodOptions[0];
 
   // Analyze state
   const [urlInputs, setUrlInputs] = useState<string[]>([""]);
@@ -548,6 +493,7 @@ export default function Home() {
 
   // Campaigns: named workspace snapshots with live outcome counts.
   const CAMPAIGNS_KEY = "pr_campaigns_v1";
+  const LAST_BACKUP_KEY = "pr_last_backup_at";
   const [campaigns, setCampaigns] = useState<Record<string, AnyObj>>(() => {
     try {
       const raw = typeof window !== "undefined" ? window.localStorage.getItem(CAMPAIGNS_KEY) : null;
@@ -934,7 +880,7 @@ export default function Home() {
     if (!quota || typeof quota.remaining !== "number") return true;
     if (quota.remaining >= count) return true;
     return window.confirm(
-      `This would use ${count} research calls but only ${quota.remaining} are left today. Continue anyway?`
+      `This would use ${count} research calls but only ${quota.remaining} can run right now. Continue anyway?`
     );
   }
 
@@ -942,7 +888,7 @@ export default function Home() {
   function confirmBulk(label: string, count: number): boolean {
     if (count <= 1) return true;
     const left =
-      quota && typeof quota.remaining === "number" ? `, ${quota.remaining} left today` : "";
+      quota && typeof quota.remaining === "number" ? `, ${quota.remaining} can run right now` : "";
     return window.confirm(`${label} will use ${count} research calls${left}. Continue?`);
   }  // Auto-sync to the sheet after pitch writing / status changes.
   const AUTO_SYNC_KEY = "pr_autosync_v1";
@@ -966,6 +912,7 @@ export default function Home() {
 
   // Sheet connection status
   const [sheetStatus, setSheetStatus] = useState<AnyObj | null>(null);
+  const [sheetProbe, setSheetProbe] = useState<{ ok: boolean; text: string } | null>(null);
   const [checkingSheet, setCheckingSheet] = useState(false);
   async function testSheetConnection() {
     setCheckingSheet(true);
@@ -975,6 +922,47 @@ export default function Home() {
       setSheetStatus(data);
     } catch (err: any) {
       setSheetStatus({ configured: false, error: err?.message || "Unreachable" });
+    } finally {
+      setCheckingSheet(false);
+    }
+  }
+
+  // "Configured" only means the env vars exist. This asks the deployment itself,
+  // so a dead webhook cannot look healthy.
+  async function probeSheetConnection() {
+    setCheckingSheet(true);
+    setSheetProbe(null);
+    try {
+      const res = await fetch("/api/sheet?probe=1", { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      setSheetStatus(data);
+      if (!res.ok) {
+        setSheetProbe({ ok: false, text: data?.detail || `The check failed (HTTP ${res.status}).` });
+      } else if (!data?.configured) {
+        setSheetProbe({
+          ok: false,
+          text: "Neither a webhook nor a service account is configured for this deployment.",
+        });
+      } else if (data?.mode !== "webhook") {
+        setSheetProbe({
+          ok: true,
+          text: "Service-account mode is configured. It is only proven when the first row syncs.",
+        });
+      } else if (data?.reachable) {
+        setSheetProbe({
+          ok: true,
+          text: `The Apps Script deployment answered (HTTP ${data?.probeStatus}). That proves it is live, not that the token is right.`,
+        });
+      } else {
+        setSheetProbe({
+          ok: false,
+          text: `The Apps Script deployment did not answer${
+            data?.probeStatus ? ` (HTTP ${data.probeStatus})` : ""
+          }. Check the /exec URL and that the deployment is still live.`,
+        });
+      }
+    } catch (err: any) {
+      setSheetProbe({ ok: false, text: err?.message || "Could not run the check." });
     } finally {
       setCheckingSheet(false);
     }
@@ -1020,6 +1008,23 @@ export default function Home() {
   // Workspace backup: everything this browser persists, in one JSON file.
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
   const [backupErr, setBackupErr] = useState<string | null>(null);
+  const [lastBackupAt, setLastBackupAt] = useState<string | null>(() => {
+    try {
+      return window.localStorage.getItem(LAST_BACKUP_KEY);
+    } catch {
+      return null;
+    }
+  });
+
+  function markBackedUp() {
+    const stamp = new Date().toISOString();
+    setLastBackupAt(stamp);
+    try {
+      window.localStorage.setItem(LAST_BACKUP_KEY, stamp);
+    } catch {
+      // The export still happened; the reminder just cannot be remembered.
+    }
+  }
 
   function exportWorkspace() {
     const payload = {
@@ -1040,6 +1045,7 @@ export default function Home() {
     link.download = `vista-pr-workspace-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     URL.revokeObjectURL(url);
+    markBackedUp();
     setBackupErr(null);
     setBackupMsg(
       `Exported ${Object.keys(campaigns).length} campaigns, ${Object.keys(mediaLibrary).length} contacts, ${usedUrls.length} used marks, ${blockedDomains.length} rejected sites.`
@@ -2433,6 +2439,25 @@ export default function Home() {
     }
   }
 
+  // One person owns this browser, so the only real way to lose work is clearing
+  // site data. Keep the last export date visible instead of buried.
+  const hasSavedWork =
+    Object.keys(campaigns).length > 0 ||
+    usedUrls.length > 0 ||
+    Object.keys(mediaLibrary).length > 0 ||
+    Object.keys(pitchOutcomes).length > 0;
+  const backupAgeDays = lastBackupAt
+    ? (Date.now() - new Date(lastBackupAt).getTime()) / 86_400_000
+    : Infinity;
+  const backupStale = hasSavedWork && backupAgeDays > 14;
+  const lastBackupLabel = lastBackupAt
+    ? new Date(lastBackupAt).toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      })
+    : "Never";
+
   const sidebar = (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -2477,11 +2502,19 @@ export default function Home() {
         <div>
           Search context: <strong>low</strong>
         </div>
-        {quota && typeof quota.remaining === "number" && (
+        {quota && typeof quota.today === "number" && (
           <div>
-            Calls left today: <strong>{quota.remaining}</strong>
+            Calls left today: <strong>{quota.today}</strong>
           </div>
         )}
+        {quota &&
+          typeof quota.perSession === "number" &&
+          typeof quota.perSessionLimit === "number" &&
+          quota.perSession < quota.perSessionLimit && (
+            <div className="sidebar-note">
+              {quota.perSession} of {quota.perSessionLimit} left in the current 10-minute window.
+            </div>
+          )}
         {syncErr && (
           <div className="sidebar-note">
             Sheet sync failed. Open Outreach or Settings to retry.
@@ -2489,7 +2522,14 @@ export default function Home() {
         )}
         {quota && quota.remaining === 0 && (
           <div className="sidebar-note">
-            Daily research limit reached. It resets tomorrow.
+            Research limit reached. It resets on its own; today&apos;s ceiling is in Settings.
+          </div>
+        )}
+        {backupStale && (
+          <div className="sidebar-note">
+            Not backed up{" "}
+            {lastBackupAt ? `since ${lastBackupLabel}` : "yet"}. Export in Settings so clearing this
+            browser cannot lose your work.
           </div>
         )}
         <div className="sidebar-note">Vercel demo · no automatic outreach</div>
@@ -2556,7 +2596,7 @@ export default function Home() {
               <PageHeading
                 badge="Workspace"
                 title={workflow === "digital" ? "Digital PR" : "Listicles"}
-                subtitle={phaseCopy[activePhase] || "You approve every decision and every send."}
+                subtitle={phaseCopy[activePhase] || "You approve every decision and every draft."}
                 action={
                   <div className="actions" style={{ marginTop: 0 }}>
                     <button
@@ -4751,8 +4791,7 @@ export default function Home() {
 
               <Note>
                 Workspace research resets on reload, but Used marks, the media library, outcomes,
-                and campaigns persist in this browser.
-                Full saved libraries, backups, and send history live in the local Streamlit app.
+                and campaigns persist in this browser. Export them in Settings before clearing site data.
               </Note>
             </>
           )}
@@ -4762,7 +4801,7 @@ export default function Home() {
               <PageHeading
                 badge="Settings"
                 title="Settings"
-                subtitle="Read-only preview of the local app settings. No credentials are collected and no email can be sent from this demo."
+                subtitle="Settings for this build and everything saved in this browser. No credentials are collected here and nothing is sent from this site."
                 action={
                   <button className="btn-secondary" onClick={() => setNav("Workspace")}>
                     Back to Workspace
@@ -4782,8 +4821,8 @@ export default function Home() {
                       {sheetStatus === null
                         ? "Checking..."
                         : sheetStatus?.configured
-                          ? "Connected"
-                          : "Not connected"}
+                          ? "Configured"
+                          : "Not configured"}
                     </span>
                   </div>
                   {sheetStatus?.configured && (
@@ -4792,12 +4831,13 @@ export default function Home() {
                       <strong>{sheetStatus?.mode === "webhook" ? "Apps Script webhook" : "Service account"}</strong>
                     </div>
                   )}
+                  {sheetProbe && <Note tone={sheetProbe.ok ? "info" : "warn"}>{sheetProbe.text}</Note>}
                   <div className="setting-row">
                     <span>Auto-sync after pitches and status changes</span>
                     <strong>{autoSync ? "On" : "Off"}</strong>
                   </div>
                   <div className="actions">
-                    <button className="btn-secondary" onClick={testSheetConnection} disabled={checkingSheet}>
+                    <button className="btn-secondary" onClick={probeSheetConnection} disabled={checkingSheet}>
                       {checkingSheet ? <Spinner /> : <RefreshCw size={16} />}
                       Test connection
                     </button>
@@ -4870,6 +4910,13 @@ export default function Home() {
                     <span>Used articles</span>
                     <strong>{usedUrls.length}</strong>
                   </div>
+                  <div className="setting-row">
+                    <span>Last export</span>
+                    <strong>
+                      {lastBackupLabel}
+                      {backupStale ? " · overdue" : ""}
+                    </strong>
+                  </div>
                   <div className="actions">
                     <button className="btn-primary" onClick={exportWorkspace}>
                       <Download size={16} /> Export workspace
@@ -4890,6 +4937,36 @@ export default function Home() {
                   </div>
                   {backupMsg && <Note>{backupMsg}</Note>}
                   {backupErr && <Note tone="warn">{backupErr}</Note>}
+                </section>
+
+                <section className="card">
+                  <h2 className="section-title">Research budget</h2>
+                  <p className="meta">
+                    Counted in memory by the server that answered you, so a restart can reset it. Treat the
+                    numbers as a brake, not a guarantee.
+                  </p>
+                  {quota ? (
+                    <>
+                      <div className="setting-row">
+                        <span>Calls left today</span>
+                        <strong>{quota.today}</strong>
+                      </div>
+                      <div className="setting-row">
+                        <span>Today&apos;s ceilings</span>
+                        <strong>
+                          {quota.perClientDayLimit} this browser · {quota.globalDayLimit} this instance
+                        </strong>
+                      </div>
+                      <div className="setting-row">
+                        <span>Next 10 minutes</span>
+                        <strong>
+                          {quota.perSession} of {quota.perSessionLimit} left
+                        </strong>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="meta">Not loaded yet. Open the Workspace to ask for the current numbers.</p>
+                  )}
                 </section>
 
                 <section className="card">
@@ -4916,131 +4993,11 @@ export default function Home() {
                   </div>
                   <div className="setting-row">
                     <span>Data storage</span>
-                    <strong>Browser session only</strong>
+                    <strong>This browser, exportable</strong>
                   </div>
                   <div className="setting-row">
                     <span>Outreach</span>
                     <strong>Human approval required</strong>
-                  </div>
-                </section>
-
-                <section className="card">
-                  <div className="card-head">
-                    <div>
-                      <h2 className="section-title">Email sending (designated sender)</h2>
-                      <p className="meta">Local-only sender. This demo is a display-only preview.</p>
-                    </div>
-                    <span className="status-pill">No sending here</span>
-                  </div>
-                  <p className="body-text">
-                    The local Streamlit app sends explicitly approved drafts from the configured Gmail account.
-                    Credentials stay in local, gitignored storage. This demo does not collect credentials, connect to
-                    Gmail, or send email.
-                  </p>
-
-                  <div className="method-grid" aria-label="Email sending methods">
-                    {emailMethodOptions.map((method) => (
-                      <button
-                        key={method.id}
-                        type="button"
-                        className={`method-card ${demoEmailMethod === method.id ? "active" : ""}`}
-                        onClick={() => setDemoEmailMethod(method.id)}
-                        aria-pressed={demoEmailMethod === method.id}
-                      >
-                        <span className="method-icon">{method.icon}</span>
-                        <span className="method-copy">
-                          <span className="method-topline">
-                            <span className="method-name">{method.label}</span>
-                            <span
-                              className={`status-pill ${method.status === "Active locally" ? "active" : ""}`}
-                            >
-                              {method.status}
-                            </span>
-                          </span>
-                          <span className="method-note">{method.description}</span>
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                  <p className="method-footnote">
-                    "Active locally" reflects the local Streamlit app, not this demo. Optional methods are available
-                    but unconfigured.
-                  </p>
-
-                  <div className="method-preview" role="status" aria-live="polite">
-                    <div className="method-preview-head">
-                      <div>
-                        <h3 className="card-title">{selectedEmailMethod.label}</h3>
-                        <p className="meta">
-                          Display-only preview. No fields are editable and no credentials are stored here.
-                        </p>
-                      </div>
-                      <span
-                        className={`status-pill ${
-                          selectedEmailMethod.status === "Active locally" ? "active" : ""
-                        }`}
-                      >
-                        {selectedEmailMethod.status}
-                      </span>
-                    </div>
-                    {selectedEmailMethod.facts.map(([label, value]) => (
-                      <div className="setting-row" key={label}>
-                        <span>{label}</span>
-                        <strong>{value}</strong>
-                      </div>
-                    ))}
-                    <p className="method-footnote">{selectedEmailMethod.note}</p>
-                  </div>
-
-                  <div className="divider" />
-                  <h3 className="card-title">Batch safeguards</h3>
-                  <div className="setting-row">
-                    <span>Human approval</span>
-                    <strong>Required for every draft</strong>
-                  </div>
-                  <div className="setting-row">
-                    <span>Batch confirmation</span>
-                    <strong>Required before sending</strong>
-                  </div>
-                  <div className="setting-row">
-                    <span>Delay between sends</span>
-                    <strong>30 seconds</strong>
-                  </div>
-                  <div className="setting-row">
-                    <span>Daily cap</span>
-                    <strong>20 successful sends</strong>
-                  </div>
-                  <div className="setting-row">
-                    <span>Do-not-send list</span>
-                    <strong>Blocks matching addresses</strong>
-                  </div>
-                  <div className="setting-row">
-                    <span>Opt-out footer</span>
-                    <strong>Added to every email</strong>
-                  </div>
-                  <div className="setting-row">
-                    <span>Audit log</span>
-                    <strong>Permanent send history</strong>
-                  </div>
-                </section>
-
-                <section className="card">
-                  <h2 className="section-title">Do-not-send list (opt-outs)</h2>
-                  <p className="body-text">
-                    If someone asks not to be contacted, add their address in the local app. Matching drafts are
-                    blocked from every future batch, and the opt-out footer asks recipients to reply "unsubscribe".
-                  </p>
-                  <div className="setting-row">
-                    <span>List storage</span>
-                    <strong>Local app only</strong>
-                  </div>
-                  <div className="setting-row">
-                    <span>Enforcement</span>
-                    <strong>Before every send</strong>
-                  </div>
-                  <div className="setting-row">
-                    <span>Demo status</span>
-                    <strong>Not editable here</strong>
                   </div>
                 </section>
 
@@ -5055,19 +5012,14 @@ export default function Home() {
                     <strong>SQLite + backups</strong>
                   </div>
                   <div className="setting-row">
-                    <span>Vercel storage</span>
-                    <strong>Browser session only</strong>
-                  </div>
-                  <div className="setting-row">
-                    <span>Email credentials</span>
-                    <strong>Local, gitignored storage only</strong>
+                    <span>This site&apos;s storage</span>
+                    <strong>This browser only, until site data is cleared</strong>
                   </div>
                 </section>
 
                 <Note>
-                  This Vercel build is a Next.js port of the local Streamlit tool. It calls the same research API, but
-                  accounts, saved libraries, CSV exports, backups, and draft generation are available only in the local
-                  app.
+                  Research, drafts, campaigns, exports and sheet sync all run in this site. Nothing here sends
+                  email or contacts a publisher.
                 </Note>
               </div>
             </>

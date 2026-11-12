@@ -15,13 +15,22 @@ writer or content/SEO contact, writes a pitch, and logs everything to Google She
 **It never sends email and never submits forms.** The local Streamlit app is the legacy
 full tool; the Vercel app is the primary one.
 
+**Single user.** This deployment is used by one person (Prachi). It is not a multi-tenant
+product. That is the intended design, not a stopgap: the shared password gate is the
+access model, there are no accounts, and per-browser state is owner state.
+
+**No email surface.** This app has no send button, no credentials, no opt-out list, no
+send log, and no mention of sending email as a feature in Settings. Those belong to the
+legacy local Streamlit app and stay out of this build. Contact *lookup* (finding a
+publicly published address) is research and stays.
+
 ## 2. Live surface
 
 | Area | Path | Notes |
 | --- | --- | --- |
 | Sign-in | `/login` | Shared password gate, signed `pr_auth` cookie |
 | App | `/` | Workspace → Research Library → Settings |
-| Sheet sync | `/api/sheet` | Apps Script webhook; upsert by key |
+| Sheet sync | `/api/sheet` | Apps Script webhook; upsert by key. `GET ?probe=1` checks that the deployment answers (it does not test the token). |
 | Token | `/api/token` | Short-lived HMAC for the Python API |
 | Model API | `/api/analyze` | `action`-based; also `GET` = health + budget |
 | LLM/markdown | `/llm`, `/llms.txt`, `/skills/seo-aeo-digital-pr.md` | Public, no login |
@@ -77,8 +86,18 @@ stray Python project).
 ```powershell
 C:\Users\Prachi\vista-pr-agent\.venv\Scripts\python.exe -m unittest discover -s vercel-app/tests -v
 ```
-25 tests: URL/email sanitizing, blog-only filter, email rules enforcement, precheck
-(no budget spent on invalid requests), dedupe.
+40 tests in two files:
+
+- `test_safety.py` (25): URL/email sanitising, blog-only filter, email rules, precheck,
+  dedupe.
+- `test_guards.py` (15): auth cookie, origin allowlist, token shape/expiry/forgery, body
+  cap, fail-closed secret, and the budget rules — a refused request charges nothing, the
+  10-minute window and the daily ceiling are reported separately, and exhausting one
+  limit does not burn the others.
+
+PowerShell prints unit-test progress on stderr, so a piped run can look like it failed;
+trust the printed `OK` and an unpiped exit code.
+
 
 ## 7. Google Sheet
 
@@ -93,7 +112,19 @@ a *new deployment* yields a **new `/exec` URL** that must be re-entered in Verce
 - **Links**: only public `https` hosts; no `javascript:`, `user@host`, raw IPs,
   localhost, punycode. Unsafe URLs are returned blank and the UI shows "Link withheld".
 - **Emails**: must parse, else "Not publicly found".
-- **Budget**: validated before spending; rejected requests cost nothing.
+- **Budget**: validated before spending; rejected requests cost nothing. Every limit is
+  checked before any counter is charged, so a refused request cannot burn another one.
+- **Budget reporting**: `remaining` = what the next click can use (the smallest of the
+  10-minute window, per-browser day, per-IP day, instance day). `today` = the daily
+  ceilings only. The sidebar shows `today`; the 10-minute window appears only when it is
+  running low. Do not label the window "today" again.
+- **One paid attempt per click**: the browser retries only a lost session (401/403), never
+  a 5xx, and the API does not re-run a paid action. Both are deliberate: a retry of a
+  failed research call spends another call.
+- **Time budget**: one action must finish within 240s (`AGENT_TOTAL_BUDGET_SECONDS`,
+  incl. the one schema repair), inside the 300s function limit. OpenAI timeout 90s, SDK
+  retries 1. A timeout returns 504 with a plain message instead of hanging.
+
 - **Blog only**: research lists blog/editorial URLs; product/pricing/docs pages dropped.
 - **One prospect per site** for PR opportunities (strongest kept); listicles not deduped.
 - **Reject site**: permanent per-browser domain block, managed in Settings.
@@ -107,9 +138,12 @@ a *new deployment* yields a **new `/exec` URL** that must be re-entered in Verce
 1. **Bulk actions cost real money.** One call per site; always respect the confirm
    dialog. Bulk writers ≈ 4 calls, all pitches ≈ 5–10.
 2. **Rate limits are per-instance memory.** Multiple Vercel instances each keep their
-   own counters, so the daily cap is best-effort. A shared Redis counter would fix it.
+   own counters, so the daily cap is best-effort and resets on a cold start. A shared
+   Redis/KV counter is the only hard fix; until then, the caps are a rough brake, not a
+   spend guarantee.
 3. **State is browser-local** (campaigns, library, used, rejected, outcomes). Settings →
-   Backup this browser → Export/Import JSON is the only safety net.
+   Backup this browser → Export/Import JSON is the only safety net. The app remembers the
+   last export and shows a sidebar warning after 14 days without one.
 4. **Deploy lag**: after a push, builds take ~60–120s. Verify with a fresh chunk name
    before claiming a fix is live.
 5. **Minification** renames functions; verify fixes by user-visible strings, not
@@ -120,14 +154,22 @@ a *new deployment* yields a **new `/exec` URL** that must be re-entered in Verce
    re-checks the cookie itself.
 8. **Local Streamlit app** (`app.py`, `database.py`) is separate; it has the same
    research logic in the root `agent.py` and is not audited to the same level.
+9. **The site is behind Cloudflare**, and the API keys rate limits off `x-real-ip`. With
+   one user that is harmless, but any second user could share the same counters. Check
+   what Vercel sees before adding people.
+10. **A leaked password is an OpenAI bill.** One shared password, a one-year HMAC cookie,
+    and soft counters. Rotating `SITE_PASSWORD` revokes everyone (and needs a redeploy).
+
 
 ## 10. Open / next
 
-- Move rate limits to a shared store for a hard global spend cap.
 - Freeze features; run three real campaigns and fix only what breaks.
 - Listicle policy caching for multi-item runs (contacts already cached).
 - Mobile layout check (desktop-first today).
-- Decide whether to keep the public demo, put it behind per-user login, or retire it.
+- Decide whether to move the counters to a shared store. With one user it is not
+  urgent; it is the only way to make the daily caps hard.
+- Per-user login and retiring the public demo are **closed**: one user, shared gate.
+
 
 ## 11. Quick verification commands
 
