@@ -214,6 +214,16 @@ stays a non-sending demo.
   ("leverage", "seamless", "data-driven", "I hope this email finds you well",
   "furthermore", etc.). Verified live: two drafts differed in subject and body
   with zero banned phrases.
+- **UI refresh**: larger type scale (17px base, 2.35rem page titles, 17px body
+  copy, 44px controls), layered gradient background, lifted rounded cards, a
+  gradient primary button, pill stepper, and reduced-motion support.
+- **Locked email rules**: one `EMAIL_RULES` block (13 numbered rules) is injected
+  into the draft agent and every draft — first write, bulk, regenerate — passes
+  through `enforce_email_rules()`, which mechanically removes bullets/headings,
+  strips opener clichés, swaps banned buzzwords, fixes greeting/sign-off,
+  guarantees blank lines between paragraphs, caps the subject at 60 chars and the
+  body at 150 words. Verified live: 101-word draft, 3 paragraphs, no banned
+  phrases. 25 unit tests.
 - Research budget raised: 150 calls/day per browser, 300/day per IP, 30 per 10
   minutes, 800/day global.
 - Budget safety: all requests are validated (`_precheck`) **before** a research
