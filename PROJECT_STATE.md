@@ -191,6 +191,14 @@ stays a non-sending demo.
   pitch, and journalist beats, plus **Use as pitch asset** to jump straight into
   analysis. Other domains still run the publisher scan. Verified live
   (8 pages, top = "Social Media Analytics", High).
+- **Blog pages only**: every research result is filtered to editorial URLs
+  (`is_blog_page` / `keep_blog_pages`) — blog, insights, news, guides, research,
+  dated permalinks, long slugs — and pricing, product, features, integrations,
+  about, careers, docs and landing pages are dropped, with a note in the summary
+  when any were hidden. Applies to opportunity research, publisher scans and the
+  own-page audit.
+- Research budget raised: 150 calls/day per browser, 300/day per IP, 30 per 10
+  minutes, 800/day global.
 - Budget safety: all requests are validated (`_precheck`) **before** a research
   call is charged, so own-domain scans, unsafe links and missing fields return
   400 without spending. Verified live: four rejected requests, budget
