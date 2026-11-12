@@ -241,12 +241,33 @@ def health(request: Request):
     )
 
 
+KNOWN_ACTIONS = {
+    "analyze",
+    "opportunities",
+    "draft",
+    "listicles",
+    "listicle-draft",
+    "listicle_draft",
+    "publisher-policy",
+    "publisher_policy",
+    "domain-scan",
+    "domain_scan",
+    "own-pages",
+    "own_pages",
+    "site-metrics",
+    "site_metrics",
+}
+
+
 def _precheck(req: AnalyzeRequest, action: str) -> None:
     """Validate a request before any budget is spent.
 
     Guarding first and validating later meant a rejected request still burned a
-    research call. Everything cheap and deterministic is checked here.
+    research call. Everything cheap and deterministic is checked here, including
+    the action name itself: an unknown or retired action must not be charged.
     """
+    if action not in KNOWN_ACTIONS:
+        raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
     if action == "analyze":
         if not safe_website_url(req.article_url):
             raise HTTPException(
