@@ -1,36 +1,14 @@
-# Local Python environment
+# Dependencies
+node_modules/
 .venv/
 __pycache__/
-*.py[cod]
-*.pyo
 
-# Local research data (private; never commit)
-data/
-backups/
-*.sqlite3
-*.sqlite3-wal
-*.sqlite3-shm
-
-# Local configuration and secrets
+# Local secrets and project links
 .env
-.env.*
-!.env.example
-*.log
-.streamlit/secrets.toml
+.env*.local
+.vercel/
 
-# Older local code snapshots
-*_backup_before_*.py
-vista_pr_agent_agent*.py
-vista_pr_agent_app*.py
-
-# Node / Next.js
-node_modules/
+# Build output
 .next/
 out/
-npm-debug.log*
-.idea/
-.DS_Store
-Thumbs.db
-desktop.ini
-
-.vercel
+*.tsbuildinfo
