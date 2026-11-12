@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 import time
+from urllib.parse import urlsplit
 from pathlib import Path
 
 from openai import AsyncOpenAI
@@ -1170,7 +1171,38 @@ Find real existing editorial articles that match this angle. Evaluate their
 topical relevance, editorial fit, evidence, competitor presence, and next action.
 Return up to 5 strong candidates.
 """
-    return _run_agent_in_worker(opportunity_agent, prompt)
+    result = _run_agent_in_worker(opportunity_agent, prompt)
+    return _one_per_site(result)
+
+
+def _one_per_site(result: PRResearchResults) -> PRResearchResults:
+    """Keep one opportunity per publication so the queue never repeats a site."""
+    seen: dict[str, int] = {}
+    kept: list[PROpportunity] = []
+    hidden = 0
+    order = {"Strong fit": 3, "Possible fit": 2, "Weak fit": 1, "Not suitable": 0}
+    for opp in result.opportunities:
+        host = (urlsplit(opp.article_url or "").hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        key = host or opp.publication.strip().lower()
+        if key in seen:
+            hidden += 1
+            idx = seen[key]
+            if order.get(opp.pr_fit, 0) > order.get(kept[idx].pr_fit, 0):
+                kept[idx] = opp
+            continue
+        seen[key] = len(kept)
+        kept.append(opp)
+    if not hidden:
+        return result
+    summary = result.research_summary.rstrip()
+    return result.model_copy(
+        update={
+            "opportunities": kept,
+            "research_summary": f"{summary} One page per site is shown ({hidden} duplicate page(s) hidden).",
+        }
+    )
 
 
 def assess_pr_fit(opportunity: PROpportunity) -> PRFitAssessment:

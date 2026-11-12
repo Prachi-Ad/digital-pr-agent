@@ -763,6 +763,41 @@ export default function Home() {
     return { visible, hiddenUsed, hiddenDr, drKnown };
   }
 
+  // One prospect per site: keeps the highest-scoring page and reports the rest.
+  function dedupeByDomain<T extends AnyObj>(
+    items: T[],
+    getUrl: (x: T) => any
+  ): { visible: T[]; hidden: number } {
+    const byDomain = new Map<string, T>();
+    let hidden = 0;
+    for (const item of items) {
+      const d = domainOf(getUrl(item));
+      if (!d) {
+        byDomain.set(`__${byDomain.size}`, item);
+        continue;
+      }
+      const prev = byDomain.get(d);
+      if (!prev) {
+        byDomain.set(d, item);
+        continue;
+      }
+      hidden += 1;
+      if ((Number((item as AnyObj).pr_score) || 0) > (Number((prev as AnyObj).pr_score) || 0)) {
+        byDomain.set(d, item);
+      }
+    }
+    return { visible: Array.from(byDomain.values()), hidden };
+  }
+
+  function DedupeNote({ hidden }: { hidden: number }) {
+    if (!hidden) return null;
+    return (
+      <p className="meta">
+        {hidden} more page{hidden === 1 ? "" : "s"} from the same site hidden — one prospect per site.
+      </p>
+    );
+  }
+
   function FilterNotes({ hiddenUsed, hiddenDr, drKnown }: { hiddenUsed: number; hiddenDr: number; drKnown: boolean }) {
     return (
       <>
@@ -2564,8 +2599,11 @@ export default function Home() {
                           </label>
                         </div>
                         {sortByScore(
-                          filterProspects(
-                            scanResult.articles ?? [],
+                          dedupeByDomain(
+                            filterProspects(
+                              scanResult.articles ?? [],
+                              (a: AnyObj) => a.article_url
+                            ).visible,
                             (a: AnyObj) => a.article_url
                           ).visible
                         ).map((a: AnyObj, i: number) => (
@@ -2641,12 +2679,16 @@ export default function Home() {
                             scanResult.articles ?? [],
                             (a: AnyObj) => a.article_url
                           );
+                          const dd = dedupeByDomain(f.visible, (a: AnyObj) => a.article_url);
                           return (
-                            <FilterNotes
-                              hiddenUsed={f.hiddenUsed}
-                              hiddenDr={f.hiddenDr}
-                              drKnown={f.drKnown}
-                            />
+                            <>
+                              <DedupeNote hidden={dd.hidden} />
+                              <FilterNotes
+                                hiddenUsed={f.hiddenUsed}
+                                hiddenDr={f.hiddenDr}
+                                drKnown={f.drKnown}
+                              />
+                            </>
                           );
                         })()}
                         {(!scanResult.articles || scanResult.articles.length === 0) && (
@@ -2949,8 +2991,11 @@ export default function Home() {
                             DR {DR_CUTOFF}+ only
                           </label>
                           {sortByScore(
-                            filterProspects(
-                              opportunities.opportunities ?? [],
+                            dedupeByDomain(
+                              filterProspects(
+                                opportunities.opportunities ?? [],
+                                (o: AnyObj) => o.article_url
+                              ).visible,
                               (o: AnyObj) => o.article_url
                             ).visible
                           ).map((o: AnyObj, i: number) => (                            <article className="card" key={`${o.article_url}-${i}`}>
@@ -3072,12 +3117,16 @@ export default function Home() {
                               opportunities.opportunities ?? [],
                               (o: AnyObj) => o.article_url
                             );
+                            const dd = dedupeByDomain(f.visible, (o: AnyObj) => o.article_url);
                             return (
-                              <FilterNotes
-                                hiddenUsed={f.hiddenUsed}
-                                hiddenDr={f.hiddenDr}
-                                drKnown={f.drKnown}
-                              />
+                              <>
+                                <DedupeNote hidden={dd.hidden} />
+                                <FilterNotes
+                                  hiddenUsed={f.hiddenUsed}
+                                  hiddenDr={f.hiddenDr}
+                                  drKnown={f.drKnown}
+                                />
+                              </>
                             );
                           })()}
                           {(!opportunities.opportunities || opportunities.opportunities.length === 0) && (
@@ -3751,8 +3800,11 @@ export default function Home() {
                         <strong>Write all inclusion requests</strong> — it uses every researched contact at once.
                       </Note>
                       {sortByScore(
-                        filterProspects(
-                          listicles.opportunities ?? [],
+                        dedupeByDomain(
+                          filterProspects(
+                            listicles.opportunities ?? [],
+                            (item: AnyObj) => item.listicle_url
+                          ).visible,
                           (item: AnyObj) => item.listicle_url
                         ).visible
                       ).map((item: AnyObj, i: number) => (
@@ -3951,12 +4003,16 @@ export default function Home() {
                           listicles.opportunities ?? [],
                           (item: AnyObj) => item.listicle_url
                         );
+                        const dd = dedupeByDomain(f.visible, (item: AnyObj) => item.listicle_url);
                         return (
-                          <FilterNotes
-                            hiddenUsed={f.hiddenUsed}
-                            hiddenDr={f.hiddenDr}
-                            drKnown={f.drKnown}
-                          />
+                          <>
+                            <DedupeNote hidden={dd.hidden} />
+                            <FilterNotes
+                              hiddenUsed={f.hiddenUsed}
+                              hiddenDr={f.hiddenDr}
+                              drKnown={f.drKnown}
+                            />
+                          </>
                         );
                       })()}
                       {(!listicles.opportunities || listicles.opportunities.length === 0) && (
