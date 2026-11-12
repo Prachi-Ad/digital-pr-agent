@@ -120,6 +120,19 @@ type Workflow = "digital" | "listicles";
 type AnalyzedArticle = { url: string; analysis: AnyObj };
 let demoToken: { token: string; expiresAt: number } | null = null;
 
+// Every paid call should refresh the visible budget. callApi sits outside the
+// component, so it notifies whoever is listening instead of reaching into state.
+const quotaListeners = new Set<() => void>();
+function notifyQuotaChanged() {
+  quotaListeners.forEach((fn) => {
+    try {
+      fn();
+    } catch {
+      // A broken listener must never affect the research response.
+    }
+  });
+}
+
 async function getDemoToken(force = false): Promise<string> {
   if (!force && demoToken && demoToken.expiresAt > Date.now() + 20_000) {
     return demoToken.token;
@@ -165,7 +178,12 @@ async function callApi(action: string, body: any = {}, onRetry?: (attempt: numbe
         body: JSON.stringify({ action, ...body }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) return data;
+      if (res.ok) {
+        // A paid call just ran: refresh the displayed budget for every path,
+        // not only the three that used to remember to ask.
+        notifyQuotaChanged();
+        return data;
+      }
 
       const message = data?.detail || data?.error || "Request failed";
       if (res.status === 401 || res.status === 403) {
@@ -690,11 +708,15 @@ export default function Home() {
   }
   useEffect(() => {
     void refreshQuota();
+    quotaListeners.add(refreshQuota);
     // Keep "Calls left today" fresh while working; the check costs no budget.
     const t = setInterval(() => {
       void refreshQuota();
     }, 60000);
-    return () => clearInterval(t);
+    return () => {
+      quotaListeners.delete(refreshQuota);
+      clearInterval(t);
+    };
   }, []);
 
   // Ahrefs Domain Rating cache: domain -> DR number (null = lookup failed).
