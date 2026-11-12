@@ -201,9 +201,9 @@ stays a non-sending demo.
   listicles) has **Reject site**. It blocks the whole domain in this browser,
   hides every existing and future result from it, and is managed (allow again)
   in Settings → Rejected sites. Included in workspace export/import.
-- **DR 50+ is strict**: once any rating is loaded, sub-50 *and* unrated sites are
-  hidden (previously unrated domains slipped through, which is how a DR 16 site
-  appeared). With no ratings at all the list stays visible and asks for Check DR.
+- **DR 50+ is strict** once any rating is loaded: under-50 and unknown are
+  hidden, and unrated sites are counted separately with a "press Check DR"
+  hint. Check DR now rates up to 25 sites per click.
 - Research budget raised: 150 calls/day per browser, 300/day per IP, 30 per 10
   minutes, 800/day global.
 - Budget safety: all requests are validated (`_precheck`) **before** a research
