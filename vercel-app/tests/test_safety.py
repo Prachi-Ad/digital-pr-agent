@@ -223,13 +223,9 @@ class TestApiInputCaps(unittest.TestCase):
             ("analyze", {"article_url": "javascript:alert(1)"}),
             ("opportunities", {}),
             ("draft", {}),
-            ("journalists", {}),
             ("listicles", {"search_theme": "   "}),
-            ("listicle-contact", {}),
             ("publisher-policy", {}),
             ("domain-scan", {"domain": "vistasocial.com"}),
-            ("person-contact", {}),
-            ("collect-writers", {"query": ""}),
             ("listicle-draft", {}),
             ("site-metrics", {"domains": []}),
         ]

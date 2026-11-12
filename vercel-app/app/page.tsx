@@ -20,9 +20,10 @@ import {
   Server,
   Shield,
   SlidersHorizontal,
-  Users,
   X,
 } from "lucide-react";
+
+import { downloadBatchCsv } from "./lib/batch-export";
 
 type AnyObj = Record<string, any>;
 
@@ -66,7 +67,7 @@ const listiclePhases = ["Find & review", "Outreach"] as const;
 type DigitalPhase = (typeof digitalPhases)[number];
 type ListiclePhase = (typeof listiclePhases)[number];
 
-const digitalSteps = ["Article", "PR angles", "Opportunities", "Journalists", "Outreach"] as const;
+const digitalSteps = ["Article", "PR angles", "Opportunities", "Outreach"] as const;
 const listicleSteps = ["Search", "Prospects", "Outreach"] as const;
 type DigitalStep = (typeof digitalSteps)[number];
 type ListicleStep = (typeof listicleSteps)[number];
@@ -75,7 +76,6 @@ const phaseOfDigitalStep: Record<DigitalStep, DigitalPhase> = {
   Article: "Research",
   "PR angles": "Research",
   Opportunities: "Prospects",
-  Journalists: "Prospects",
   Outreach: "Outreach",
 };
 const firstStepOfDigitalPhase: Record<DigitalPhase, DigitalStep> = {
@@ -85,7 +85,7 @@ const firstStepOfDigitalPhase: Record<DigitalPhase, DigitalStep> = {
 };
 const stepsOfDigitalPhase: Record<DigitalPhase, DigitalStep[]> = {
   Research: ["Article", "PR angles"],
-  Prospects: ["Opportunities", "Journalists"],
+  Prospects: ["Opportunities"],
   Outreach: ["Outreach"],
 };
 const phaseOfListicleStep: Record<ListicleStep, ListiclePhase> = {
@@ -99,9 +99,9 @@ const firstStepOfListiclePhase: Record<ListiclePhase, ListicleStep> = {
 };
 const phaseCopy: Record<string, string> = {
   Research: "Analyze the article and pick the angle. The evidence stays on screen.",
-  Prospects: "Review the editorial openings. Writers appear for each approved one.",
+  Prospects: "Review the editorial openings for the angle you approved.",
   Outreach: "Draft and approve. Nothing is sent from this app.",
-  "Find & review": "Find pages worth pursuing, then review fit, contact route, and policy.",
+  "Find & review": "Find pages worth pursuing, then review fit and publisher policy.",
 };
 
 const fitStyles: Record<string, { className: string; label: string }> = {
@@ -452,44 +452,18 @@ export default function Home() {
   const [oppByAngle, setOppByAngle] = useState<Record<string, AnyObj>>({});
   const [errOpp, setErrOpp] = useState<string | null>(null);
 
-  const [selectedOpp, setSelectedOpp] = useState<AnyObj | null>(null);
-  const [loadingJourn, setLoadingJourn] = useState(false);
-  const [journalists, setJournalists] = useState<AnyObj | null>(null);
-  const [writersByOpp, setWritersByOpp] = useState<Record<string, AnyObj>>({});
-  const [errJourn, setErrJourn] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, AnyObj>>({});
 
   // Listicle inclusion drafts
   const [listicleDrafts, setListicleDrafts] = useState<Record<string, AnyObj>>({});
   const [loadingListDraft, setLoadingListDraft] = useState<string | null>(null);
   const [errListDraft, setErrListDraft] = useState<string | null>(null);
-  const [contactByItem, setContactByItem] = useState<Record<string, AnyObj>>({});
   const [policyByItem, setPolicyByItem] = useState<Record<string, AnyObj>>({});
 
   const [loadingDraft, setLoadingDraft] = useState<string | null>(null);
   const [errDraft, setErrDraft] = useState<string | null>(null);
   const [draftVariants, setDraftVariants] = useState<Record<string, number>>({});
-  const [checkedPeople, setCheckedPeople] = useState<string[]>([]);
-  const [emailByPerson, setEmailByPerson] = useState<Record<string, AnyObj>>({});
-  const [loadingEmail, setLoadingEmail] = useState<string | null>(null);
 
-  // Media library: every researched writer auto-saved, persisted in this browser.
-  const MEDIA_LIBRARY_KEY = "pr_media_library_v1";
-  const [mediaLibrary, setMediaLibrary] = useState<Record<string, AnyObj>>(() => {
-    try {
-      const raw = typeof window !== "undefined" ? window.localStorage.getItem(MEDIA_LIBRARY_KEY) : null;
-      const parsed = raw ? JSON.parse(raw) : {};
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
-    }
-  });
-  const [libSearch, setLibSearch] = useState("");
-  const [libEmailOnly, setLibEmailOnly] = useState(false);
-  const [collectQuery, setCollectQuery] = useState("");
-  const [loadingCollect, setLoadingCollect] = useState(false);
-  const [errCollect, setErrCollect] = useState<string | null>(null);
-  const [collectMsg, setCollectMsg] = useState<string | null>(null);
   const OUTCOME_KEY = "pr_pitch_outcomes_v1";
   const [pitchOutcomes, setPitchOutcomes] = useState<Record<string, AnyObj>>(() => {
     try {
@@ -530,8 +504,37 @@ export default function Home() {
     }
   }, [campaigns]);
 
-  function saveCampaign() {
-    if (!analysis && Object.keys(drafts).length === 0 && !listicles) return;
+  function batchRowCount(): number {
+    return (
+      (analyses?.length || 0) +
+      (opportunities?.opportunities?.length || 0) +
+      (listicles?.opportunities?.length || 0) +
+      Object.keys(drafts).length +
+      Object.keys(listicleDrafts).length
+    );
+  }
+
+  // One file for the whole batch: angles, opportunities, listicles and drafts.
+  // CSV with a BOM so Google Sheets opens it as a clean table.
+  function downloadBatch() {
+    const rows = downloadBatchCsv(
+      {
+        analyses,
+        opportunities: opportunities?.opportunities || [],
+        listicles: listicles?.opportunities || [],
+        drafts,
+        listicleDrafts,
+        outcomes: pitchOutcomes,
+        angle: selectedAngle?.angle || "",
+        theme: listicles?.search_theme || "",
+      },
+      workflow === "digital" ? "vista-digital-pr" : "vista-listicles"
+    );
+    if (rows === 0) return;
+    setBackupErr(null);
+  }
+
+  function saveCampaign() {    if (!analysis && Object.keys(drafts).length === 0 && !listicles) return;
     const name = window.prompt(
       "Campaign name",
       analysis?.article_title || (listicles ? `Listicles: ${listicles.search_theme}` : "") || "Untitled campaign"
@@ -552,8 +555,6 @@ export default function Home() {
         activeUrl,
         selectedAngle,
         oppByAngle,
-        selectedOpp,
-        writersByOpp,
         drafts,
         draftKeys: Object.keys(drafts),
         usedUrls,
@@ -562,11 +563,8 @@ export default function Home() {
         listForm,
         listicles,
         selectedItem,
-        contact,
         policy,
-        contactByItem,
         policyByItem,
-        emailByPerson,
         domainInput,
         topicHint,
         scanResult,
@@ -586,11 +584,6 @@ export default function Home() {
     setOpportunities(
       c.selectedAngle && c.oppByAngle ? (c.oppByAngle[angleKey(c.selectedAngle)] ?? null) : null
     );
-    setSelectedOpp(c.selectedOpp || null);
-    setWritersByOpp(c.writersByOpp || {});
-    setJournalists(
-      c.selectedOpp && c.writersByOpp ? (c.writersByOpp[oppKey(c.selectedOpp)] ?? null) : null
-    );
     setDrafts(c.drafts || {});
     setListicleDrafts(c.listicleDrafts || {});
     setListForm(c.listForm || {
@@ -603,11 +596,8 @@ export default function Home() {
     });
     setListicles(c.listicles || null);
     setSelectedItem(c.selectedItem || null);
-    setContact(c.contact || null);
     setPolicy(c.policy || null);
-    setContactByItem(c.contactByItem || {});
     setPolicyByItem(c.policyByItem || {});
-    setEmailByPerson(c.emailByPerson && typeof c.emailByPerson === "object" ? c.emailByPerson : {});
     setDomainInput(typeof c.domainInput === "string" ? c.domainInput : "");
     setTopicHint(typeof c.topicHint === "string" ? c.topicHint : "");
     setScanResult(c.scanResult || null);
@@ -624,12 +614,9 @@ export default function Home() {
     if (c.listicleDrafts && typeof c.listicleDrafts === "object") {
       setListicleDrafts(c.listicleDrafts);
     }
-    setCheckedPeople([]);
     setErrOpp(null);
-    setErrJourn(null);
     setErrDraft(null);
     setErrList(null);
-    setErrContact(null);
     setErrPolicy(null);
     setErrListDraft(null);
     setShowStart(false);
@@ -648,11 +635,9 @@ export default function Home() {
     setDigitalStep(
       c.drafts && Object.keys(c.drafts).length
         ? "Outreach"
-        : c.selectedOpp
-          ? "Journalists"
-          : c.selectedAngle
-            ? "Opportunities"
-            : "Article"
+        : c.selectedAngle
+          ? "Opportunities"
+          : "Article"
     );
   }
 
@@ -666,15 +651,6 @@ export default function Home() {
         updated: new Date().toISOString().slice(0, 10),
       },
     }));
-  }
-
-  function draftStatusFor(recipientName: any): string {
-    const entry = Object.values(drafts).find(
-      (d: AnyObj) => String(d.recipient_name || "").toLowerCase() === String(recipientName || "").toLowerCase()
-    );
-    if (!entry) return "";
-    const id = Object.keys(drafts).find((k) => drafts[k] === entry) || "";
-    return pitchOutcomes[id]?.status || "Draft";
   }
 
   const outcomeCounts = Object.keys(drafts).reduce(
@@ -1075,7 +1051,6 @@ export default function Home() {
       exportedAt: new Date().toISOString(),
       usedUrls,
       blockedDomains,
-      mediaLibrary,
       pitchOutcomes,
       campaigns,
     };
@@ -1089,7 +1064,7 @@ export default function Home() {
     markBackedUp();
     setBackupErr(null);
     setBackupMsg(
-      `Exported ${Object.keys(campaigns).length} campaigns, ${Object.keys(mediaLibrary).length} contacts, ${usedUrls.length} used marks, ${blockedDomains.length} rejected sites.`
+      `Exported ${Object.keys(campaigns).length} campaigns, ${usedUrls.length} used marks, ${blockedDomains.length} rejected sites.`
     );
   }
 
@@ -1103,7 +1078,7 @@ export default function Home() {
         throw new Error("That is not a Vista PR workspace file.");
       }
       const replace = window.confirm(
-        "Replace this browser's saved campaigns, contacts, used marks and outcomes with the file? This cannot be undone."
+        "Replace this browser's saved campaigns, used marks and outcomes with the file? This cannot be undone."
       );
       if (!replace) return;
       const normed: string[] = Array.isArray(data.usedUrls)
@@ -1127,13 +1102,12 @@ export default function Home() {
             )
           : []
       );
-      setMediaLibrary(data.mediaLibrary && typeof data.mediaLibrary === "object" ? data.mediaLibrary : {});
       setPitchOutcomes(
         data.pitchOutcomes && typeof data.pitchOutcomes === "object" ? data.pitchOutcomes : {}
       );
       setCampaigns(data.campaigns && typeof data.campaigns === "object" ? data.campaigns : {});
       setBackupMsg(
-        `Imported ${Object.keys(data.campaigns || {}).length} campaigns, ${Object.keys(data.mediaLibrary || {}).length} contacts, ${normed.length} used marks, ${
+        `Imported ${Object.keys(data.campaigns || {}).length} campaigns, ${normed.length} used marks, ${
           Array.isArray(data.blockedDomains) ? data.blockedDomains.length : 0
         } rejected sites.`
       );
@@ -1154,16 +1128,12 @@ export default function Home() {
     return data;
   }
 
-  function splitDraftId(id: string): string {
-    const sep = id.lastIndexOf("##");
-    return sep >= 0 ? id.slice(0, sep) : "";
-  }
-
   function buildPitchRows(): string[][] {
     const today = new Date().toISOString().slice(0, 10);
     const rows: string[][] = [];
-    for (const id of Object.keys(drafts)) {      const d = drafts[id];
-      const oppUrl = splitDraftId(id);
+    for (const id of Object.keys(drafts)) {
+      const d = drafts[id];
+      const oppUrl = id;
       let angleName = "";
       let opp: AnyObj | null = null;
       for (const [ak, res] of Object.entries(oppByAngle)) {
@@ -1177,8 +1147,6 @@ export default function Home() {
         }
       }
       const out = pitchOutcomes[id] || {};
-      const emailRec = emailByPerson[id];
-      const email = emailRec && !emailRec.__error ? emailRec.email || "" : "";
       let domain = "";
       try {
         domain = new URL(oppUrl).hostname.replace(/^www\./, "");
@@ -1189,16 +1157,16 @@ export default function Home() {
         id,
         today,
         angleName,
-        d.publication || "",
+        d.publication || opp?.publication || "",
         domain,
         opp?.article_title || d.target_title || "",
         oppUrl,
         isUsed(oppUrl) ? "yes" : "no",
         String(opp?.pr_fit || ""),
         String(opp?.pr_score || ""),
-        d.recipient_name || "",
-        d.recipient_role || "",
-        email,
+        "",
+        "",
+        "",
         d.subject_line || "",
         d.message_body || "",
         out.status || "Draft",
@@ -1214,7 +1182,7 @@ export default function Home() {
       const out = pitchOutcomes[id] || {};
       if (out.status !== "Covered") continue;
       const d = drafts[id];
-      const oppUrl = splitDraftId(id);
+      const oppUrl = id;
       let opp: AnyObj | null = null;
       for (const res of Object.values(oppByAngle)) {
         const found = (res?.opportunities ?? []).find(
@@ -1228,8 +1196,8 @@ export default function Home() {
       rows.push([
         id,
         out.updated || new Date().toISOString().slice(0, 10),
-        d.recipient_name || "",
-        d.publication || "",
+        "",
+        d.publication || opp?.publication || "",
         opp?.article_title || d.target_title || "",
         oppUrl,
         d.subject_line || "",
@@ -1238,24 +1206,6 @@ export default function Home() {
       ]);
     }
     return rows;
-  }
-
-  function buildContactRows(): string[][] {
-    return (Object.entries(mediaLibrary) as Array<[string, AnyObj]>).map(([key, e]) => [
-      key,
-      e.name || "",
-      e.publication || "",
-      e.role || "",
-      e.beat || "",
-      e.email || "",
-      e.contact_page || "",
-      e.profile_url || "",
-      e.article_title || "",
-      e.article_url || "",
-      (e.angles ?? []).slice(-1)[0] || "",
-      e.last_seen || "",
-      draftStatusFor(e.name) || "",
-    ]);
   }
 
   function buildListicleRows(): string[][] {
@@ -1272,8 +1222,8 @@ export default function Home() {
         item.listicle_title || d.target_title || "",
         item.listicle_url || "",
         item.placement_type || "",
-        d.recipient_name || "",
-        d.recipient_role || "",
+        "",
+        "",
         "",
         d.subject_line || "",
         d.message_body || "",
@@ -1332,7 +1282,7 @@ export default function Home() {
       rows.push([
         id,
         out.updated || new Date().toISOString().slice(0, 10),
-        d.recipient_name || "",
+        "",
         item.publication || d.publication || "",
         item.listicle_title || d.target_title || "",
         item.listicle_url || "",
@@ -1342,163 +1292,6 @@ export default function Home() {
       ]);
     }
     return rows;
-  }
-
-  async function syncContactsToSheet() {
-    if (Object.keys(mediaLibrary).length === 0) return;
-    setSyncing(true);
-    setSyncMsg(null);
-    setSyncErr(null);
-    try {
-      const data = await postSheetTab("Contacts", buildContactRows());
-      setCollectMsg(`Contacts synced: ${data.appended} added, ${data.updated} refreshed.`);
-    } catch (err: any) {
-      setErrCollect(err?.message || "Sheet sync failed.");
-    } finally {
-      setSyncing(false);
-    }
-  }
-
-  async function collectWriters(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const query = collectQuery.trim();
-    if (!query) {
-      setErrCollect("Describe what to collect, e.g. fintech reporters at TechCrunch.");
-      return;
-    }
-    setLoadingCollect(true);
-    setErrCollect(null);
-    setCollectMsg(null);
-    setRetryMsg(null);
-    try {
-      const data = await callApi("collect-writers", { query }, (a) =>
-        setRetryMsg(`Retrying (attempt ${a}/3)...`)
-      );
-      const people = data?.journalists ?? [];
-      saveToLibrary(people, null, null);
-      setCollectMsg(
-        people.length > 0
-          ? `Saved ${people.length} contact(s) to the library. ${data?.research_summary || ""}`
-          : "No verifiable writers found. Try a more specific beat or outlet."
-      );
-    } catch (err: any) {
-      setErrCollect(err?.message || "Something went wrong");
-    } finally {
-      setLoadingCollect(false);
-      setRetryMsg(null);
-    }
-  }
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(MEDIA_LIBRARY_KEY, JSON.stringify(mediaLibrary));
-    } catch {
-      // Private-mode storage may be unavailable; the in-memory list still works.
-    }
-  }, [mediaLibrary]);
-
-  function libraryKey(name: any, publication: any): string {
-    return `${String(name || "").trim().toLowerCase()} @ ${String(publication || "").trim().toLowerCase()}`;
-  }
-
-  function saveToLibrary(people: AnyObj[], opportunity?: AnyObj | null, angle?: AnyObj | null) {
-    if (!Array.isArray(people) || people.length === 0) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const angleText = String(angle?.angle || "").trim();
-    setMediaLibrary((current) => {
-      const next = { ...current };
-      for (const p of people) {
-        const key = libraryKey(p.name, p.publication);
-        if (key === " @ ") continue;
-        const prev = next[key] || {};
-        const angles = Array.isArray(prev.angles) ? [...prev.angles] : [];
-        if (angleText && !angles.includes(angleText)) angles.push(angleText);
-        next[key] = {
-          name: p.name || prev.name || "",
-          publication: p.publication || prev.publication || "",
-          role: p.current_role || prev.role || "",
-          beat: p.topic_covered || prev.beat || "",
-          article_title: p.relevant_article_title || prev.article_title || "",
-          article_url: p.relevant_article_url || prev.article_url || "",
-          profile_url:
-            p.author_profile_or_contact_page && p.author_profile_or_contact_page !== "Unknown"
-              ? p.author_profile_or_contact_page
-              : prev.profile_url || "",
-          why: p.why_relevant || prev.why || "",
-          pitch_angle: p.suggested_pitch_angle || prev.pitch_angle || "",
-          opportunity_title: opportunity?.article_title || prev.opportunity_title || "",
-          opportunity_url: opportunity?.article_url || prev.opportunity_url || "",
-          angles: angles.slice(-5),
-          email: prev.email || "",
-          email_evidence: prev.email_evidence || "",
-          contact_page: prev.contact_page || "",
-          first_seen: prev.first_seen || today,
-          last_seen: today,
-        };
-      }
-      return next;
-    });
-  }
-
-  function mergeLibraryEmail(person: AnyObj, contact: AnyObj) {
-    const key = libraryKey(person.name, person.publication);
-    if (key === " @ ") return;
-    const today = new Date().toISOString().slice(0, 10);
-    setMediaLibrary((current) => {
-      const prev = current[key] || {
-        name: person.name || "",
-        publication: person.publication || "",
-        first_seen: today,
-        angles: [],
-      };
-      return {
-        ...current,
-        [key]: {
-          ...prev,
-          email: contact.email && contact.email !== "Not publicly found" ? contact.email : prev.email || "",
-          email_evidence: contact.evidence || prev.email_evidence || "",
-          contact_page:
-            contact.contact_page_url && contact.contact_page_url !== "Unknown"
-              ? contact.contact_page_url
-              : prev.contact_page || "",
-          last_seen: today,
-        },
-      };
-    });
-  }
-
-  function downloadLibraryCsv(entries: AnyObj[]) {
-    const header = [
-      "name", "publication", "role", "beat", "email", "contact_page",
-      "profile_url", "source_article", "source_url", "last_angle", "last_seen",
-    ];
-    const rows = entries.map((e) => [
-      e.name || "", e.publication || "", e.role || "", e.beat || "",
-      e.email || "", e.contact_page || "", e.profile_url || "",
-      e.article_title || "", e.article_url || "",
-      (e.angles ?? []).slice(-1)[0] || "", e.last_seen || "",
-    ]);
-    const csv = [header, ...rows]
-      .map((row) => row.map(csvCell).join(","))
-      .join("\r\n");
-    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "media_library.csv";
-    link.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function personKey(name: any): string {
-    return draftKey(oppKey(selectedOpp), name);
-  }
-
-  function togglePerson(name: any) {
-    const key = String(name || "");
-    setCheckedPeople((current) =>
-      current.includes(key) ? current.filter((n) => n !== key) : [...current, key]
-    );
   }
 
   // Listicle state
@@ -1515,27 +1308,21 @@ export default function Home() {
   const [errList, setErrList] = useState<string | null>(null);
 
   const [selectedItem, setSelectedItem] = useState<AnyObj | null>(null);
-  const [loadingContact, setLoadingContact] = useState(false);
-  const [contact, setContact] = useState<AnyObj | null>(null);
-  const [errContact, setErrContact] = useState<string | null>(null);
 
   const [loadingPolicy, setLoadingPolicy] = useState(false);
   const [policy, setPolicy] = useState<AnyObj | null>(null);
   const [errPolicy, setErrPolicy] = useState<string | null>(null);
-  function listDraftKey(url: any, name: any): string {
-    return `list::${String(url || "")}##${String(name || "contact")}`;
+  function listDraftKey(url: any): string {
+    return `list::${String(url || "")}`;
   }
 
   async function writeAllListicleDrafts() {
-    const entries: Array<{ item: AnyObj; person: AnyObj }> = [];
+    const entries: AnyObj[] = [];
     for (const item of listicles?.opportunities ?? []) {
-      const c = contactByItem[item.listicle_url];
-      for (const person of c?.contacts ?? []) {
-        entries.push({ item, person });
-      }
+      entries.push(item);
     }
     if (entries.length === 0) {
-      setErrListDraft("Run Find contact on at least one listicle first.");
+      setErrListDraft("Search for listicles first.");
       return;
     }
     if (!budgetAllows(entries.length)) return;
@@ -1547,22 +1334,22 @@ export default function Home() {
     let done = 0;
     try {
       for (let index = 0; index < entries.length; index += 1) {
-        const { item, person } = entries[index];
+        const item = entries[index];
         setRetryMsg(`Writing inclusion requests ${index + 1} of ${entries.length}...`);
         try {
           const data = await callApi(
             "listicle-draft",
-            { item, contact: person },
+            { item },
             (a) => setRetryMsg(`Writing requests ${index + 1} of ${entries.length} - retry ${a}/3...`)
           );
           setListicleDrafts((current) => ({
             ...current,
-            [listDraftKey(item.listicle_url, person.contact_name)]: { ...data, __item: item },
+            [listDraftKey(item.listicle_url)]: { ...data, __item: item },
           }));
           markUrlsUsed([item.listicle_url]);
           done += 1;
         } catch (err: any) {
-          failures.push(`${shortText(person.contact_name, 30)}: ${err?.message || "failed"}`);
+          failures.push(`${shortText(item.listicle_title, 30)}: ${err?.message || "failed"}`);
           if (String(err?.message || "").match(/429|limit|budget|Too many/i)) break;
         }
       }
@@ -1577,8 +1364,8 @@ export default function Home() {
     }
   }
 
-  async function writeListicleDraft(item: AnyObj, person: AnyObj) {
-    const key = listDraftKey(item.listicle_url, person.contact_name);
+  async function writeListicleDraft(item: AnyObj) {
+    const key = listDraftKey(item.listicle_url);
     const existing = listicleDrafts[key];
     const variant = existing ? (draftVariants[key] || 0) + 1 : draftVariants[key] || 0;
     setLoadingListDraft(key);
@@ -1589,7 +1376,6 @@ export default function Home() {
         "listicle-draft",
         {
           item,
-          contact: person,
           variant,
           previous_subject: existing?.subject_line || "",
           previous_body: existing?.message_body || "",
@@ -1598,7 +1384,7 @@ export default function Home() {
       );
       setListicleDrafts((current) => ({
         ...current,
-        [key]: { ...data, __item: item, __contact: person },
+        [key]: { ...data, __item: item },
       }));
       setDraftVariants((current) => ({ ...current, [key]: variant }));
       markUrlsUsed([item.listicle_url]);
@@ -1617,13 +1403,7 @@ export default function Home() {
     oppEntries.length > 0
       ? oppEntries.reduce((n, [, res]) => n + (res?.opportunities?.length || 0), 0)
       : opportunities?.opportunities?.length || 0;
-  const writerEntries = Object.entries(writersByOpp);
-  const journCount =
-    writerEntries.length > 0
-      ? writerEntries.reduce((n, [, res]) => n + (res?.journalists?.length || 0), 0)
-      : journalists?.journalists?.length || 0;
   const listCount = listicles?.opportunities?.length || 0;
-  const contactCount = contact?.contacts?.length || 0;
 
   const phases: readonly string[] = workflow === "digital" ? digitalPhases : listiclePhases;
   const activePhase =
@@ -1662,13 +1442,10 @@ export default function Home() {
   function startNewListicles() {
     setListicles(null);
     setSelectedItem(null);
-    setContact(null);
     setPolicy(null);
-    setContactByItem({});
     setPolicyByItem({});
     setListicleDrafts({});
     setErrList(null);
-    setErrContact(null);
     setErrPolicy(null);
     setErrListDraft(null);
     setShowStart(false);
@@ -1703,13 +1480,7 @@ export default function Home() {
     setSelectedAngle(null);
     setOpportunities(null);
     setOppByAngle({});
-    setSelectedOpp(null);
-    setJournalists(null);
-    setWritersByOpp({});
-    setCheckedPeople([]);
-    setEmailByPerson({});
     setErrOpp(null);
-    setErrJourn(null);
     setErrDraft(null);
     setRetryMsg(null);
   }
@@ -1904,21 +1675,14 @@ export default function Home() {
     return String(o?.article_url || "").trim();
   }
 
-  function draftKey(oppUrl: string, name: any): string {
-    return `${oppUrl}##${String(name || "contact")}`;
+  function draftKey(oppUrl: string): string {
+    return String(oppUrl || "");
   }
 
   function selectAngleCached(angle: AnyObj) {
     setSelectedAngle(angle);
     setOpportunities(oppByAngle[angleKey(angle)] ?? null);
-    // Drop the previous angle's selection so the Journalists step never shows
-    // writers researched for a different angle.
-    setSelectedOpp(null);
-    setJournalists(null);
-    setCheckedPeople([]);
-    setEmailByPerson({});
     setErrOpp(null);
-    setErrJourn(null);
   }
 
   function pickAngle(angle: AnyObj) {
@@ -1930,45 +1694,11 @@ export default function Home() {
     }
   }
 
-  function selectOppCached(opportunity: AnyObj) {
-    setSelectedOpp(opportunity);
-    setJournalists(writersByOpp[oppKey(opportunity)] ?? null);
-    setCheckedPeople([]);
-    setErrJourn(null);
-  }
-
-  async function findEmailFor(person: AnyObj, opportunity?: AnyObj | null) {
-    const opp = opportunity ?? selectedOpp;
-    if (!opp) return;
-    const key = draftKey(oppKey(opp), person.name);
-    setLoadingEmail(key);
-    setRetryMsg(null);
-    try {
-      const data = await callApi(
-        "person-contact",
-        { person, opportunity: opp },
-        (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
-      );
-      setEmailByPerson((current) => ({ ...current, [key]: data }));
-      mergeLibraryEmail(person, data);
-    } catch (err: any) {
-      setEmailByPerson((current) => ({
-        ...current,
-        [key]: { __error: err?.message || "Email lookup failed" },
-      }));
-    } finally {
-      setLoadingEmail(null);
-      setRetryMsg(null);
-    }
-  }
-
   async function researchAngle(angle: AnyObj) {
     setSelectedAngle(angle);
     setLoadingOpp(true);
     setErrOpp(null);
     setOpportunities(null);
-    setSelectedOpp(null);
-    setJournalists(null);
     setRetryMsg(null);
     try {
       const data = await callApi("opportunities", { angle }, (a) =>
@@ -2038,56 +1768,6 @@ export default function Home() {
     }
   }
 
-  async function researchJournalistsFor(opportunity: AnyObj) {
-    if (!selectedAngle) return;
-    setSelectedOpp(opportunity);
-    setJournalists(null);
-    setCheckedPeople([]);
-    setDigitalStep("Journalists");
-    setLoadingJourn(true);
-    setErrJourn(null);
-    setRetryMsg(null);
-    try {
-      const data = await callApi(
-        "journalists",
-        { angle: selectedAngle, opportunity },
-        (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
-      );
-      setJournalists(data);
-      setWritersByOpp((current) => ({ ...current, [oppKey(opportunity)]: data }));
-      saveToLibrary(data?.journalists, opportunity, selectedAngle);
-    } catch (err: any) {
-      setErrJourn(err?.message || "Something went wrong");
-    } finally {
-      setLoadingJourn(false);
-      setRetryMsg(null);
-    }
-  }
-
-  async function runJournalists() {
-    if (!selectedAngle || !selectedOpp) return;
-    setLoadingJourn(true);
-    setErrJourn(null);
-    setJournalists(null);
-    setCheckedPeople([]);
-    setRetryMsg(null);
-    try {
-      const data = await callApi(
-        "journalists",
-        { angle: selectedAngle, opportunity: selectedOpp },
-        (a) => setRetryMsg(`Retrying (attempt ${a}/3)...`)
-      );
-      setJournalists(data);
-      setWritersByOpp((current) => ({ ...current, [oppKey(selectedOpp)]: data }));
-      saveToLibrary(data?.journalists, selectedOpp, selectedAngle);
-    } catch (err: any) {
-      setErrJourn(err?.message || "Something went wrong");
-    } finally {
-      setLoadingJourn(false);
-      setRetryMsg(null);
-    }
-  }
-
   // The exact list the page shows: filtered (rejected/used/DR) and one page per
   // site. Bulk actions use this, so calls always match what is on screen.
   function visibleOpportunities(): AnyObj[] {
@@ -2099,53 +1779,6 @@ export default function Home() {
   function clearProspectFilters() {
     setHideUsed(false);
     setDrOnly(false);
-  }
-
-  async function findWritersForAll() {
-    const opps = visibleOpportunities();
-    if (!selectedAngle || opps.length === 0) return;
-    if (!budgetAllows(opps.length)) return;
-    if (!confirmBulk(`Find writers for ${opps.length} site${opps.length === 1 ? "" : "s"}`, opps.length)) return;
-    setLoadingJourn(true);
-    setErrJourn(null);
-    setCheckedPeople([]);
-    setRetryMsg(null);
-    const failures: string[] = [];
-    const collected: Record<string, AnyObj> = {};
-    try {
-      for (let index = 0; index < opps.length; index += 1) {
-        const opportunity = opps[index];
-        setRetryMsg(`Finding writers ${index + 1} of ${opps.length}...`);
-        try {
-          const data = await callApi(
-            "journalists",
-            { angle: selectedAngle, opportunity },
-            (attempt) => setRetryMsg(`Finding writers ${index + 1} of ${opps.length} - retry ${attempt}/3...`)
-          );
-          collected[oppKey(opportunity)] = data;
-          setWritersByOpp((current) => ({ ...current, [oppKey(opportunity)]: data }));
-          saveToLibrary(data?.journalists, opportunity, selectedAngle);
-          if (oppKey(opportunity) === oppKey(selectedOpp)) setJournalists(data);
-        } catch (err: any) {
-          failures.push(`${shortText(opportunity.article_title, 60)}: ${err?.message || "failed"}`);
-          if (String(err?.message || "").match(/429|limit|budget|Too many/i)) break;
-        }
-      }
-      if (failures.length > 0) {
-        setErrJourn(`Stopped with ${failures.length} failure(s). ${failures.join(" | ")}`);
-      }
-      // Land on real results: select an opportunity that actually has writers.
-      const firstWithWriters =
-        opps.find((o: AnyObj) => (collected[oppKey(o)]?.journalists ?? []).length > 0) ?? opps[0];
-      if (firstWithWriters) {
-        setSelectedOpp(firstWithWriters);
-        setJournalists(collected[oppKey(firstWithWriters)] ?? writersByOpp[oppKey(firstWithWriters)] ?? null);
-      }
-      setDigitalStep("Journalists");
-    } finally {
-      setLoadingJourn(false);
-      setRetryMsg(null);
-    }
   }
 
   function markUrlsUsed(urls: ArrayLike<any>) {
@@ -2162,11 +1795,10 @@ export default function Home() {
     });
   }
 
-  async function writeDraft(person: AnyObj, opportunity?: AnyObj | null, angle?: AnyObj | null) {
-    const opp = opportunity ?? selectedOpp;
+  async function writeDraft(opportunity: AnyObj, angle?: AnyObj | null) {
     const ang = angle ?? selectedAngle;
-    if (!ang || !opp) return;
-    const key = draftKey(oppKey(opp), person.name);
+    if (!ang || !opportunity) return;
+    const key = draftKey(oppKey(opportunity));
     const existing = drafts[key];
     const variant = existing ? (draftVariants[key] || 0) + 1 : draftVariants[key] || 0;
     setLoadingDraft(key);
@@ -2176,9 +1808,8 @@ export default function Home() {
       const data = await callApi(
         "draft",
         {
-          angle: ang,
-          opportunity: opp,
-          person,
+          opportunity,
+          angle_context: ang,
           variant,
           previous_subject: existing?.subject_line || "",
           previous_body: existing?.message_body || "",
@@ -2187,87 +1818,13 @@ export default function Home() {
       );
       setDrafts((current) => ({
         ...current,
-        [key]: { ...data, __person: person, __opp: opp, __angle: ang },
+        [key]: { ...data, __opp: opportunity, __angle: ang },
       }));
       setDraftVariants((current) => ({ ...current, [key]: variant }));
-      markUrlsUsed([oppKey(opp)]);
+      markUrlsUsed([oppKey(opportunity)]);
       if (!existing) setDigitalStep("Outreach");
     } catch (err: any) {
       setErrDraft(err?.message || "Draft generation failed");
-    } finally {
-      setLoadingDraft(null);
-      setRetryMsg(null);
-    }
-  }
-
-  async function writeAllPitches() {
-    const entries: Array<{ angle: AnyObj; opportunity: AnyObj; person: AnyObj }> = [];
-    for (const [key, res] of Object.entries(oppByAngle)) {
-      const angle = (analysis?.pr_angles ?? []).find((a: AnyObj) => angleKey(a) === key);
-      if (!angle) continue;
-      for (const opportunity of res?.opportunities ?? []) {
-        for (const person of writersByOpp[oppKey(opportunity)]?.journalists ?? []) {
-          entries.push({ angle, opportunity, person });
-        }
-      }
-    }
-    if (entries.length === 0) return;
-    await runPitchBatch(entries);
-  }
-
-  async function writeSelectedPitches() {
-    if (!selectedAngle || !selectedOpp || checkedPeople.length === 0) return;
-    const people = (journalists?.journalists ?? []).filter((j: AnyObj) =>
-      checkedPeople.includes(String(j.name || ""))
-    );
-    if (people.length === 0) return;
-    await runPitchBatch(
-      people.map((person: AnyObj) => ({
-        angle: selectedAngle,
-        opportunity: selectedOpp,
-        person,
-      }))
-    );
-  }
-
-  async function runPitchBatch(
-    entries: Array<{ angle: AnyObj; opportunity: AnyObj; person: AnyObj }>
-  ) {
-    if (!budgetAllows(entries.length)) return;
-    if (!confirmBulk("Write all pitches", entries.length)) return;
-    setLoadingDraft("__all__");
-    setErrDraft(null);
-    setRetryMsg(null);
-    const failures: string[] = [];
-    let done = 0;
-    const pitchedUrls: string[] = [];
-    try {
-      for (let index = 0; index < entries.length; index += 1) {
-        const { angle, opportunity, person } = entries[index];
-        const key = draftKey(oppKey(opportunity), person.name);
-        setRetryMsg(`Writing pitches ${index + 1} of ${entries.length}...`);
-        try {
-          const data = await callApi(
-            "draft",
-            { angle, opportunity, person },
-            (attempt) => setRetryMsg(`Writing pitches ${index + 1} of ${entries.length} - retry ${attempt}/3...`)
-          );
-          setDrafts((current) => ({ ...current, [key]: data }));
-          pitchedUrls.push(oppKey(opportunity));
-          done += 1;
-        } catch (err: any) {
-          failures.push(`${shortText(person.name, 40)}: ${err?.message || "failed"}`);
-          if (String(err?.message || "").match(/429|limit|budget|Too many/i)) break;
-        }
-      }
-      if (failures.length > 0) {
-        setErrDraft(
-          `Wrote ${done} of ${entries.length} pitches. Failures: ${failures.join(" | ")}`
-        );
-      }
-      markUrlsUsed(pitchedUrls);
-      if (done > 0) setDigitalStep("Outreach");
-      void refreshQuota();
     } finally {
       setLoadingDraft(null);
       setRetryMsg(null);
@@ -2314,55 +1871,51 @@ export default function Home() {
     const rows: string[][] = [];
     for (const [angleName, res] of angleGroups) {
       for (const opportunity of res?.opportunities ?? []) {
-        const writers = writersByOpp[oppKey(opportunity)]?.journalists ?? [];
-        const contacts = writers.length ? writers : [null];
-        for (const person of contacts) {
-          const draft = person ? drafts[draftKey(oppKey(opportunity), person.name)] : null;
-          let domain = "";
-          try {
-            domain = new URL(opportunity.article_url || "").hostname.replace(/^www\./, "");
-          } catch {
-            domain = "";
-          }
-          rows.push([
-            angleName || "",
-            opportunity.publication || "",
-            domain,
-            opportunity.article_title || "",
-            opportunity.article_url || "",
-            isUsed(opportunity.article_url) ? "yes" : "no",
-            opportunity.pr_fit || "",
-            opportunity.pr_score || "",
-            Array.isArray(opportunity.pr_score_reasons)
-              ? opportunity.pr_score_reasons.join("; ")
-              : "",
-            (() => {
-              let domain = "";
-              try {
-                domain = new URL(opportunity.article_url || "").hostname.replace(/^www\./, "").toLowerCase();
-              } catch {
-                domain = "";
-              }
-              return drByDomain[domain] ?? "";
-            })(),
-            opportunity.audience_question || "",
-            opportunity.aeo_answer || "",
-            opportunity.aeo_format || "",
-            opportunity.aeo_schema || "",
-            person?.name || "",
-            person?.current_role || "",
-            draft?.subject_line || "",
-            draft?.message_body || "",
-            (() => {
-              const id = draftKey(oppKey(opportunity), person?.name);
-              return pitchOutcomes[id]?.status || (draft ? "Draft" : "");
-            })(),
-            (() => {
-              const id = draftKey(oppKey(opportunity), person?.name);
-              return pitchOutcomes[id]?.coverage_url || "";
-            })(),
-          ]);
+        const draft = drafts[draftKey(oppKey(opportunity))] || null;
+        let domain = "";
+        try {
+          domain = new URL(opportunity.article_url || "").hostname.replace(/^www\./, "");
+        } catch {
+          domain = "";
         }
+        rows.push([
+          angleName || "",
+          opportunity.publication || "",
+          domain,
+          opportunity.article_title || "",
+          opportunity.article_url || "",
+          isUsed(opportunity.article_url) ? "yes" : "no",
+          opportunity.pr_fit || "",
+          opportunity.pr_score || "",
+          Array.isArray(opportunity.pr_score_reasons)
+            ? opportunity.pr_score_reasons.join("; ")
+            : "",
+          (() => {
+            let domain = "";
+            try {
+              domain = new URL(opportunity.article_url || "").hostname.replace(/^www\./, "").toLowerCase();
+            } catch {
+              domain = "";
+            }
+            return drByDomain[domain] ?? "";
+          })(),
+          opportunity.audience_question || "",
+          opportunity.aeo_answer || "",
+          opportunity.aeo_format || "",
+          opportunity.aeo_schema || "",
+          "",
+          "",
+          draft?.subject_line || "",
+          draft?.message_body || "",
+          (() => {
+            const id = draftKey(oppKey(opportunity));
+            return pitchOutcomes[id]?.status || (draft ? "Draft" : "");
+          })(),
+          (() => {
+            const id = draftKey(oppKey(opportunity));
+            return pitchOutcomes[id]?.coverage_url || "";
+          })(),
+        ]);
       }
     }
     const csv = [header, ...rows]
@@ -2372,7 +1925,7 @@ export default function Home() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "pr_sites_contacts.csv";
+    link.download = "pr_opportunities.csv";
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -2383,7 +1936,6 @@ export default function Home() {
     setErrList(null);
     setListicles(null);
     setSelectedItem(null);
-    setContact(null);
     setPolicy(null);
     setRetryMsg(null);
     try {
@@ -2417,33 +1969,6 @@ export default function Home() {
     await generateListicles();
   }
 
-  async function runContact(item: AnyObj, force = false) {
-    setSelectedItem(item);
-    const cached = contactByItem[item.listicle_url];
-    // Instant when already researched: show the cache, Refresh forces a new call.
-    if (cached && !force) {
-      setContact(cached);
-      setErrContact(null);
-      return;
-    }
-    setLoadingContact(true);
-    setErrContact(null);
-    setContact(null);
-    setRetryMsg(null);
-    try {
-      const data = await callApi("listicle-contact", { item }, (a) =>
-        setRetryMsg(`Retrying (attempt ${a}/3)...`)
-      );
-      setContact(data);
-      setContactByItem((current) => ({ ...current, [item.listicle_url]: data }));
-    } catch (err: any) {
-      setErrContact(err?.message || "Something went wrong");
-    } finally {
-      setLoadingContact(false);
-      setRetryMsg(null);
-    }
-  }
-
   async function runPolicy(item: AnyObj, force = false) {
     setSelectedItem(item);
     const cached = policyByItem[item.listicle_url];
@@ -2475,7 +2000,6 @@ export default function Home() {
   const hasSavedWork =
     Object.keys(campaigns).length > 0 ||
     usedUrls.length > 0 ||
-    Object.keys(mediaLibrary).length > 0 ||
     Object.keys(pitchOutcomes).length > 0;
   const backupAgeDays = lastBackupAt
     ? (Date.now() - new Date(lastBackupAt).getTime()) / 86_400_000
@@ -2593,8 +2117,7 @@ export default function Home() {
               <section className="card">
                 <h2 className="section-title">Digital PR</h2>
                 <p className="body-text">
-                  Turn a published article into angles, editorial openings, writer/contact research, and a
-                  personalized pitch.
+                  Turn a published article into angles, editorial openings, and a personalized pitch.
                 </p>
                 <div className="actions">
                   <button className="btn-primary" onClick={continueDigital}>
@@ -2608,7 +2131,7 @@ export default function Home() {
               <section className="card">
                 <h2 className="section-title">Listicle inclusion</h2>
                 <p className="body-text">
-                  Find roundups and directories where the product fits, then research the contact and policy.
+                  Find roundups and directories where the product fits, then check the publisher policy.
                 </p>
                 <div className="actions">
                   <button className="btn-primary" onClick={continueListicles}>
@@ -2630,6 +2153,14 @@ export default function Home() {
                 subtitle={phaseCopy[activePhase] || "You approve every decision and every draft."}
                 action={
                   <div className="actions" style={{ marginTop: 0 }}>
+                    <button
+                      className="btn-secondary"
+                      onClick={downloadBatch}
+                      disabled={batchRowCount() === 0}
+                      title="Download this batch as a CSV that opens in Google Sheets"
+                    >
+                      <Download size={15} /> Download batch
+                    </button>
                     <button
                       className="btn-secondary"
                       onClick={saveCampaign}
@@ -3182,14 +2713,6 @@ export default function Home() {
                           {loadingOpp ? <Spinner /> : opportunities ? <RefreshCw size={17} /> : <Search size={17} />}
                           {opportunities ? "Generate again" : "Run opportunity research"}
                         </button>
-                        {opportunities && visibleOpportunities().length > 1 && (
-                          <button className="btn-secondary" onClick={findWritersForAll} disabled={loadingJourn}>
-                            {loadingJourn ? <Spinner /> : <Users size={17} />}
-                            {loadingJourn
-                              ? "Finding writers..."
-                              : `Find writers for all (${visibleOpportunities().length} sites)`}
-                          </button>
-                        )}
                         {opportunities && (opportunities.opportunities ?? []).length > 0 && (
                           <button
                             className="btn-secondary"
@@ -3336,16 +2859,20 @@ export default function Home() {
                               <div className="actions">
                                 <button
                                   className="btn-primary"
-                                  onClick={() => researchJournalistsFor(o)}
-                                  disabled={loadingJourn}
+                                  onClick={() => writeDraft(o, selectedAngle)}
+                                  disabled={loadingDraft === draftKey(oppKey(o))}
                                 >
-                                  {loadingJourn && selectedOpp?.article_url === o.article_url ? (
+                                  {loadingDraft === draftKey(oppKey(o)) ? (
                                     <>
-                                      <Spinner /> Researching writers...
+                                      <Spinner /> Writing pitch...
+                                    </>
+                                  ) : drafts[draftKey(oppKey(o))] ? (
+                                    <>
+                                      Write again <RefreshCw size={16} />
                                     </>
                                   ) : (
                                     <>
-                                      Find writers & contacts <ArrowRight size={16} />
+                                      Write pitch <ArrowRight size={16} />
                                     </>
                                   )}
                                 </button>
@@ -3393,265 +2920,37 @@ export default function Home() {
                 </>
               )}
 
-              {workflow === "digital" && activePhase === "Prospects" && digitalStep === "Journalists" && (
-                <>
-                  <p className="step-caption">
-                    Find writers or the best content/SEO contact for each opportunity, then write all pitches at once.
-                  </p>
-                  {!selectedAngle || !selectedOpp ? (
-                    <div className="card empty-state">
-                      <h2 className="empty-title">
-                        {selectedAngle && (opportunities?.opportunities ?? []).length > 0
-                          ? "Choose an opportunity"
-                          : "Pick an opportunity first"}
-                      </h2>
-                      {selectedAngle && (opportunities?.opportunities ?? []).length > 0 ? (
-                        <>
-                          <p className="empty-copy">
-                            Writers are kept per opportunity. Pick one to see who was found.
-                          </p>
-                          <div className="actions" style={{ justifyContent: "center" }}>
-                            {(opportunities?.opportunities ?? []).slice(0, 6).map((o: AnyObj, i: number) => (
-                              <button
-                                key={`${o.article_url}-${i}`}
-                                className="btn-secondary"
-                                onClick={() => selectOppCached(o)}
-                                title={shortText(o.article_title, 100)}
-                              >
-                                {i + 1}. {shortText(o.article_title, 28)}{" "}
-                                {writersByOpp[oppKey(o)] ? "✓" : ""}
-                              </button>
-                            ))}
-                          </div>
-                        </>
-                      ) : (
-                        <button className="btn-secondary" onClick={() => setDigitalStep("Opportunities")}>
-                          Go to Opportunities
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="stack">
-                      <div className="actions" style={{ marginTop: 0 }}>
-                        {(opportunities?.opportunities ?? []).map((o: AnyObj, i: number) => (
-                          <button
-                            key={`${o.article_url}-${i}`}
-                            type="button"
-                            className={oppKey(o) === oppKey(selectedOpp) ? "btn-primary" : "btn-secondary"}
-                            onClick={() => selectOppCached(o)}
-                            title={shortText(o.article_title, 120)}
-                          >
-                            {i + 1}. {shortText(o.article_title, 32)} {writersByOpp[oppKey(o)] ? "✓" : ""}
-                          </button>
-                        ))}
-                      </div>
-                      <section className="context-card">
-                        <span className="context-label">Selected opportunity</span>
-                        <span className="context-value">
-                          {selectedOpp.article_title} · {selectedOpp.publication}
-                        </span>
-                      </section>
-
-                      <div className="actions-between">
-                        <button className="btn-primary" onClick={runJournalists} disabled={loadingJourn}>
-                          {loadingJourn ? <Spinner /> : journalists ? <RefreshCw size={17} /> : <Users size={17} />}
-                          {journalists ? "Find again" : "Find writers & contacts"}
-                        </button>
-                        <button
-                          className="btn-primary"
-                          onClick={writeSelectedPitches}
-                          disabled={loadingDraft !== null || checkedPeople.length === 0}
-                          title="Write pitches only for the people you ticked"
-                        >
-                          {loadingDraft !== null ? <Spinner /> : <Mail size={17} />}
-                          {checkedPeople.length > 0
-                            ? `Write pitches for selected (${checkedPeople.length})`
-                            : "Tick people, then write"}
-                        </button>
-                        <button
-                          className="btn-secondary"
-                          onClick={writeAllPitches}
-                          disabled={loadingDraft !== null || writerEntries.length === 0}
-                          title="Write a pitch for every researched writer across all angles"
-                        >
-                          {loadingDraft === "__all__" ? <Spinner /> : <Mail size={17} />}
-                          {loadingDraft === "__all__" ? "Writing all..." : "Write all pitches"}
-                        </button>
-                      </div>
-
-                      {errJourn && <Note tone="warn">{errJourn}</Note>}
-
-                      {journalists && (
-                        <>
-                          <p className="step-caption">{journalists.research_summary}</p>
-                          {(journalists.journalists ?? []).map((j: AnyObj, i: number) => (
-                            <article className="card" key={`${j.name}-${i}`}>
-                              <h2 className="card-title">
-                                {i + 1}. {j.name}
-                              </h2>
-                              <p className="meta">
-                                {j.publication} · {j.current_role} · Coverage date: {j.article_date} · Confidence:{" "}
-                                {j.confidence}
-                              </p>
-                              <p className="body-text">
-                                <strong>Why relevant:</strong> {j.why_relevant}
-                              </p>
-
-                              <details className="plan">
-                                <summary>Coverage and pitch angle</summary>
-                                <div className="plan-body">
-                                  <p>
-                                    <strong>Relevant article:</strong> {j.relevant_article_title}
-                                  </p>
-                                  {j.relevant_article_url?.startsWith("https://") && (
-                                    <p>
-                                      <SafeA url={j.relevant_article_url}>Open coverage <ExternalLink size={13} className="inline" /></SafeA>
-                                    </p>
-                                  )}
-                                  <p>
-                                    <strong>Topic covered:</strong> {j.topic_covered}
-                                  </p>
-                                  <p>
-                                    <strong>Suggested pitch angle:</strong> {j.suggested_pitch_angle}
-                                  </p>
-                                  <p>
-                                    <strong>Profile or contact page:</strong>{" "}
-                                    {j.author_profile_or_contact_page}
-                                  </p>
-                                  <p>
-                                    <strong>Evidence:</strong> {j.evidence}
-                                  </p>
-                                </div>
-                              </details>
-
-                              <div className="actions">
-                                <label
-                                  className="meta"
-                                  style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={checkedPeople.includes(String(j.name || ""))}
-                                    onChange={() => togglePerson(j.name)}
-                                    aria-label={`Select ${j.name} for pitching`}
-                                  />
-                                  Select
-                                </label>
-                                <button
-                                  className="btn-primary"
-                                  onClick={() => writeDraft(j)}
-                                  disabled={loadingDraft === draftKey(oppKey(selectedOpp), j.name)}
-                                >
-                                  {loadingDraft === draftKey(oppKey(selectedOpp), j.name) ? (
-                                    <>
-                                      <Spinner /> Writing pitch...
-                                    </>
-                                  ) : drafts[draftKey(oppKey(selectedOpp), j.name)] ? (
-                                    <>
-                                      Write again <RefreshCw size={15} />
-                                    </>
-                                  ) : (
-                                    <>
-                                      Write pitch <ArrowRight size={15} />
-                                    </>
-                                  )}
-                                </button>
-                                <button
-                                  className="btn-secondary"
-                                  onClick={() => findEmailFor(j)}
-                                  disabled={loadingEmail === personKey(j.name)}
-                                  title="Look up this person's publicly published email"
-                                >
-                                  {loadingEmail === personKey(j.name) ? (
-                                    <Spinner />
-                                  ) : (
-                                    <Mail size={15} />
-                                  )}
-                                  {emailByPerson[personKey(j.name)] && !emailByPerson[personKey(j.name)].__error
-                                    ? "Refresh email"
-                                    : "Find email"}
-                                </button>
-                              </div>
-                              {emailByPerson[personKey(j.name)] && (
-                                <div className="inline-panel">
-                                  {emailByPerson[personKey(j.name)].__error ? (
-                                    <Note tone="warn">{emailByPerson[personKey(j.name)].__error}</Note>
-                                  ) : (
-                                    <>
-                                      <p className="result-copy">
-                                        <strong>Email:</strong>{" "}
-                                        {emailByPerson[personKey(j.name)].email || "Not publicly found"}
-                                      </p>
-                                      {emailByPerson[personKey(j.name)].contact_page_url &&
-                                        emailByPerson[personKey(j.name)].contact_page_url !== "Unknown" && (
-                                          <p className="result-copy">
-                                            <strong>Contact route:</strong>{" "}
-                                            <SafeA url={emailByPerson[personKey(j.name)].contact_page_url}>
-                                              {emailByPerson[personKey(j.name)].route || "Open contact page"}{" "}
-                                              <ExternalLink size={13} className="inline" />
-                                            </SafeA>
-                                          </p>
-                                        )}
-                                      {emailByPerson[personKey(j.name)].evidence && (
-                                        <p className="result-meta">
-                                          {shortText(emailByPerson[personKey(j.name)].evidence, 220)}
-                                        </p>
-                                      )}
-                                    </>
-                                  )}
-                                </div>
-                              )}
-                              {drafts[draftKey(oppKey(selectedOpp), j.name)] && (
-                                <p className="meta">Draft ready — open Outreach to copy it.</p>
-                              )}
-                            </article>
-                          ))}
-                          {(!journalists.journalists || journalists.journalists.length === 0) && (
-                            <Note tone="warn">
-                              No writer or contact could be verified. Do not guess one.
-                            </Note>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-
               {workflow === "digital" && activePhase === "Outreach" && (
                 <div className="stack">
                   <div className="actions-between">
                     <p className="step-caption">
-                      Personalized drafts for every researched contact. Copy or download them; nothing is sent.
+                      Drafts for the opportunities you picked. Copy or download them; nothing is sent.
                       {Object.keys(drafts).length > 0 &&
                         ` · ${outcomeCounts["Pitched"] || 0} pitched · ${outcomeCounts["Replied"] || 0} replied · ${outcomeCounts["Covered"] || 0} covered`}
                     </p>
                     {(() => {
-                      const people = journalists?.journalists ?? [];
-                      const nextPerson = people.find(
-                        (p: AnyObj) => !drafts[draftKey(oppKey(selectedOpp), p.name)]
-                      );
-                      if (people.length === 0) return null;
+                      const opps = visibleOpportunities();
+                      const nextOpp = opps.find((o: AnyObj) => !drafts[draftKey(oppKey(o))]);
                       return (
                         <>
-                          {nextPerson && (
+                          {nextOpp && (
                             <button
                               className="btn-primary"
-                              onClick={() => writeDraft(nextPerson)}
+                              onClick={() => writeDraft(nextOpp, selectedAngle)}
                               disabled={loadingDraft !== null}
-                              title={`Write the pitch for ${nextPerson.name}`}
+                              title={`Write the pitch for ${nextOpp.article_title}`}
                             >
                               {loadingDraft ? <Spinner /> : <ArrowRight size={16} />}
                               {loadingDraft
                                 ? "Writing..."
-                                : `Write next pitch (${shortText(nextPerson.name, 22)})`}
+                                : `Write next pitch (${shortText(nextOpp.article_title, 22)})`}
                             </button>
                           )}
                           <button
                             className="btn-secondary"
-                            onClick={() => setDigitalStep("Journalists")}
+                            onClick={() => setDigitalStep("Opportunities")}
                           >
-                            ← Back to contacts
+                            ← Back to opportunities
                           </button>
                         </>
                       );
@@ -3663,8 +2962,8 @@ export default function Home() {
                           navigator.clipboard.writeText(
                             Object.entries(drafts)
                               .map(
-                                ([name, d]) =>
-                                  `To: ${d.recipient_name || name} (${d.publication || ""})\nSubject: ${d.subject_line}\n\n${d.message_body}`
+                                ([, d]) =>
+                                  `To: ${d.__opp?.publication || d.publication || ""} (${d.__opp?.article_title || d.target_title || ""})\nSubject: ${d.subject_line}\n\n${d.message_body}`
                               )
                               .join("\n\n---\n\n")
                           )
@@ -3733,10 +3032,10 @@ export default function Home() {
                       <div className="page-badge">Human approval</div>
                       <h2 className="empty-title">No drafts yet</h2>
                       <p className="empty-copy">
-                        Go back to Contacts and click <strong>Write pitch</strong> on a writer or content/SEO contact.
+                        Go back to Opportunities and click <strong>Write pitch</strong> on an editorial opening.
                       </p>
-                      <button className="btn-secondary" onClick={() => setDigitalStep("Journalists")}>
-                        Back to Contacts
+                      <button className="btn-secondary" onClick={() => setDigitalStep("Opportunities")}>
+                        Back to Opportunities
                       </button>
                     </div>
                   ) : (
@@ -3744,9 +3043,11 @@ export default function Home() {
                       <article className="card" key={name}>
                         <div className="card-head">
                           <div>
-                            <h2 className="card-title">{draft.recipient_name || name}</h2>
+                            <h2 className="card-title">
+                              {draft.__opp?.article_title || draft.target_title || "Pitch"}
+                            </h2>
                             <p className="meta">
-                              {draft.publication} · {draft.recipient_role} · {draft.channel}
+                              {draft.__opp?.publication || draft.publication} · {draft.channel}
                             </p>
                           </div>
                           <span
@@ -3762,7 +3063,7 @@ export default function Home() {
                               type="checkbox"
                               checked={selectedDrafts.includes(name)}
                               onChange={() => toggleDraftSel(name)}
-                              aria-label={`Select ${draft.recipient_name || name}`}
+                              aria-label={`Select ${draft.__opp?.article_title || name}`}
                             />
                             Select
                           </label>
@@ -3807,34 +3108,6 @@ export default function Home() {
                         <p className="body-text">
                           <strong>Subject:</strong> {draft.subject_line}
                         </p>
-                        {(() => {
-                          const person = draft.__person;
-                          const opp = draft.__opp;
-                          if (!person || !opp) return null;
-                          const emailRec = emailByPerson[draftKey(oppKey(opp), person.name)];
-                          return (
-                            <p className="meta" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                              <span>
-                                <strong>Email:</strong>{" "}
-                                {emailRec && !emailRec.__error
-                                  ? emailRec.email || "Not publicly found"
-                                  : "not checked"}
-                              </span>
-                              <button
-                                className="btn-ghost"
-                                onClick={() => findEmailFor(person, opp)}
-                                disabled={loadingEmail === draftKey(oppKey(opp), person.name)}
-                              >
-                                {loadingEmail === draftKey(oppKey(opp), person.name) ? (
-                                  <Spinner />
-                                ) : (
-                                  <Mail size={14} />
-                                )}
-                                {emailRec ? "Check again" : "Find email"}
-                              </button>
-                            </p>
-                          );
-                        })()}
                         <div className="draft-body">{draft.message_body}</div>
                         {Array.isArray(draft.pitch_checks) && draft.pitch_checks.length > 0 && (
                           <details className="plan" open>
@@ -3861,17 +3134,17 @@ export default function Home() {
                             className="btn-secondary"
                             onClick={() =>
                               downloadText(
-                                `pitch-${(draft.recipient_name || name).replace(/\s+/g, "-").toLowerCase()}.txt`,
+                                `pitch-${(draft.__opp?.publication || draft.publication || name).replace(/\s+/g, "-").toLowerCase()}.txt`,
                                 `Subject: ${draft.subject_line}\n\n${draft.message_body}\n`
                               )
                             }
                           >
                             <Download size={15} /> Download
                           </button>
-                          {draft.__person && draft.__opp && draft.__angle && (
+                          {draft.__opp && draft.__angle && (
                             <button
                               className="btn-primary"
-                              onClick={() => writeDraft(draft.__person, draft.__opp, draft.__angle)}
+                              onClick={() => writeDraft(draft.__opp, draft.__angle)}
                               disabled={loadingDraft === name}
                               title="Write a different version of this pitch"
                             >
@@ -3913,8 +3186,8 @@ export default function Home() {
                   <section className="card">
                     <h2 className="section-title">Search listicle opportunities</h2>
                     <p className="body-text">
-                      Find existing roundups and tools lists where the brand could be considered. Contact and policy
-                      research run only when you ask for them.
+                      Find existing roundups and tools lists where the brand could be considered. Policy research
+                      runs only when you ask for it.
                     </p>
                     <form onSubmit={runListicles}>
                       <div className="form-grid">
@@ -4033,15 +3306,12 @@ export default function Home() {
                             className="btn-primary"
                             onClick={writeAllListicleDrafts}
                             disabled={loadingListDraft !== null}
-                            title="Write an inclusion request for every contact you have researched"
+                            title="Write an inclusion request for every listicle in these results"
                           >
                             {loadingListDraft === "__all__" ? <Spinner /> : <Mail size={16} />}
                             {loadingListDraft === "__all__"
                               ? "Writing requests..."
-                              : `Write all inclusion requests (${Object.values(contactByItem).reduce(
-                                  (n: number, c: AnyObj) => n + (c?.contacts?.length || 0),
-                                  0
-                                )})`}
+                              : `Write all inclusion requests (${(listicles.opportunities ?? []).length})`}
                           </button>
                           <button
                             className="btn-secondary"
@@ -4081,8 +3351,8 @@ export default function Home() {
                       </div>
                       {errListDraft && <Note tone="warn">{errListDraft}</Note>}
                       <Note>
-                        Run <strong>Find contact</strong> on the listicles you want, then{" "}
-                        <strong>Write all inclusion requests</strong> — it uses every researched contact at once.
+                        <strong>Write all inclusion requests</strong> drafts one request for every listicle in
+                        these results.
                       </Note>
                       {sortByScore(
                         filterProspects(
@@ -4146,14 +3416,6 @@ export default function Home() {
                           <div className="actions">
                             <button
                               className="btn-secondary"
-                              onClick={() => runContact(item)}
-                              disabled={loadingContact}
-                            >
-                              {loadingContact && selectedItem === item ? <Spinner /> : <Mail size={16} />}
-                              {contactByItem[item.listicle_url] ? "View contact ✓" : "Find contact"}
-                            </button>
-                            <button
-                              className="btn-secondary"
                               onClick={() => runPolicy(item)}
                               disabled={loadingPolicy}
                             >
@@ -4165,79 +3427,8 @@ export default function Home() {
                           </div>
 
                           {selectedItem === item &&
-                            (loadingContact ||
-                              loadingPolicy ||
-                              contact ||
-                              policy ||
-                              errContact ||
-                              errPolicy) && (
+                            (loadingPolicy || policy || errPolicy) && (
                               <div className="inline-panel">
-                                {errContact && <Note tone="warn">{errContact}</Note>}
-                                {loadingContact && (
-                                  <p className="result-copy">
-                                    <Spinner /> Researching contact route...
-                                  </p>
-                                )}
-                                {contact && (
-                                  <div className="result-block">
-                                    <div className="card-head">
-                                      <h3 className="result-title">Contact research</h3>
-                                      <button
-                                        type="button"
-                                        className="btn-ghost"
-                                        onClick={() => runContact(item, true)}
-                                        disabled={loadingContact}
-                                      >
-                                        {loadingContact ? <Spinner /> : <RefreshCw size={14} />}
-                                        Refresh
-                                      </button>
-                                    </div>
-                                    <p className="result-meta">{contact.research_summary}</p>
-                                    {(contact.contacts ?? []).map((c: AnyObj, ci: number) => (
-                                      <div key={`${c.contact_name}-${ci}`} className="result-block">
-                                        <p className="result-copy">
-                                          <strong>{c.contact_name}</strong> — {c.current_role}
-                                        </p>
-                                        <p className="result-copy">
-                                          <strong>Email:</strong> {c.professional_email}
-                                        </p>
-                                        <p className="result-copy">
-                                          <strong>Method:</strong> {c.contact_method}
-                                        </p>
-                                        <p className="result-copy">{c.why_this_contact}</p>
-                                        <p className="result-meta">Confidence: {c.confidence}</p>
-                                        {c.source_url && c.source_url !== "Unknown" && (
-                                          <SafeA url={c.source_url}>Open source <ExternalLink size={13} className="inline" /></SafeA>
-                                        )}
-                                        <div className="actions" style={{ marginTop: 8 }}>
-                                          <button
-                                            className="btn-primary"
-                                            onClick={() => writeListicleDraft(item, c)}
-                                            disabled={loadingListDraft === listDraftKey(item.listicle_url, c.contact_name)}
-                                          >
-                                            {loadingListDraft === listDraftKey(item.listicle_url, c.contact_name) ? (
-                                              <>
-                                                <Spinner /> Writing request...
-                                              </>
-                                            ) : listicleDrafts[listDraftKey(item.listicle_url, c.contact_name)] ? (
-                                              <>
-                                                Write again <RefreshCw size={15} />
-                                              </>
-                                            ) : (
-                                              <>
-                                                Write inclusion request <ArrowRight size={15} />
-                                              </>
-                                            )}
-                                          </button>
-                                        </div>
-                                      </div>
-                                    ))}
-                                    {(!contact.contacts || contact.contacts.length === 0) && (
-                                      <p className="result-copy">No verified contact found.</p>
-                                    )}
-                                  </div>
-                                )}
-
                                 {errPolicy && <Note tone="warn">{errPolicy}</Note>}
                                 {loadingPolicy && (
                                   <p className="result-copy">
@@ -4310,7 +3501,7 @@ export default function Home() {
                 <div className="stack">
                   <div className="actions-between">
                     <p className="step-caption">
-                      Inclusion requests for the contacts you selected. Copy or download them; nothing is sent or
+                      Inclusion requests for the listicles you picked. Copy or download them; nothing is sent or
                       submitted.
                       {Object.keys(listicleDrafts).length > 0 &&
                         ` · ${Object.values(pitchOutcomes).filter((o: AnyObj) => o?.status === "Covered").length} covered`}
@@ -4323,7 +3514,7 @@ export default function Home() {
                             Object.entries(listicleDrafts)
                               .map(
                                 ([, d]) =>
-                                  `To: ${d.recipient_name || ""} (${(d.__item || {}).publication || d.publication || ""})\nSubject: ${d.subject_line}\n\n${d.message_body}`
+                                  `To: ${(d.__item || {}).publication || d.publication || ""} (${(d.__item || {}).listicle_title || d.target_title || ""})\nSubject: ${d.subject_line}\n\n${d.message_body}`
                               )
                               .join("\n\n---\n\n")
                           )
@@ -4353,8 +3544,8 @@ export default function Home() {
                       <div className="page-badge">Human approval</div>
                       <h2 className="empty-title">No inclusion requests yet</h2>
                       <p className="empty-copy">
-                        Go to Prospects, run <strong>Find contact</strong> on a listicle, then click{" "}
-                        <strong>Write inclusion request</strong>.
+                        Go to Prospects and click <strong>Write all inclusion requests</strong> to draft them from
+                        the listicle results.
                       </p>
                       <button className="btn-secondary" onClick={() => setListicleStep("Prospects")}>
                         Back to Prospects
@@ -4368,11 +3559,10 @@ export default function Home() {
                         <article className="card" key={key}>
                           <div className="card-head">
                             <div>
-                              <h2 className="card-title">{d.recipient_name || "Editorial team"}</h2>
+                              <h2 className="card-title">{item.listicle_title || d.target_title || "Inclusion request"}</h2>
                               <p className="meta">
-                                {item.publication || d.publication} · {d.recipient_role} · {d.channel}
+                                {item.publication || d.publication} · {d.channel}
                               </p>
-                              <p className="meta">{item.listicle_title || d.target_title}</p>
                             </div>
                             <span className={`status-pill ${status !== "Draft" ? "active" : ""}`}>{status}</span>
                           </div>
@@ -4425,7 +3615,7 @@ export default function Home() {
                               className="btn-secondary"
                               onClick={() =>
                                 downloadText(
-                                  `listicle-${(d.recipient_name || "contact").replace(/\s+/g, "-").toLowerCase()}.txt`,
+                                  `listicle-${(item.publication || "request").replace(/\s+/g, "-").toLowerCase()}.txt`,
                                   `Subject: ${d.subject_line}\n\n${d.message_body}\n`
                                 )
                               }
@@ -4435,17 +3625,15 @@ export default function Home() {
                             {item.listicle_url?.startsWith("https://") && (
                               <SafeA className="btn-secondary" url={item.listicle_url}>Open listicle <ExternalLink size={15} /></SafeA>
                             )}
-                            {d.__contact && (
-                              <button
-                                className="btn-primary"
-                                onClick={() => writeListicleDraft(item, d.__contact)}
-                                disabled={loadingListDraft === key}
-                                title="Write a different version of this request"
-                              >
-                                {loadingListDraft === key ? <Spinner /> : <RefreshCw size={15} />}
-                                {loadingListDraft === key ? "Rewriting..." : "Regenerate"}
-                              </button>
-                            )}
+                            <button
+                              className="btn-primary"
+                              onClick={() => writeListicleDraft(item)}
+                              disabled={loadingListDraft === key}
+                              title="Write a different version of this request"
+                            >
+                              {loadingListDraft === key ? <Spinner /> : <RefreshCw size={15} />}
+                              {loadingListDraft === key ? "Rewriting..." : "Regenerate"}
+                            </button>
                           </div>
                           <details className="plan">
                             <summary>Facts to verify</summary>
@@ -4455,7 +3643,7 @@ export default function Home() {
                                   <p key={index}>{fact}</p>
                                 ))
                               ) : (
-                                <p>None listed. Verify the contact and the inclusion route.</p>
+                                <p>None listed. Verify the inclusion route and the claims.</p>
                               )}
                               {d.compliance_notes && (
                                 <p>
@@ -4488,9 +3676,7 @@ export default function Home() {
               <div className="metric-grid">
                 <MetricCard label="PR angles" value={angleCount} icon={<BarChart3 size={20} />} />
                 <MetricCard label="PR opportunities" value={oppCount} icon={<FileText size={20} />} />
-                <MetricCard label="Journalists" value={journCount} icon={<Users size={20} />} />
                 <MetricCard label="Listicle candidates" value={listCount} icon={<List size={20} />} />
-                <MetricCard label="Contacts found" value={contactCount} icon={<Mail size={20} />} />
                 <MetricCard label="Policies checked" value={policy ? 1 : 0} icon={<Shield size={20} />} />
               </div>
 
@@ -4502,7 +3688,7 @@ export default function Home() {
                   </p>
                   <p className="meta">
                     {opportunities
-                      ? `${oppCount} opportunities · ${journCount} journalists`
+                      ? `${oppCount} opportunities`
                       : "Run an article analysis to start the Digital PR workflow."}
                   </p>
                   <div className="actions">
@@ -4526,7 +3712,7 @@ export default function Home() {
                   </p>
                   <p className="meta">
                     {listicles
-                      ? `${listCount} candidates · ${contactCount} contacts`
+                      ? `${listCount} candidates`
                       : "Search for roundups and tools lists to start."}
                   </p>
                   <div className="actions">
@@ -4543,182 +3729,6 @@ export default function Home() {
                   </div>
                 </section>
               </div>
-
-              <section className="card">
-                <div className="card-head">
-                  <div>
-                    <h2 className="section-title">
-                      Media library · {Object.keys(mediaLibrary).length} saved contacts
-                    </h2>
-                    <p className="meta">
-                      Every researched writer is saved here automatically, with emails merged
-                      from Find-email lookups. Stored in this browser.
-                    </p>
-                  </div>
-                </div>
-                <form onSubmit={collectWriters} style={{ marginTop: 16 }}>
-                  <div className="field">
-                    <label htmlFor="collect-query">Collect from the web</label>
-                    <input
-                      id="collect-query"
-                      type="text"
-                      value={collectQuery}
-                      onChange={(e) => setCollectQuery(e.target.value)}
-                      placeholder="e.g. SaaS reporters at The Verge, or writers covering social media analytics"
-                      aria-label="What contacts to collect from the web"
-                      className="input"
-                    />
-                    <span className="field-note">
-                      One research call per collection. Only verifiable writers with real coverage are saved.
-                    </span>
-                  </div>
-                  <div className="actions" style={{ marginTop: 10 }}>
-                    <button type="submit" disabled={loadingCollect} className="btn-primary">
-                      {loadingCollect ? <Spinner /> : <Search size={17} />}
-                      {loadingCollect ? "Collecting..." : "Collect from web"}
-                    </button>
-                  </div>
-                </form>
-                {errCollect && <Note tone="warn">{errCollect}</Note>}
-                {collectMsg && <Note>{collectMsg}</Note>}
-                <div className="form-row">
-                  <input
-                    type="search"
-                    value={libSearch}
-                    onChange={(e) => setLibSearch(e.target.value)}
-                    placeholder="Search name, outlet, beat, topic..."
-                    aria-label="Search saved contacts"
-                    className="input"
-                  />
-                </div>
-                <div className="actions">
-                  <label className="meta" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={libEmailOnly}
-                      onChange={(e) => setLibEmailOnly(e.target.checked)}
-                    />
-                    Has email only
-                  </label>
-                  <button
-                    className="btn-secondary"
-                    onClick={() =>
-                      downloadLibraryCsv(
-                        Object.values(mediaLibrary).sort((a: AnyObj, b: AnyObj) =>
-                          String(b.last_seen || "").localeCompare(String(a.last_seen || ""))
-                        )
-                      )
-                    }
-                    disabled={Object.keys(mediaLibrary).length === 0}
-                  >
-                    <Download size={15} /> Contacts CSV
-                  </button>
-                  <button
-                    className="btn-primary"
-                    onClick={syncContactsToSheet}
-                    disabled={syncing || Object.keys(mediaLibrary).length === 0}
-                    title="Sync the media library to the Contacts tab"
-                  >
-                    {syncing ? <Spinner /> : <Server size={17} />}
-                    {syncing ? "Syncing..." : "Sync contacts"}
-                  </button>
-                  <button
-                    className="btn-ghost"
-                    onClick={() => {
-                      if (window.confirm("Delete all saved contacts in this browser?")) {
-                        setMediaLibrary({});
-                      }
-                    }}
-                    disabled={Object.keys(mediaLibrary).length === 0}
-                  >
-                    Clear all
-                  </button>
-                </div>
-                <div className="stack-sm" style={{ marginTop: 14 }}>
-                  {(() => {
-                    const q = libSearch.trim().toLowerCase();
-                    const entries = (Object.values(mediaLibrary) as AnyObj[])
-                      .filter((e: AnyObj) => !libEmailOnly || e.email)
-                      .filter(
-                        (e: AnyObj) =>
-                          !q ||
-                          [e.name, e.publication, e.role, e.beat, e.article_title, (e.angles ?? []).join(" ")]
-                            .join(" ")
-                            .toLowerCase()
-                            .includes(q)
-                      )
-                      .sort((a: AnyObj, b: AnyObj) =>
-                        String(b.last_seen || "").localeCompare(String(a.last_seen || ""))
-                      );
-                    if (entries.length === 0) {
-                      return (
-                        <p className="meta">
-                          {Object.keys(mediaLibrary).length === 0
-                            ? "No contacts saved yet. Research writers in the Digital PR workflow and they will appear here."
-                            : "No saved contacts match this search."}
-                        </p>
-                      );
-                    }
-                    return entries.slice(0, 100).map((e: AnyObj, i: number) => (
-                      <div className="context-card" key={`${e.name}-${e.publication}-${i}`}>
-                        <div className="card-head">
-                          <div>
-                            <span className="context-value">
-                              <strong>{e.name}</strong>{" "}
-                              {e.email && <span className="status-pill">Has email</span>}{" "}
-                              {draftStatusFor(e.name) && draftStatusFor(e.name) !== "Draft" && (
-                                <span className="status-pill active">{draftStatusFor(e.name)}</span>
-                              )}
-                            </span>
-                            <p className="meta">
-                              {e.publication}
-                              {e.role ? ` · ${e.role}` : ""}
-                              {e.beat ? ` · ${e.beat}` : ""}
-                            </p>
-                          </div>
-                          <button
-                            className="btn-ghost"
-                            onClick={() =>
-                              setMediaLibrary((current) => {
-                                const next = { ...current };
-                                delete next[libraryKey(e.name, e.publication)];
-                                return next;
-                              })
-                            }
-                            aria-label={`Delete ${e.name}`}
-                            title="Delete this contact"
-                          >
-                            <X size={15} />
-                          </button>
-                        </div>
-                        {e.email ? (
-                          <p className="result-copy">
-                            <strong>Email:</strong> {e.email}
-                          </p>
-                        ) : (
-                          <p className="result-meta">No verified email yet — use Find email on their card.</p>
-                        )}
-                        {e.article_title && (
-                          <p className="result-meta">
-                            Via: {e.article_title}
-                            {e.article_url?.startsWith("https://") && (
-                              <>
-                                {" · "}
-                                <SafeA url={e.article_url}>Open <ExternalLink size={12} className="inline" /></SafeA>
-                              </>
-                            )}
-                          </p>
-                        )}
-                        <p className="result-meta">
-                          Saved {e.first_seen || ""}
-                          {e.last_seen && e.last_seen !== e.first_seen ? ` · updated ${e.last_seen}` : ""}
-                          {(e.angles ?? []).length > 0 ? ` · ${(e.angles ?? []).slice(-2).join(" · ")}` : ""}
-                        </p>
-                      </div>
-                    ));
-                  })()}
-                </div>
-              </section>
 
               <section className="card">
                 <div className="card-head">
@@ -4755,10 +3765,6 @@ export default function Home() {
                           (n: number, r: AnyObj) => n + (r?.opportunities?.length || 0),
                           0
                         );
-                        const writerTotal = (Object.values(c.writersByOpp || {}) as AnyObj[]).reduce(
-                          (n: number, r: AnyObj) => n + (r?.journalists?.length || 0),
-                          0
-                        );
                         return (
                           <div className="context-card" key={c.id}>
                             <div className="card-head">
@@ -4767,7 +3773,7 @@ export default function Home() {
                                   <strong>{c.name}</strong>
                                 </span>
                                 <p className="meta">
-                                  Saved {c.created || ""} · {oppTotal} opportunities · {writerTotal} writers ·{" "}
+                                  Saved {c.created || ""} · {oppTotal} opportunities ·{" "}
                                   {keys.length} drafts
                                   {(counts["Pitched"] || counts["Replied"] || counts["Covered"]) &&
                                     ` · ${counts["Pitched"] || 0} pitched · ${counts["Replied"] || 0} replied · ${counts["Covered"] || 0} covered`}
@@ -4813,8 +3819,8 @@ export default function Home() {
               </section>
 
               <Note>
-                Workspace research resets on reload, but Used marks, the media library, outcomes,
-                and campaigns persist in this browser. Export them in Settings before clearing site data.
+                Workspace research resets on reload, but Used marks, outcomes, and campaigns persist
+                in this browser. Export them in Settings before clearing site data.
               </Note>
             </>
           )}
@@ -4837,7 +3843,7 @@ export default function Home() {
                     <div>
                       <h2 className="section-title">Google Sheet sync</h2>
                       <p className="meta">
-                        Pitches, Contacts, Coverage and Dashboard tabs update from this app.
+                        Pitches, Listicles, Coverage and Dashboard tabs update from this app.
                       </p>
                     </div>
                     <span className={`status-pill ${sheetStatus?.configured ? "active" : ""}`}>
@@ -4884,7 +3890,7 @@ export default function Home() {
                       value={clearTab}
                       onChange={(e) => setClearTab(e.target.value)}
                     >
-                      {["Pitches", "Listicles", "Contacts", "Coverage"].map((name) => (
+                      {["Pitches", "Listicles", "Coverage"].map((name) => (
                         <option key={name} value={name}>
                           {name}
                         </option>
@@ -4939,7 +3945,7 @@ export default function Home() {
                     <div>
                       <h2 className="section-title">Backup this browser</h2>
                       <p className="meta">
-                        Campaigns, media library, used marks and outcomes live only in this browser.
+                        Campaigns, used marks and outcomes live only in this browser.
                         Export them to a file so clearing site data or switching machines never loses work.
                       </p>
                     </div>
@@ -4947,10 +3953,6 @@ export default function Home() {
                   <div className="setting-row">
                     <span>Saved campaigns</span>
                     <strong>{Object.keys(campaigns).length}</strong>
-                  </div>
-                  <div className="setting-row">
-                    <span>Media library contacts</span>
-                    <strong>{Object.keys(mediaLibrary).length}</strong>
                   </div>
                   <div className="setting-row">
                     <span>Used articles</span>

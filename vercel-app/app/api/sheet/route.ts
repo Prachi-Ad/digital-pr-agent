@@ -12,10 +12,6 @@ const HEADER_MAP: Record<string, string[]> = {
     "used", "pr_fit", "pr_score", "contact_name", "contact_role", "email",
     "subject", "body", "status", "coverage_url",
   ],
-  Contacts: [
-    "key", "name", "publication", "role", "beat", "email", "contact_page",
-    "profile_url", "source_article", "source_url", "last_angle", "last_seen", "status",
-  ],
   Coverage: [
     "key", "date", "contact_name", "publication", "article_title", "article_url",
     "subject", "coverage_url", "status",
@@ -146,16 +142,27 @@ export async function POST(req: Request) {
   let rows: any[][] = [];
   let tab = TAB;
   let action = "sync";
+  let requestedTab = "";
   try {
     const body = await req.json();
     rows = Array.isArray(body?.rows) ? body.rows : [];
-    if (typeof body?.tab === "string" && HEADER_MAP[body.tab]) tab = body.tab;
+    if (typeof body?.tab === "string") requestedTab = body.tab;
+    if (HEADER_MAP[requestedTab]) tab = requestedTab;
     if (body?.action === "clear") action = "clear";
   } catch {
     rows = [];
   }
 
   if (action === "clear") {
+    // Clearing must never fall back to another tab: an unknown name would
+    // otherwise wipe Pitches instead of refusing.
+    if (!HEADER_MAP[requestedTab]) {
+      return Response.json(
+        { detail: `Unknown tab "${requestedTab}".` },
+        { status: 400 }
+      );
+    }
+    tab = requestedTab;
     // Only the webhook path can clear; the service-account path would need an
     // explicit range delete and is not configured here.
     if (!(process.env.SHEET_WEBHOOK_URL || "").trim()) {

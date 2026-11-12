@@ -10,10 +10,16 @@ Local path: `C:\Users\Prachi\vista-pr-agent`
 ## 1. What this is
 
 A research-only Digital PR tool for Vista Social. It turns a published article (yours
-or a publisher's) into pitch angles, finds publisher articles worth pitching, finds the
-writer or content/SEO contact, writes a pitch, and logs everything to Google Sheets.
+or a publisher's) into pitch angles, finds publisher articles worth pitching, writes a
+pitch to that publication's editorial team, and logs everything to Google Sheets.
 **It never sends email and never submits forms.** The local Streamlit app is the legacy
 full tool; the Vercel app is the primary one.
+
+**No people research.** This build does not look for writers, editors, contacts, or email
+addresses. There is no media library and no Contacts tab. Drafts are addressed to the
+publication's editorial team; the model is told never to invent a recipient. The one
+exception is the sheet's legacy `contact_name`/`email` columns, which stay empty so old
+rows and existing spreadsheets keep working.
 
 **Single user.** This deployment is used by one person (Prachi). It is not a multi-tenant
 product. That is the intended design, not a stopgap: the shared password gate is the
@@ -49,9 +55,9 @@ Browser (Next.js app/page.tsx, 4k lines)
   └─ fetch /api/sheet     → Apps Script webhook → Google Sheet
 ```
 
-Python API actions: `analyze`, `own-pages`, `domain-scan`, `opportunities`,
-`journalists`, `person-contact`, `draft`, `listicles`, `listicle-contact`,
-`listicle-draft`, `publisher-policy`, `collect-writers`, `site-metrics`.
+Python API actions: `analyze`, `own-pages`, `domain-scan`, `opportunities`, `draft`,
+`listicles`, `listicle-draft`, `publisher-policy`, `site-metrics`. Removed with the
+people layer: `journalists`, `person-contact`, `collect-writers`, `listicle-contact`.
 
 ## 4. Environment (Vercel → Project `vercel-app`, team `prachi-8a13`)
 
@@ -87,7 +93,7 @@ stray Python project).
 ```powershell
 C:\Users\Prachi\vista-pr-agent\.venv\Scripts\python.exe -m unittest discover -s vercel-app/tests -v
 ```
-40 tests in two files:
+48 tests in three files:
 
 - `test_safety.py` (25): URL/email sanitising, blog-only filter, email rules, precheck,
   dedupe.
@@ -95,11 +101,9 @@ C:\Users\Prachi\vista-pr-agent\.venv\Scripts\python.exe -m unittest discover -s 
   cap, fail-closed secret, and the budget rules — a refused request charges nothing, the
   10-minute window and the daily ceiling are reported separately, and exhausting one
   limit does not burn the others.
-
-48 tests in three files; the third is `test_shared_budget.py` (8) which runs a fake
-Upstash REST endpoint and proves a cold start does not reset the shared count, the ceiling
-is enforced on the shared number, refusals do not charge, and an unreachable store fails
-closed.
+- `test_shared_budget.py` (8): runs a fake Upstash REST endpoint and proves a cold start
+  does not reset the shared count, the ceiling is enforced on the shared number, refusals
+  do not charge, and an unreachable store fails closed.
 
 PowerShell prints unit-test progress on stderr, so a piped run can look like it failed;
 trust the printed `OK` and an unpiped exit code.
@@ -107,20 +111,26 @@ trust the printed `OK` and an unpiped exit code.
 
 ## 7. Google Sheet
 
-Tabs: **Dashboard**, **Pitches**, **Listicles**, **Contacts**, **Coverage**.
-Script source lives at `vercel-app/apps-script/pitch-sheet.gs` (token redacted) and is
-served at `/apps-script/pitch-sheet.js` for the "Copy setup script" button.
-Rule: every Apps Script change needs **Deploy → Manage deployments → New version**, and
-a *new deployment* yields a **new `/exec` URL** that must be re-entered in Vercel.
+Tabs: **Dashboard**, **Pitches**, **Listicles**, **Coverage**. One spreadsheet, always the
+same one: the app only ever POSTs to the single `SHEET_WEBHOOK_URL`, the Apps Script is
+bound to that document, and rows upsert by their `key` so a re-sync refreshes a row instead
+of adding a duplicate. Nothing creates a spreadsheet or a tab per batch. (A legacy
+**Contacts** tab may still exist in the document; the app no longer writes to it.)
+
+Styling lives in the script: ink header band (`#16122c`) with paper text (`#faf8f1`),
+Inter, bold, frozen header and key column, a hard rule under the header, per-tab column
+widths, auto-filter, and conditional colours for PR fit, score, and status. The Dashboard
+uses the same palette. Re-running a sync restyles the tab.
+
 
 **Writes are manual only.** There is no auto-sync: nothing reaches the sheet on load, after
 a draft, or after a status change. Pitches/Listicles/Coverage go out from a Sync button in
-Outreach or Settings; Contacts from Research Library → Sync contacts.
+Outreach or Settings. Contacts are never written (the people layer is gone).
 
 **Clearing** is per tab: Settings → Google Sheet sync → pick a tab → Clear. The Apps Script
-must be the version that understands `{action:"clear"}` (it deletes data rows, keeps the
-header rows and formatting). An older deployment answers `No rows.`, which the app reports
-as "does not support clearing yet" — update the script and deploy a new version.
+must be the version that understands `{action:"clear"}` (it deletes data rows in that tab,
+keeps the header row and formatting). An older deployment answers `No rows.`, which the
+app reports as "does not support clearing yet" — update the script and deploy a new version.
 
 ## 8. Behaviour rules now enforced
 
@@ -146,6 +156,8 @@ as "does not support clearing yet" — update the script and deploy a new versio
 - **Used marks**: URL-normalised, survive reloads, exported/imported.
 - **Pitches**: 70–150 words, 2–3 paragraphs, one greeting, one ask, fixed sign-off,
   subject ≤60 chars, no AEO, no banned buzzwords — enforced by `enforce_email_rules()`.
+  Addressed to the editorial team ("Hi there,"); no recipient name or email is researched
+  or invented.
 - **Regenerate** produces a deliberately different draft (revision + previous text).
 
 ## 9. Known landmines (read before changing anything)

@@ -296,7 +296,9 @@ def remaining_quota(request: Request) -> dict:
     """
     per_window, per_day, per_client, daily_cap = _caps()
     ip = client_ip(request)
-    client = (request.cookies.get(CLIENT_COOKIE) or "").strip()
+    # Same key the guard charges: without the cookie it counts against the IP,
+    # so the reported numbers match what a paid call would actually consume.
+    client = (request.cookies.get(CLIENT_COOKIE) or "").strip() or f"ip:{ip}"
 
     mode = "memory"
     if store_configured():

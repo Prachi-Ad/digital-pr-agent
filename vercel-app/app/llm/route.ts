@@ -1,30 +1,28 @@
 const MARKDOWN = `# PR Research Agent
 
-> A private Digital PR, SEO, and AEO research tool by Prachi Admane. It analyzes published articles, finds editorial opportunities, scores them for search and answer-engine fit, researches writers and content/SEO contacts, and writes personalized pitches for human review. It does not send email.
+> A private Digital PR, SEO, and AEO research tool by Prachi Admane. It analyzes published articles, finds editorial opportunities, scores them for search and answer-engine fit, writes pitches to a publication's editorial team, and logs a batch to one Google Sheet. It does not send email and does not research individual people.
 
 ## How it works
 
 1. **Research** — paste a published article. The tool extracts credible angles and evidence.
 2. **Prospects** — review real articles and editorial openings. Each gets a fit verdict: Strong, Possible, Weak, or Not suitable.
-3. **Contacts** — find the bylined writer, content manager, SEO lead, or link-building contact. If no writer matches, the tool falls back to the publication's verified content/SEO contact.
-4. **Outreach** — write a personalized 120–180 word pitch, copy or download it, and send it yourself.
+3. **Outreach** — write a 70–150 word pitch to the publication's editorial team, then copy, download, or sync the batch. No recipient names or personal email addresses are collected.
 
 ## Skill
 
-- [SEO / AEO / Digital PR skill](/skills/seo-aeo-digital-pr.md): methodology, scoring rubric, AEO checklist, contact rules, output contract.
+- [SEO / AEO / Digital PR skill](/skills/seo-aeo-digital-pr.md): methodology, scoring rubric, AEO checklist, output contract.
 
 ## Summary
 
 - [llms.txt](/llms.txt): compact machine-readable summary.
-- API: token-gated POST \`/api/analyze\` with actions \`analyze\`, \`domain-scan\`, \`opportunities\`, \`journalists\`, \`person-contact\`, \`collect-writers\`, \`draft\`, \`listicles\`, \`listicle-contact\`, \`publisher-policy\`.
+- API: token-gated POST \`/api/analyze\` with actions \`analyze\`, \`domain-scan\`, \`own-pages\`, \`opportunities\`, \`draft\`, \`listicles\`, \`listicle-draft\`, \`publisher-policy\`, \`site-metrics\`.
 
 ## Rules
 
-- Only use emails explicitly published on public pages.
-- Never guess an email pattern.
+- No people research: no names, roles, or email addresses are looked up or invented.
 - Never invent statistics, citations, contacts, policies, or coverage.
 - Paid, sponsored, affiliate, and directory routes are labeled honestly.
-- A human reviews every contact and every draft. The tool does not send.
+- A human reviews every draft. The tool does not send.
 
 ## Interactive app
 
