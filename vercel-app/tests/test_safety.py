@@ -181,6 +181,20 @@ class TestEmailRules(unittest.TestCase):
         self.assertLessEqual(len(out.subject_line), 60)
         self.assertLessEqual(len(out.message_body.split()), 150)
         self.assertNotIn("-", "\n".join(l[:1] for l in out.message_body.split("\n")))
+        self.assertIn("\n\nBest,\n", out.message_body)
+
+    def test_paragraphs_get_blank_lines(self):
+        from agent import enforce_email_rules
+
+        draft = self._draft(
+            "Capacity planning idea",
+            "Hi Alex,\nI read your piece on capacity planning. It covers routines well.\n"
+            "We have workflow data that fits. Would you like a short example?\n\nThanks\nPrachi",
+        )
+        out = enforce_email_rules(draft, "Prachi", "SEO Specialist", "Alex Borden")
+        paragraphs = [p for p in out.message_body.split("\n\n") if p.strip()]
+        self.assertGreaterEqual(len(paragraphs), 3, out.message_body)
+        self.assertTrue(out.message_body.rstrip().endswith("SEO Specialist"))
 
 
 class TestApiInputCaps(unittest.TestCase):

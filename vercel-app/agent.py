@@ -1769,6 +1769,15 @@ def enforce_email_rules(draft: OutreachDraft, sender_name: str, sender_role: str
     # 6. Hard length limit (paragraph-aware).
     body = _trim_to_words(body, 150)
 
+    # 6b. Guarantee blank lines between paragraphs, but keep the sign-off tight.
+    match = re.search(r"\n(Best|Thanks|Thank you|Cheers|Regards),\n", body, re.IGNORECASE)
+    if match:
+        head, tail = body[: match.start()], body[match.start() :]
+        head = re.sub(r"(?<=[.!?])\n(?!\n)", "\n\n", head)
+        body = head.rstrip() + "\n\n" + tail.lstrip("\n")
+    else:
+        body = re.sub(r"(?<=[.!?])\n(?!\n)", "\n\n", body)
+
     # 7. Subject: plain words, no shouting, no banned phrases, under 60 chars.
     subject = re.sub(r"\s+", " ", (draft.subject_line or "")).strip()
     for phrase, replacement in BANNED_PHRASES.items():
