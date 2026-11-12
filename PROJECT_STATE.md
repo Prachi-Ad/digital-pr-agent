@@ -612,6 +612,25 @@ stays a non-sending demo.
 - The full tool remains the local Streamlit app. The public Vercel demo is
   available at the custom domain above.
 
+## Bug-fix pass (2026-11-12, late)
+
+- **Writer research crashed mid-batch.** `JournalistProfile` / `JournalistResearchResults`
+  required fields the model sometimes omits (`publication`), so one bad reply returned
+  a raw Pydantic 500 and the whole "Find writers for all" run looked broken. Models now
+  default every field, empty names are dropped, and `run_agent_safely()` retries once
+  with an explicit schema reminder before failing.
+- **Bulk writers used hidden items.** "Find writers for all" iterated every raw
+  opportunity while the page shows one per site, so it spent calls on duplicates and
+  looked like "only the first site". It now uses the same filtered, deduped list the
+  page shows, and the button states the site count.
+- **Silent empty lists.** If filters (rejected/used/DR) hid everything, the page showed
+  blank space. It now says how many are hidden and offers "Show them again".
+- **Paper background was overridden** by Tailwind's `bg-gray-50` on `<body>`; removed so
+  the portfolio palette applies.
+- Verified live: bulk writers returned writers for 4/4 sites with four ✓ chips and no
+  errors; Research Library, Settings and Workspace render with zero console errors and
+  no horizontal overflow.
+
 ## Safety hardening (2026-11-11)
 - Model output is untrusted. Every API response passes `sanitize_payload`:
   URLs must be public `https` hosts (no `javascript:`/`data:`, no `user@host`
