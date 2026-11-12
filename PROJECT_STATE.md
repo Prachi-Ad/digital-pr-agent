@@ -214,9 +214,11 @@ stays a non-sending demo.
   ("leverage", "seamless", "data-driven", "I hope this email finds you well",
   "furthermore", etc.). Verified live: two drafts differed in subject and body
   with zero banned phrases.
-- **UI refresh**: larger type scale (17px base, 2.35rem page titles, 17px body
-  copy, 44px controls), layered gradient background, lifted rounded cards, a
-  gradient primary button, pill stepper, and reduced-motion support.
+- **Visual system matches prachiadmane.com**: Clash Display + General Sans
+  (self-hosted from `/public/fonts`), paper `#faf8f1` + ink `#16130c` palette,
+  cobalt `#6d28d9` and blaze `#db2777` accents, 2px ink borders with 4px offset
+  shadows, pill buttons and stepper, uppercase micro-labels, paper grain overlay,
+  and the pink highlighter under heading words.
 - **Locked email rules**: one `EMAIL_RULES` block (13 numbered rules) is injected
   into the draft agent and every draft — first write, bulk, regenerate — passes
   through `enforce_email_rules()`, which mechanically removes bullets/headings,
