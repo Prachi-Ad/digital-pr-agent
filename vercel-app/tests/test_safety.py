@@ -113,6 +113,16 @@ class TestWrapUserInput(unittest.TestCase):
 
 
 class TestBlogOnlyFilter(unittest.TestCase):
+    def test_fallback_is_reported(self):
+        from agent import keep_blog_pages
+        from types import SimpleNamespace
+
+        items = [SimpleNamespace(article_url="https://example.com/pricing")]
+        kept, hidden, fallback = keep_blog_pages(items, "article_url")
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(hidden, 0)
+        self.assertTrue(fallback, "non-blog-only result must be flagged as a fallback")
+
     def test_accepts_editorial_pages(self):
         from agent import is_blog_page
 

@@ -373,6 +373,10 @@ export default function Home() {
   function blockSite(url: any, label?: string) {
     const d = domainOfRaw(url);
     if (!d) return;
+    if (brandDomain && (d === brandDomain || d.endsWith(`.${brandDomain}`))) {
+      setBlockedMsg("That is your own site — it cannot be rejected.");
+      return;
+    }
     if (!window.confirm(`Never suggest ${d} again?`)) return;
     setBlockedDomains((current) => (current.includes(d) ? current : [...current, d].sort()));
     setBlockedMsg(`${d} rejected — it will not be suggested again.`);
@@ -763,7 +767,7 @@ export default function Home() {
   async function checkDr(urls: any[]) {
     const domains = Array.from(
       new Set(urls.map(domainOf).filter((d) => d && !(d in drByDomain)))
-    ).slice(0, 10);
+    ).slice(0, 25);
     if (domains.length === 0) return;
     setLoadingDr(true);
     setRetryMsg(null);
@@ -807,6 +811,7 @@ export default function Home() {
     const visible: T[] = [];
     let hiddenUsed = 0;
     let hiddenDr = 0;
+    let hiddenDrUnchecked = 0;
     let hiddenBlocked = 0;
     // With no ratings at all there is nothing to judge, so the list stays
     // visible and the UI asks for Check DR. Once any rating exists the filter is
@@ -830,14 +835,18 @@ export default function Home() {
       const d = domainOf(url);
       const dr = d ? drByDomain[d] : undefined;
       if (drOnly && anyRating) {
-        if (dr === undefined || dr === null || dr < DR_CUTOFF) {
+        if (dr === undefined) {
+          hiddenDrUnchecked += 1;
+          continue;
+        }
+        if (dr === null || dr < DR_CUTOFF) {
           hiddenDr += 1;
           continue;
         }
       }
       visible.push(item);
     }
-    return { visible, hiddenUsed, hiddenDr, hiddenBlocked, drKnown };
+    return { visible, hiddenUsed, hiddenDr, hiddenDrUnchecked, hiddenBlocked, drKnown };
   }
 
   // One prospect per site: keeps the highest-scoring page and reports the rest.
@@ -878,11 +887,13 @@ export default function Home() {
   function FilterNotes({
     hiddenUsed,
     hiddenDr,
+    hiddenDrUnchecked = 0,
     hiddenBlocked = 0,
     drKnown,
   }: {
     hiddenUsed: number;
     hiddenDr: number;
+    hiddenDrUnchecked?: number;
     hiddenBlocked?: number;
     drKnown: boolean;
   }) {
@@ -900,7 +911,13 @@ export default function Home() {
         )}
         {hiddenDr > 0 && (
           <p className="meta">
-            {hiddenDr} hidden by the DR {DR_CUTOFF}+ filter.
+            {hiddenDr} hidden for being under DR {DR_CUTOFF}.
+          </p>
+        )}
+        {hiddenDrUnchecked > 0 && (
+          <p className="meta">
+            {hiddenDrUnchecked} site{hiddenDrUnchecked === 1 ? "" : "s"} not rated yet and hidden — press{" "}
+            <strong>Check DR</strong> to include them if they qualify.
           </p>
         )}
         {drOnly && !drKnown && (
@@ -2793,6 +2810,8 @@ export default function Home() {
                               <FilterNotes
                                 hiddenUsed={f.hiddenUsed}
                                 hiddenDr={f.hiddenDr}
+                                hiddenDrUnchecked={f.hiddenDrUnchecked}
+                                hiddenBlocked={f.hiddenBlocked}
                                 drKnown={f.drKnown}
                               />
                             </>
@@ -3232,6 +3251,7 @@ export default function Home() {
                                 <FilterNotes
                                   hiddenUsed={f.hiddenUsed}
                                   hiddenDr={f.hiddenDr}
+                                  hiddenDrUnchecked={f.hiddenDrUnchecked}
                                   hiddenBlocked={f.hiddenBlocked}
                                   drKnown={f.drKnown}
                                 />
@@ -3909,11 +3929,8 @@ export default function Home() {
                         <strong>Write all inclusion requests</strong> — it uses every researched contact at once.
                       </Note>
                       {sortByScore(
-                        dedupeByDomain(
-                          filterProspects(
-                            listicles.opportunities ?? [],
-                            (item: AnyObj) => item.listicle_url
-                          ).visible,
+                        filterProspects(
+                          listicles.opportunities ?? [],
                           (item: AnyObj) => item.listicle_url
                         ).visible
                       ).map((item: AnyObj, i: number) => (
@@ -4113,13 +4130,12 @@ export default function Home() {
                           listicles.opportunities ?? [],
                           (item: AnyObj) => item.listicle_url
                         );
-                        const dd = dedupeByDomain(f.visible, (item: AnyObj) => item.listicle_url);
                         return (
                           <>
-                            <DedupeNote hidden={dd.hidden} />
                             <FilterNotes
                               hiddenUsed={f.hiddenUsed}
                               hiddenDr={f.hiddenDr}
+                              hiddenDrUnchecked={f.hiddenDrUnchecked}
                               hiddenBlocked={f.hiddenBlocked}
                               drKnown={f.drKnown}
                             />

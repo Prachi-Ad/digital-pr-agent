@@ -77,13 +77,27 @@ def is_blog_page(url: object) -> bool:
     return segments[-1].count("-") >= 2
 
 
-def keep_blog_pages(items: list, url_attr: str) -> tuple[list, int]:
-    """Filter to blog pages, keeping the original list if nothing qualifies."""
+def keep_blog_pages(items: list, url_attr: str) -> tuple[list, int, bool]:
+    """Filter to blog pages.
+
+    Returns (kept, hidden_count, fallback_used). When nothing looks like a blog
+    page the original list is returned unchanged and fallback_used is True, so
+    the caller can say so instead of implying the results are blog-only.
+    """
     kept = [item for item in items if is_blog_page(getattr(item, url_attr, ""))]
     hidden = len(items) - len(kept)
     if not kept:
-        return items, 0
-    return kept, hidden
+        return items, 0, True
+    return kept, hidden, False
+
+
+def _blog_note(summary: str, hidden: int, fallback: bool) -> str:
+    base = summary.rstrip()
+    if fallback:
+        return f"{base} No blog-style URLs were found, so all pages are shown."
+    if hidden:
+        return f"{base} Blog articles only ({hidden} non-blog page(s) hidden)."
+    return base
 
 
 def safe_website_url(value: object) -> str:
@@ -1378,12 +1392,12 @@ Return up to 5 strong candidates.
   feature, about, careers, docs, or landing pages.
 """
     result = _run_agent_in_worker(opportunity_agent, prompt)
-    kept, hidden = keep_blog_pages(result.opportunities, "article_url")
-    if hidden:
+    kept, hidden, fallback = keep_blog_pages(result.opportunities, "article_url")
+    if hidden or fallback:
         result = result.model_copy(
             update={
                 "opportunities": kept,
-                "research_summary": f"{result.research_summary.rstrip()} Blog articles only ({hidden} non-blog page(s) hidden).",
+                "research_summary": _blog_note(result.research_summary, hidden, fallback),
             }
         )
     return result
@@ -1416,12 +1430,12 @@ target, and rank the strongest first. Return up to 8.
   integration, about, careers, docs, or landing pages.
 """
     result = _run_agent_in_worker(domain_agent, prompt)
-    kept, hidden = keep_blog_pages(result.articles, "article_url")
-    if hidden:
+    kept, hidden, fallback = keep_blog_pages(result.articles, "article_url")
+    if hidden or fallback:
         return result.model_copy(
             update={
                 "articles": kept,
-                "research_summary": f"{result.research_summary.rstrip()} Blog articles only ({hidden} non-blog page(s) hidden).",
+                "research_summary": _blog_note(result.research_summary, hidden, fallback),
             }
         )
     return result
@@ -1453,12 +1467,12 @@ the page (data, research, expert view) and the angle a journalist could cover.
   about, careers, docs, or landing pages.
 """
     result = _run_agent_in_worker(own_pages_agent, prompt)
-    kept, hidden = keep_blog_pages(result.pages, "article_url")
-    if hidden:
+    kept, hidden, fallback = keep_blog_pages(result.pages, "article_url")
+    if hidden or fallback:
         return result.model_copy(
             update={
                 "pages": kept,
-                "summary": f"{result.summary.rstrip()} Blog articles only ({hidden} non-blog page(s) hidden).",
+                "summary": _blog_note(result.summary, hidden, fallback),
             }
         )
     return result

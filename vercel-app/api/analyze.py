@@ -248,7 +248,7 @@ def _dispatch(req: AnalyzeRequest):
                     cleaned.append(norm)
             if not cleaned:
                 raise HTTPException(status_code=400, detail="Send 1-10 valid domains.")
-            return {"metrics": get_domain_ratings(cleaned[:10]), "attribution": "Domain Rating by Ahrefs"}
+            return {"metrics": get_domain_ratings(cleaned[:25]), "attribution": "Domain Rating by Ahrefs"}
         if action in ("collect-writers", "collect_writers"):
             if not req.query.strip():
                 raise HTTPException(status_code=400, detail="query is required")
@@ -323,7 +323,14 @@ def _precheck(req: AnalyzeRequest, action: str) -> None:
         _check_domain(req.domain)
         return
     if action in ("own-pages", "own_pages"):
-        _bare_domain(req.domain)
+        domain = _bare_domain(req.domain)
+        if AGENT_BRAND_DOMAIN and not (
+            domain == AGENT_BRAND_DOMAIN or domain.endswith("." + AGENT_BRAND_DOMAIN)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="That is not your brand domain. Use Find publisher targets for other sites.",
+            )
         return
     if action in ("person-contact", "person_contact"):
         if req.person is None or req.opportunity is None:

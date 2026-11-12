@@ -14,7 +14,7 @@ import urllib.request
 
 API_BASE = "https://api.ahrefs.com/v3/public/domain-rating-free"
 TIMEOUT_SECONDS = 15
-MAX_DOMAINS = 10
+MAX_DOMAINS = 25
 
 
 def _api_key() -> str:
