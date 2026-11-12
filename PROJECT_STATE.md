@@ -185,6 +185,12 @@ stays a non-sending demo.
   spent), Check policy, Write inclusion request, auto-sync reported
   "Listicles: 1 added", then marking it **Covered** auto-synced
   "Listicles: 1 refreshed; Coverage: 1 added".
+- **Own-page audit**: entering the brand's own domain in the Research card runs
+  `own-pages` instead of a prospect scan — it returns up to 8 of your pages
+  ranked High/Medium/Low pitch potential, with the evidence, the angle to
+  pitch, and journalist beats, plus **Use as pitch asset** to jump straight into
+  analysis. Other domains still run the publisher scan. Verified live
+  (8 pages, top = "Social Media Analytics", High).
 - Budget safety: all requests are validated (`_precheck`) **before** a research
   call is charged, so own-domain scans, unsafe links and missing fields return
   400 without spending. Verified live: four rejected requests, budget
