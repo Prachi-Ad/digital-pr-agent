@@ -2411,10 +2411,11 @@ export default function Home() {
               {workflow === "digital" && activePhase === "Research" && digitalStep === "Article" && (
                 <div className="stack">
                   <section className="card">
-                    <h2 className="section-title">Scan a domain</h2>
+                    <h2 className="section-title">Find prospects or audit your pages</h2>
                     <p className="body-text">
-                      Enter a publication domain to find its recent articles ranked by PR-pitch
-                      suitability. Pick one to analyze it and build angles from it.
+                      Enter a <strong>publisher domain</strong> to find articles you can pitch to. Enter{" "}
+                      <strong>your own domain</strong> to find your own pages ranked by pitch potential, then use one
+                      as the asset for a pitch.
                     </p>
                     <form onSubmit={scanDomain} style={{ marginTop: 16 }}>
                       <div className="form-grid">
