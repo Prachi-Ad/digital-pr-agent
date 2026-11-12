@@ -2051,11 +2051,24 @@ export default function Home() {
     }
   }
 
+  // The exact list the page shows: filtered (rejected/used/DR) and one page per
+  // site. Bulk actions use this, so calls always match what is on screen.
+  function visibleOpportunities(): AnyObj[] {
+    const raw = opportunities?.opportunities ?? [];
+    const filtered = filterProspects(raw, (o: AnyObj) => o.article_url).visible;
+    return sortByScore(dedupeByDomain(filtered, (o: AnyObj) => o.article_url).visible);
+  }
+
+  function clearProspectFilters() {
+    setHideUsed(false);
+    setDrOnly(false);
+  }
+
   async function findWritersForAll() {
-    const opps = opportunities?.opportunities ?? [];
+    const opps = visibleOpportunities();
     if (!selectedAngle || opps.length === 0) return;
     if (!budgetAllows(opps.length)) return;
-    if (!confirmBulk("Find writers for all", opps.length)) return;
+    if (!confirmBulk(`Find writers for ${opps.length} site${opps.length === 1 ? "" : "s"}`, opps.length)) return;
     setLoadingJourn(true);
     setErrJourn(null);
     setCheckedPeople([]);
@@ -3098,10 +3111,12 @@ export default function Home() {
                           {loadingOpp ? <Spinner /> : opportunities ? <RefreshCw size={17} /> : <Search size={17} />}
                           {opportunities ? "Generate again" : "Run opportunity research"}
                         </button>
-                        {opportunities && (opportunities.opportunities ?? []).length > 1 && (
+                        {opportunities && visibleOpportunities().length > 1 && (
                           <button className="btn-secondary" onClick={findWritersForAll} disabled={loadingJourn}>
                             {loadingJourn ? <Spinner /> : <Users size={17} />}
-                            {loadingJourn ? "Finding writers..." : "Find writers for all"}
+                            {loadingJourn
+                              ? "Finding writers..."
+                              : `Find writers for all (${visibleOpportunities().length} sites)`}
                           </button>
                         )}
                         {opportunities && (opportunities.opportunities ?? []).length > 0 && (
@@ -3290,6 +3305,16 @@ export default function Home() {
                           {(!opportunities.opportunities || opportunities.opportunities.length === 0) && (
                             <Note tone="warn">No suitable opportunity was verified for this angle.</Note>
                           )}
+                          {(opportunities.opportunities?.length ?? 0) > 0 &&
+                            visibleOpportunities().length === 0 && (
+                              <Note tone="warn">
+                                All {opportunities.opportunities.length} opportunities are hidden by your
+                                filters.{" "}
+                                <button className="btn-ghost" onClick={clearProspectFilters}>
+                                  Show them again
+                                </button>
+                              </Note>
+                            )}
                         </>
                       )}
                     </div>
