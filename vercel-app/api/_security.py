@@ -27,6 +27,14 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 
+from _store import (
+    StoreError,
+    bump as store_bump,
+    configured as store_configured,
+    read_counts as store_read_counts,
+    seconds_to_utc_midnight,
+)
+
 TOKEN_PREFIX = "v1"
 TOKEN_CLOCK_SKEW_SECONDS = 30
 TOKEN_MAX_LIFETIME_SECONDS = 600
@@ -214,30 +222,53 @@ def _caps() -> tuple[int, int, int, int]:
     )
 
 
-def remaining_quota(request: Request) -> dict:
-    """Report what is left without consuming a call.
+def _shared_keys(ip: str, client: str, now: float) -> dict[str, tuple[str, int]]:
+    """Redis key plus TTL for each counter.
 
-    Two numbers matter and they used to be conflated: the 10-minute window
-    (how many calls are left right now) and the daily ceilings. The UI showed
-    the smallest of them as "calls left today", so a 10-minute window looked
-    like a daily limit and climbed back up after ten idle minutes.
+    Keys carry the UTC date or the 10-minute bucket, so a late TTL can never let
+    yesterday's count leak into today. The TTL is only a cleanup hint.
     """
-    per_window, per_day, per_client, daily_cap = _caps()
-    ip = client_ip(request)
-    client = (request.cookies.get(CLIENT_COOKIE) or "").strip()
+    day = time.strftime("%Y%m%d", time.gmtime(now))
+    day_ttl = seconds_to_utc_midnight(now)
+    bucket = int(now // WINDOW_SECONDS)
+    return {
+        "global": (f"pr:day:{day}:global", day_ttl),
+        "client": (f"pr:day:{day}:client:{client or 'anon'}", day_ttl),
+        "window": (f"pr:win:{bucket}:ip:{ip}", WINDOW_SECONDS + 120),
+        "ipday": (f"pr:day:{day}:ip:{ip}", day_ttl),
+    }
 
-    def left(window: _SlidingWindow, key: str, limit: int, span: int) -> int:
-        return max(0, limit - window.count(key, span))
 
-    short_term = left(_ip_window, f"ip:{ip}", per_window, WINDOW_SECONDS)
-    ip_day = left(_ip_day, f"ip:{ip}", per_day, DAY_SECONDS)
-    client_day = (
-        left(_client_day, f"client:{client}", per_client, DAY_SECONDS)
-        if client
-        else per_client
-    )
-    global_day = left(_global_day, "global", daily_cap, DAY_SECONDS)
+def _memory_used(ip: str, client: str) -> dict[str, int]:
+    return {
+        "global": _global_day.count("global", DAY_SECONDS),
+        "client": _client_day.count(f"client:{client}", DAY_SECONDS) if client else 0,
+        "window": _ip_window.count(f"ip:{ip}", WINDOW_SECONDS),
+        "ipday": _ip_day.count(f"ip:{ip}", DAY_SECONDS),
+    }
 
+
+def _shared_used(ip: str, client: str, now: float) -> dict[str, int]:
+    keys = _shared_keys(ip, client, now)
+    names = ("global", "client", "window", "ipday")
+    return dict(zip(names, store_read_counts([keys[name][0] for name in names])))
+
+
+def _quota_payload(
+    used: dict[str, int],
+    per_window: int,
+    per_day: int,
+    per_client: int,
+    daily_cap: int,
+    mode: str,
+) -> dict:
+    def left(name: str, limit: int) -> int:
+        return max(0, limit - used.get(name, 0))
+
+    short_term = left("window", per_window)
+    ip_day = left("ipday", per_day)
+    client_day = left("client", per_client)
+    global_day = left("global", daily_cap)
     return {
         "perSession": short_term,
         "perSessionLimit": per_window,
@@ -250,7 +281,35 @@ def remaining_quota(request: Request) -> dict:
         # What one more click can actually use, and what is left today.
         "remaining": min(short_term, ip_day, client_day, global_day),
         "today": min(ip_day, client_day, global_day),
+        # "shared" survives restarts and extra instances; "memory" does not.
+        "budgetStore": mode,
     }
+
+
+def remaining_quota(request: Request) -> dict:
+    """Report what is left without consuming a call.
+
+    Two numbers matter and they used to be conflated: the 10-minute window
+    (how many calls are left right now) and the daily ceilings. The UI showed
+    the smallest of them as "calls left today", so a 10-minute window looked
+    like a daily limit and climbed back up after ten idle minutes.
+    """
+    per_window, per_day, per_client, daily_cap = _caps()
+    ip = client_ip(request)
+    client = (request.cookies.get(CLIENT_COOKIE) or "").strip()
+
+    mode = "memory"
+    if store_configured():
+        try:
+            used = _shared_used(ip, client, time.time())
+            return _quota_payload(used, per_window, per_day, per_client, daily_cap, "shared")
+        except StoreError:
+            # The health check must still answer; say the numbers are local.
+            mode = "degraded"
+
+    return _quota_payload(
+        _memory_used(ip, client), per_window, per_day, per_client, daily_cap, mode
+    )
 
 
 def guard(request: Request) -> None:
@@ -293,33 +352,30 @@ def guard(request: Request) -> None:
     per_window, per_day, per_client, daily_cap = _caps()
     client = (request.cookies.get(CLIENT_COOKIE) or "").strip() or f"ip:{ip}"
 
-    limits = (
+    # name, limit, window length, refusal text (in the order a caller meets them)
+    specs = (
         (
-            _global_day,
             "global",
             daily_cap,
             DAY_SECONDS,
             "The research budget for today is used up. Try again tomorrow.",
         ),
         (
-            _client_day,
-            f"client:{client}",
+            "client",
             per_client,
             DAY_SECONDS,
             f"You have used today's {per_client} research calls. "
             "The limit resets tomorrow; ask for a higher limit if you need more.",
         ),
         (
-            _ip_window,
-            f"ip:{ip}",
+            "window",
             per_window,
             WINDOW_SECONDS,
             "Too many research requests from this connection. "
             "Try again in {retry} seconds.",
         ),
         (
-            _ip_day,
-            f"ip:{ip}",
+            "ipday",
             per_day,
             DAY_SECONDS,
             "This connection has reached its daily research limit. "
@@ -327,12 +383,70 @@ def guard(request: Request) -> None:
         ),
     )
 
-    def refuse(detail: str, retry_after: int) -> None:
+    def retry_after(span: int, now: float) -> int:
+        if span == WINDOW_SECONDS:
+            return max(1, int(WINDOW_SECONDS - (now % WINDOW_SECONDS)))
+        return seconds_to_utc_midnight(now)
+
+    def refuse(detail: str, wait: int) -> None:
         raise HTTPException(
             status_code=429,
-            detail=detail.format(retry=retry_after) if "{retry}" in detail else detail,
-            headers={"Retry-After": str(retry_after)},
+            detail=detail.format(retry=wait) if "{retry}" in detail else detail,
+            headers={"Retry-After": str(wait)},
         )
+
+    def store_unavailable(exc: StoreError, phase: str) -> None:
+        # Fail closed: if the shared counter cannot be read or written we do not
+        # know the spend, so the paid call must not run.
+        print(f"budget_store_error phase={phase} error={str(exc)[:120]}", flush=True)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The budget check is unavailable right now, so no paid research was run. "
+                "Try again in a moment."
+            ),
+        )
+
+    if store_configured():
+        now = time.time()
+        keys = _shared_keys(ip, client, now)
+        names = [name for name, _, _, _ in specs]
+        try:
+            used = dict(zip(names, store_read_counts([keys[name][0] for name in names])))
+        except StoreError as exc:
+            store_unavailable(exc, "read")
+
+        for name, limit, span, detail in specs:
+            if used[name] >= limit:
+                refuse(detail, retry_after(span, now))
+
+        try:
+            after = dict(
+                zip(
+                    names,
+                    store_bump(
+                        [keys[name][0] for name in names],
+                        [keys[name][1] for name in names],
+                    ),
+                )
+            )
+        except StoreError as exc:
+            store_unavailable(exc, "write")
+
+        # Two clicks landing at once can both pass the read; refuse the one that
+        # pushed a counter over. It stays counted, which only makes the cap tighter.
+        for name, limit, span, detail in specs:
+            if after[name] > limit:
+                refuse(detail, retry_after(span, now))
+        return
+
+    # No shared store configured: per-instance counters, as a fallback brake.
+    limits = (
+        (_global_day, "global", daily_cap, DAY_SECONDS, specs[0][3]),
+        (_client_day, f"client:{client}", per_client, DAY_SECONDS, specs[1][3]),
+        (_ip_window, f"ip:{ip}", per_window, WINDOW_SECONDS, specs[2][3]),
+        (_ip_day, f"ip:{ip}", per_day, DAY_SECONDS, specs[3][3]),
+    )
 
     # Check every limit before charging any of them. Charging as we went meant a
     # request rejected for its IP was still counted against the global budget.
@@ -341,9 +455,9 @@ def guard(request: Request) -> None:
             refuse(detail, window.retry_after(key, span))
 
     for window, key, limit, span, detail in limits:
-        allowed, retry_after = window.allow(key, limit, span)
+        allowed, retry = window.allow(key, limit, span)
         if not allowed:
-            refuse(detail, retry_after)
+            refuse(detail, retry)
 
 
 def log_request(request: Request, action: str) -> None:

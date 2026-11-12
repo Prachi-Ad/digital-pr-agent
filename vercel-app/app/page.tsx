@@ -4964,8 +4964,11 @@ export default function Home() {
                 <section className="card">
                   <h2 className="section-title">Research budget</h2>
                   <p className="meta">
-                    Counted in memory by the server that answered you, so a restart can reset it. Treat the
-                    numbers as a brake, not a guarantee.
+                    {quota?.budgetStore === "shared"
+                      ? "Enforced by a shared counter, so a restart or a second server cannot reset the daily cap."
+                      : quota?.budgetStore === "degraded"
+                        ? "The shared counter is unreachable, so these numbers are this server's rough count."
+                        : "No shared counter is configured, so a restart can reset this count. Add the budget store to make the daily cap hard."}
                   </p>
                   {quota ? (
                     <>

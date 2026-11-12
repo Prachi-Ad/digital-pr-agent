@@ -67,6 +67,7 @@ Python API actions: `analyze`, `own-pages`, `domain-scan`, `opportunities`,
 | `DEMO_IP_REQUESTS_PER_DAY` | 300 |
 | `DEMO_IP_REQUESTS_PER_10_MIN` | 30 |
 | `DEMO_DAILY_REQUEST_CAP` | 800 (per instance) |
+| `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` | Optional. Shared budget counter (Upstash REST; `KV_REST_API_URL`/`KV_REST_API_TOKEN` also work). Without them the caps are per-instance memory. |
 
 Changing any env var requires a redeploy (Vercel bakes them at build time).
 
@@ -94,6 +95,11 @@ C:\Users\Prachi\vista-pr-agent\.venv\Scripts\python.exe -m unittest discover -s 
   cap, fail-closed secret, and the budget rules — a refused request charges nothing, the
   10-minute window and the daily ceiling are reported separately, and exhausting one
   limit does not burn the others.
+
+48 tests in three files; the third is `test_shared_budget.py` (8) which runs a fake
+Upstash REST endpoint and proves a cold start does not reset the shared count, the ceiling
+is enforced on the shared number, refusals do not charge, and an unreachable store fails
+closed.
 
 PowerShell prints unit-test progress on stderr, so a piped run can look like it failed;
 trust the printed `OK` and an unpiped exit code.
@@ -137,10 +143,14 @@ a *new deployment* yields a **new `/exec` URL** that must be re-entered in Verce
 
 1. **Bulk actions cost real money.** One call per site; always respect the confirm
    dialog. Bulk writers ≈ 4 calls, all pitches ≈ 5–10.
-2. **Rate limits are per-instance memory.** Multiple Vercel instances each keep their
-   own counters, so the daily cap is best-effort and resets on a cold start. A shared
-   Redis/KV counter is the only hard fix; until then, the caps are a rough brake, not a
-   spend guarantee.
+2. **Rate limits are per-instance memory unless a store is configured.** With
+   `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` set, the daily and window counters
+   live in one Redis (`api/_store.py`): a cold start cannot reset them and every instance
+   shares them. Without those vars the caps are a per-instance brake. If the store is
+   configured but unreachable, the guard fails closed (503) rather than running uncapped;
+   `/api/analyze` reports `budgetStore: shared | memory | degraded` so the UI can say which
+   mode is active. The absolute ceiling on the bill is the OpenAI project spend limit — set
+   that in the OpenAI dashboard, because no app counter can bound a leaked key.
 3. **State is browser-local** (campaigns, library, used, rejected, outcomes). Settings →
    Backup this browser → Export/Import JSON is the only safety net. The app remembers the
    last export and shows a sidebar warning after 14 days without one.
@@ -166,8 +176,10 @@ a *new deployment* yields a **new `/exec` URL** that must be re-entered in Verce
 - Freeze features; run three real campaigns and fix only what breaks.
 - Listicle policy caching for multi-item runs (contacts already cached).
 - Mobile layout check (desktop-first today).
-- Decide whether to move the counters to a shared store. With one user it is not
-  urgent; it is the only way to make the daily caps hard.
+- Decide whether to add the shared budget store (Upstash/Vercel KV, 2 env vars). The code
+  path is built and tested; without the vars the app says "no shared counter configured".
+  This is the only way to make the daily caps hard.
+- Set the OpenAI project spend limit. It is the real ceiling behind everything else.
 - Per-user login and retiring the public demo are **closed**: one user, shared gate.
 
 
